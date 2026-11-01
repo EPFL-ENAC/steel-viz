@@ -1,0 +1,277 @@
+<title>Steel structure generator</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  /* Layout: a narrow control rail beside one large drawing sheet, like a
+     drawing with its title block. Hub tokens: hairlines, square corners,
+     red only for the main action. */
+  :root {
+    --bg: #ffffff;
+    --bg-app: #f7f7f6;
+    --fg: #212121;
+    --fg-muted: #6b6b6b;
+    --border: #d5d5d5;
+    --primary: #e30713;
+    --primary-hover: #b51f1f;
+    --on-primary: #ffffff;
+    --ok: #4f7a24;
+    --warn: #b26b00;
+    --font-ui: "Suisse Int'l", "Helvetica Neue", Helvetica, Arial, sans-serif;
+    --font-data: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #1b1b1b; --bg-app: #121212; --fg: #e9e9e7; --fg-muted: #9b9b98; --border: #383838;
+      --primary: #f0414a; --primary-hover: #ff6a71; --on-primary: #ffffff; --ok: #8fc35a; --warn: #f0a640;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #1b1b1b; --bg-app: #121212; --fg: #e9e9e7; --fg-muted: #9b9b98; --border: #383838;
+    --primary: #f0414a; --primary-hover: #ff6a71; --on-primary: #ffffff; --ok: #8fc35a; --warn: #f0a640;
+    color-scheme: dark;
+  }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg-app); color: var(--fg); font: 14px/1.45 var(--font-ui);
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-block: 16px;
+    box-sizing: border-box;
+  }
+  .app { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 16px; height: 100%; min-height: 560px; }
+  @media (max-width: 760px) {
+    html, body { height: auto; }
+    .app { grid-template-columns: minmax(0, 1fr); height: auto; }
+    .sheet { order: -1; height: 72vh; }
+  }
+  .rail { display: flex; flex-direction: column; gap: 14px; min-width: 0; overflow-y: auto; }
+  h1 { font-size: 18px; font-weight: 600; margin: 0; text-wrap: balance; letter-spacing: -0.01em; }
+  .lede { color: var(--fg-muted); margin: 2px 0 0; font-size: 13px; }
+  fieldset { border: 0; border-top: 1px solid var(--border); margin: 0; padding: 10px 0 0; display: grid; gap: 8px; min-width: 0; }
+  legend { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--fg-muted); padding: 0 6px 0 0; }
+  .row { display: grid; grid-template-columns: 64px minmax(0, 1fr) 64px; align-items: center; gap: 8px; }
+  .row label { font-size: 13px; }
+  .row output, .num { font: 12px var(--font-data); font-variant-numeric: tabular-nums; text-align: right; color: var(--fg-muted); }
+  input[type="range"] { width: 100%; accent-color: var(--fg); margin: 0; }
+  input[type="number"] {
+    width: 100%; box-sizing: border-box; font: 13px var(--font-data); padding: 5px 6px;
+    border: 1px solid var(--border); border-radius: 0; background: var(--bg); color: var(--fg);
+  }
+  .seg { display: flex; border: 1px solid var(--border); }
+  .seg label { flex: 1; text-align: center; font-size: 12px; padding: 5px 0; cursor: pointer; border-left: 1px solid var(--border); user-select: none; }
+  .seg label:first-of-type { border-left: 0; }
+  .seg input { position: absolute; opacity: 0; pointer-events: none; }
+  .seg input:checked + span { font-weight: 600; }
+  .seg label:has(input:checked) { background: var(--fg); color: var(--bg); }
+  .seg label:has(input:focus-visible), button:focus-visible, input:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  button {
+    font: 500 13px var(--font-ui); padding: 7px 12px; border-radius: 0; cursor: pointer;
+    border: 1px solid var(--border); background: var(--bg); color: var(--fg);
+  }
+  button:hover { border-color: var(--fg-muted); }
+  button.primary { background: var(--primary); border-color: var(--primary); color: var(--on-primary); }
+  button.primary:hover { background: var(--primary-hover); border-color: var(--primary-hover); }
+
+  .sheet { position: relative; background: var(--bg); border: 1px solid var(--border); min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+  .drawing { flex: 1; min-height: 0; display: grid; place-items: center; padding: 16px; color: var(--fg); }
+  .drawing svg { width: 100%; height: 100%; max-width: 100%; }
+  /* title block, the way a shop drawing carries one */
+  .titleblock { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); border-top: 1px solid var(--border); }
+  .titleblock div { padding: 6px 10px; border-left: 1px solid var(--border); min-width: 0; }
+  .titleblock div:first-child { border-left: 0; }
+  .titleblock dt { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--fg-muted); }
+  .titleblock dd { margin: 0; font: 12px var(--font-data); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+
+  .status { display: inline-flex; align-items: center; gap: 6px; font: 500 12px var(--font-data); }
+  .status::before { content: ""; width: 8px; height: 8px; background: currentColor; }
+  .status.ok { color: var(--ok); }
+  .status.bad { color: var(--warn); }
+  .members { margin: 0; padding: 0; list-style: none; font: 12px/1.6 var(--font-data); }
+  .members li { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 6px; border-bottom: 1px solid var(--border); padding: 2px 0; }
+  .members li span:first-child { color: var(--fg-muted); }
+  .log { margin: 0; padding-left: 16px; font-size: 12px; color: var(--fg-muted); }
+  .note { font-size: 12px; color: var(--fg-muted); margin: 0; }
+</style>
+
+<div class="app">
+  <aside class="rail">
+    <div>
+      <h1>Steel structure generator</h1>
+      <p class="lede">A column with arms. The frame solver checks it stands, fixes it when it does not, and sizes every member from the real section tables.</p>
+    </div>
+
+    <fieldset>
+      <legend>Structure</legend>
+      <div class="row"><label for="seed">Seed</label><input id="seed" type="number" min="1" step="1" value="5"><button id="next" type="button" title="Next seed">Next</button></div>
+      <div class="row"><label for="arms">Arms</label><input id="arms" type="range" min="1" max="12" step="1" value="8"><output for="arms" id="armsOut"></output></div>
+      <div class="row"><label for="height">Height</label><input id="height" type="range" min="1500" max="6000" step="250" value="2500"><output for="height" id="heightOut"></output></div>
+      <div class="row"><label for="load">Load</label><input id="load" type="range" min="10" max="200" step="10" value="100"><output for="load" id="loadOut"></output></div>
+      <div class="seg" role="radiogroup" aria-label="Section tables">
+        <label><input type="radio" name="family" id="fam-aisc" value="aisc" checked><span>AISC (W, HSS)</span></label>
+        <label><input type="radio" name="family" id="fam-eu" value="eu"><span>EU (IPE, HE)</span></label>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Drawing</legend>
+      <div class="seg" role="radiogroup" aria-label="Detail">
+        <label><input type="radio" name="detail" id="det-members" value="members"><span>Members</span></label>
+        <label><input type="radio" name="detail" id="det-plates" value="plates"><span>Plates</span></label>
+        <label><input type="radio" name="detail" id="det-bolts" value="bolts" checked><span>Bolts</span></label>
+      </div>
+      <div class="seg" role="radiogroup" aria-label="View">
+        <label><input type="radio" name="view" id="v-iso" value="iso" checked><span>Iso</span></label>
+        <label><input type="radio" name="view" id="v-south" value="south"><span>S</span></label>
+        <label><input type="radio" name="view" id="v-west" value="west"><span>W</span></label>
+        <label><input type="radio" name="view" id="v-north" value="north"><span>N</span></label>
+        <label><input type="radio" name="view" id="v-east" value="east"><span>E</span></label>
+        <label><input type="radio" name="view" id="v-plan" value="plan"><span>Plan</span></label>
+      </div>
+      <div class="row"><label for="az">Azimuth</label><input id="az" type="range" min="0" max="359" step="1"><output for="az" id="azOut"></output></div>
+      <div class="row"><label for="el">Elevation</label><input id="el" type="range" min="0" max="90" step="1"><output for="el" id="elOut"></output></div>
+    </fieldset>
+
+    <div class="actions">
+      <button id="replay" class="primary" type="button">Build again</button>
+      <button id="copy" type="button">Copy SVG</button>
+      <button id="theme" type="button">Dark</button>
+    </div>
+    <p class="note" id="copyNote" hidden></p>
+
+    <fieldset>
+      <legend>Analysis</legend>
+      <div><span id="status" class="status ok">Stable</span></div>
+      <ul class="members" id="members"></ul>
+      <ol class="log" id="log"></ol>
+    </fieldset>
+  </aside>
+
+  <main class="sheet">
+    <div class="drawing" id="drawing" aria-label="Generated steel structure"></div>
+    <dl class="titleblock">
+      <div><dt>Column</dt><dd id="tb-col"></dd></div>
+      <div><dt>Solver</dt><dd id="tb-solve"></dd></div>
+      <div><dt>Drawing</dt><dd id="tb-draw"></dd></div>
+      <div><dt>Time</dt><dd id="tb-ms"></dd></div>
+    </dl>
+  </main>
+</div>
+
+<script>
+/*__CODE__*/
+
+// ---- page
+const $ = (id) => document.getElementById(id);
+const cats = {};
+const catalog = (fam) => (cats[fam] ??= loadCatalog(fam, TABLES[fam][0], TABLES[fam][1]));
+const radio = (name) => document.querySelector(`input[name="${name}"]:checked`).value;
+const label = { shear_tab: 'shear tab', end_plate: 'end plate', flange_plates: 'flange plates', welded: 'welded', gusset: 'gusset' };
+let current = null;
+let lastSvg = '';
+
+function setView(name) {
+  const [az, el] = VIEWS[name];
+  $('az').value = az;
+  $('el').value = Math.round(el);
+}
+
+function build() {
+  const fam = radio('family');
+  const t0 = performance.now();
+  const r = generate(
+    { seed: +$('seed').value || 1, arms: +$('arms').value, height: +$('height').value, load: +$('load').value, fy: fam === 'eu' ? 355 : 345 },
+    catalog(fam),
+    radio('detail'),
+  );
+  current = { r, ms: performance.now() - t0 };
+  showStats();
+}
+
+function draw(animate) {
+  if (!current) return;
+  const t0 = performance.now();
+  const out = render(current.r.parts, { az: +$('az').value, el: +$('el').value, animate, stepMs: 70 });
+  const ms = performance.now() - t0;
+  lastSvg = out.svg;
+  $('drawing').innerHTML = out.svg;
+  $('tb-draw').textContent = `${out.faces} faces, ${out.dots} bolts, ${(out.svg.length / 1024).toFixed(0)} kB`;
+  $('tb-ms').textContent = `${current.ms.toFixed(0)} ms build, ${ms.toFixed(0)} ms draw`;
+}
+
+function showStats() {
+  const { r } = current;
+  const ok = r.ok && !floating(r.parts).length;
+  $('status').className = 'status ' + (ok ? 'ok' : 'bad');
+  $('status').textContent = r.ok ? `Stable, max ratio ${r.ratio.toFixed(2)}` : 'Mechanism left';
+  $('members').replaceChildren(
+    ...r.st.arms.map((a) => li(a.id, `${a.sec.id}, ${label[a.conn]}${a.brace ? ', brace ' + a.brace.sec.id : ''}`)),
+    ...r.st.secs.map((s) => li(s.id, `${s.sec.id}, ${label[s.conn]}`)),
+  );
+  $('log').replaceChildren(...r.log.map((t) => Object.assign(document.createElement('li'), { textContent: t })));
+  $('tb-col').textContent = `${r.st.col.id}, ${(r.st.H / 1000).toFixed(2)} m`;
+  $('tb-solve').textContent = `${r.nodes} nodes, ${r.solves} solves`;
+}
+
+function li(k, v) {
+  const el = document.createElement('li');
+  el.append(Object.assign(document.createElement('span'), { textContent: k }), Object.assign(document.createElement('span'), { textContent: v }));
+  return el;
+}
+
+function outputs() {
+  $('armsOut').textContent = $('arms').value;
+  $('heightOut').textContent = `${(+$('height').value / 1000).toFixed(2)} m`;
+  $('loadOut').textContent = `${$('load').value} kN/m`;
+  $('azOut').textContent = `${$('az').value}°`;
+  $('elOut').textContent = `${$('el').value}°`;
+}
+
+let pending = 0;
+function update(rebuild, animate) {
+  outputs();
+  cancelAnimationFrame(pending);
+  pending = requestAnimationFrame(() => {
+    if (rebuild) build();
+    draw(animate);
+  });
+}
+
+for (const id of ['seed', 'arms', 'height', 'load']) $(id).addEventListener('input', () => update(true, true));
+for (const el of document.querySelectorAll('input[name="family"]')) el.addEventListener('change', () => update(true, true));
+for (const el of document.querySelectorAll('input[name="detail"]')) el.addEventListener('change', () => update(true, false));
+for (const el of document.querySelectorAll('input[name="view"]')) el.addEventListener('change', () => { setView(el.value); update(false, false); });
+for (const id of ['az', 'el']) $(id).addEventListener('input', () => {
+  for (const el of document.querySelectorAll('input[name="view"]')) el.checked = false;
+  update(false, false);
+});
+$('next').addEventListener('click', () => { $('seed').value = (+$('seed').value || 0) + 1; update(true, true); });
+$('replay').addEventListener('click', () => draw(true));
+$('copy').addEventListener('click', async () => {
+  const note = $('copyNote');
+  note.hidden = false;
+  try {
+    await navigator.clipboard.writeText(lastSvg);
+    note.textContent = 'SVG copied.';
+  } catch {
+    note.textContent = 'The browser refused the clipboard. Save the drawing from the page source instead.';
+  }
+});
+const isDark = () => document.documentElement.dataset.theme
+  ? document.documentElement.dataset.theme === 'dark'
+  : matchMedia('(prefers-color-scheme: dark)').matches;
+const themeLabel = () => ($('theme').textContent = isDark() ? 'Light' : 'Dark');
+$('theme').addEventListener('click', () => {
+  document.documentElement.dataset.theme = isDark() ? 'light' : 'dark';
+  themeLabel();
+});
+new MutationObserver(themeLabel).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', themeLabel);
+themeLabel();
+
+setView('iso');
+update(true, true);
+</script>
