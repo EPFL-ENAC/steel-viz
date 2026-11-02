@@ -4,7 +4,7 @@
 // - fill: the outline (convex hull) fills a square, so the icon is not a thin
 //   stick or a flat bar.
 // - aspect: about as wide as it is tall.
-// - balance: the weight sits on the column, not all on one side.
+// - balance: the weight sits on the columns, not all on one side.
 // - members: a few members read better than many (4 to 6 is best).
 // - crossings: members that cross each other on screen make a knot.
 import { camera, type Part } from './steel.ts';
@@ -58,12 +58,14 @@ export function logoScore(parts: Part[], az: number, el: number): Score {
   const { r, up } = camera(az, el);
   const big = parts.filter((p) => p.kind === 'column' || p.kind === 'member');
   const pts: [number, number][] = [];
+  let [colX, colN] = [0, 0];
   const axes: Seg2[] = [];
   for (const p of big) {
     const own: [number, number][] = [];
     for (const f of p.faces) for (const q of f.pts) own.push([dot(q as V, r), -dot(q as V, up)]);
     pts.push(...own);
     if (p.kind === 'member') axes.push(axis(own));
+    else for (const [x] of own) [colX, colN] = [colX + x, colN + 1];
   }
   let crossings = 0;
   for (let i = 0; i < axes.length; i++) for (let j = i + 1; j < axes.length; j++) if (cross2(axes[i], axes[j])) crossings++;
@@ -84,8 +86,8 @@ export function logoScore(parts: Part[], az: number, el: number): Score {
   const side = Math.max(w, ht);
   const fill = A / (side * side); // a full square is 1, a disc 0.79
   const aspect = Math.min(w, ht) / side;
-  const balance = Math.abs(cx) / w; // the column is at x = 0
-  const members = big.length - 1;
+  const balance = Math.abs(cx - colX / colN) / w; // from the middle of the columns
+  const members = big.filter((p) => p.kind === 'member').length;
   const mScore = members < 4 ? members / 4 : members <= 6 ? 1 : Math.max(0, 1 - (members - 6) / 6);
   const score =
     0.25 * Math.min(1, fill / 0.75) + 0.2 * aspect ** 2 + 0.2 * Math.max(0, 1 - 8 * balance) + 0.15 * mScore + 0.2 / (1 + crossings / 2);

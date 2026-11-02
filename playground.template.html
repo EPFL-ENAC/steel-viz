@@ -114,12 +114,18 @@
   <aside class="rail">
     <div>
       <h1>Steel structure generator</h1>
-      <p class="lede">A column with arms. The frame solver checks it stands, fixes it when it does not, and sizes every member from the real section tables.</p>
+      <p class="lede">One column with arms, a portal or a corner frame. The frame solver checks it stands, fixes it when it does not, and sizes every member from the real section tables.</p>
     </div>
 
     <fieldset>
       <legend>Structure</legend>
       <div class="row"><label for="seed">Seed</label><input id="seed" type="number" min="1" step="1" value="5"><button id="next" type="button" title="Next seed">Next</button></div>
+      <div class="seg" role="radiogroup" aria-label="Form">
+        <label><input type="radio" name="form" id="f-mix" value="mix" checked><span>Any</span></label>
+        <label><input type="radio" name="form" id="f-tree" value="tree"><span>Tree</span></label>
+        <label><input type="radio" name="form" id="f-portal" value="portal"><span>Portal</span></label>
+        <label><input type="radio" name="form" id="f-corner" value="corner"><span>Corner</span></label>
+      </div>
       <div class="row"><label for="arms">Arms</label><input id="arms" type="range" min="1" max="12" step="1" value="8"><output for="arms" id="armsOut"></output></div>
       <div class="row"><label for="height">Height</label><input id="height" type="range" min="1500" max="6000" step="250" value="2500"><output for="height" id="heightOut"></output></div>
       <div class="row"><label for="load">Load</label><input id="load" type="range" min="10" max="200" step="10" value="100"><output for="load" id="loadOut"></output></div>
@@ -168,7 +174,7 @@
     <fieldset>
       <legend>Good seeds</legend>
       <div class="actions"><button id="find" type="button">Find good seeds</button></div>
-      <p class="note" id="findNote">Scans 200 seeds from the current one, with these arms, height, load and view. Keeps the 8 that read best as a logo: they fill a square, sit on the column, have few members and few crossings.</p>
+      <p class="note" id="findNote">Scans 200 seeds from the current one, with this form, arms, height, load and view. Keeps the 8 that read best as a logo: they fill a square, sit on the columns, have few members and few crossings.</p>
       <div class="picks" id="picks"></div>
     </fieldset>
 
@@ -214,7 +220,7 @@ function build() {
   const fam = radio('family');
   const t0 = performance.now();
   const r = generate(
-    { seed: +$('seed').value || 1, arms: +$('arms').value, height: +$('height').value, load: +$('load').value, fy: fam === 'eu' ? 355 : 345 },
+    { seed: +$('seed').value || 1, form: radio('form'), arms: +$('arms').value, height: +$('height').value, load: +$('load').value, fy: fam === 'eu' ? 355 : 345 },
     catalog(fam),
     radio('detail'),
   );
@@ -244,11 +250,11 @@ function showStats() {
   $('status').className = 'status ' + (ok ? 'ok' : 'bad');
   $('status').textContent = r.ok ? `Stable, max ratio ${r.ratio.toFixed(2)}` : 'Mechanism left';
   $('members').replaceChildren(
-    ...r.st.arms.map((a) => li(a.id, `${a.sec.id}, ${label[a.conn]}${a.brace ? ', brace ' + a.brace.sec.id : ''}`)),
+    ...r.st.arms.map((a) => li(a.id, `${a.sec.id}, ${label[a.conn]}${a.braces.map((b) => ', brace ' + b.sec.id).join('')}`)),
     ...r.st.secs.map((s) => li(s.id, `${s.sec.id}, ${label[s.conn]}`)),
   );
   $('log').replaceChildren(...r.log.map((t) => Object.assign(document.createElement('li'), { textContent: t })));
-  $('tb-col').textContent = `${r.st.col.id}, ${(r.st.H / 1000).toFixed(2)} m`;
+  $('tb-col').textContent = `${r.st.form}, ${r.st.cols.length > 1 ? r.st.cols.length + ' × ' : ''}${r.st.col.id}, ${(r.st.H / 1000).toFixed(2)} m`;
   $('tb-solve').textContent = `${r.nodes} nodes, ${r.solves} solves`;
 }
 
@@ -277,7 +283,7 @@ function update(rebuild, animate, fast = false) {
 }
 
 for (const id of ['seed', 'arms', 'height', 'load']) $(id).addEventListener('input', () => update(true, true));
-for (const el of document.querySelectorAll('input[name="family"]')) el.addEventListener('change', () => update(true, true));
+for (const el of document.querySelectorAll('input[name="family"], input[name="form"]')) el.addEventListener('change', () => update(true, true));
 for (const el of document.querySelectorAll('input[name="detail"]')) el.addEventListener('change', () => update(true, false));
 for (const el of document.querySelectorAll('input[name="weights"], input[name="size"]')) el.addEventListener('change', () => update(false, false));
 for (const el of document.querySelectorAll('input[name="view"]')) el.addEventListener('change', () => { setView(el.value); update(false, false); });
@@ -292,7 +298,7 @@ for (const id of ['az', 'el']) {
 let scanning = 0;
 $('find').addEventListener('click', () => {
   const fam = radio('family');
-  const base = { arms: +$('arms').value, height: +$('height').value, load: +$('load').value, fy: fam === 'eu' ? 355 : 345 };
+  const base = { form: radio('form'), arms: +$('arms').value, height: +$('height').value, load: +$('load').value, fy: fam === 'eu' ? 355 : 345 };
   const [az, el] = [+$('az').value, +$('el').value];
   const [N, from] = [200, +$('seed').value || 1];
   const run = ++scanning;
@@ -303,7 +309,7 @@ $('find').addEventListener('click', () => {
     if (run !== scanning) return;
     for (const end = Math.min(from + N, s + 10); s < end; s++) {
       const r = generate({ ...base, seed: s }, catalog(fam), 'members');
-      if (r.ok) found.push({ seed: s, ...logoScore(r.parts, az, el) });
+      if (r.ok) found.push({ seed: s, form: r.st.form, ...logoScore(r.parts, az, el) });
     }
     $('findNote').textContent = `Scanning, ${s - from} of ${N} seeds…`;
     if (s < from + N) return void setTimeout(chunk, 0);
@@ -317,7 +323,7 @@ $('find').addEventListener('click', () => {
         btn.title = `fill ${b.fill.toFixed(2)}, aspect ${b.aspect.toFixed(2)}, balance ${b.balance.toFixed(2)}, ${b.members} members, ${b.crossings} crossings`;
         btn.append(
           Object.assign(document.createElement('img'), { src: 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg), alt: `Seed ${b.seed}` }),
-          Object.assign(document.createElement('span'), { textContent: `seed ${b.seed}, ${b.score.toFixed(2)}` }),
+          Object.assign(document.createElement('span'), { textContent: `${b.form} ${b.seed}, ${b.score.toFixed(2)}` }),
         );
         btn.addEventListener('click', () => {
           for (const o of $('picks').children) o.removeAttribute('aria-current');

@@ -23,9 +23,6 @@ export type Kind = 'base' | 'column' | 'plate' | 'member' | 'bolts';
 // direction it comes from)
 export type Part = { id: string; step: number; faces: Face[]; dots: Dot[]; supports: string[]; boxes?: Box[]; accent?: boolean; kind?: Kind; from?: V };
 
-// When each part starts to move and when it lands, in ms. Plates and
-// members come one after the other, a bit overlapped, like on a crane.
-// Bolts don't wait for the crane: they start when their member lands.
 // Less detail when the drawing is small: at 160 px or less bolts are only
 // noise, at 64 px plates too, at 40 px the secondary beams.
 export const DETAIL = { bolts: 160, plates: 64, secondaries: 40 };
@@ -38,24 +35,44 @@ export function forSize(parts: Part[], size?: number): Part[] {
     .map((p) => (size <= DETAIL.bolts && p.dots.length ? { ...p, dots: [] } : p));
 }
 
+// When each part starts to move and when it lands, in ms. A part waits for
+// the parts it stands on to land. Columns and members also wait for a free
+// crane (there are CRANES), and two of them never start closer than GAP, so
+// a few beams come in at once, one a bit after the other. Plates are put on
+// by hand: no crane. Bolts start when their member lands.
 export type Slot = { start: number; dur: number; land: number };
-export const BOLT_MS = 70; // between two bolts of one connection
+export const BOLT_MS = 60; // between two bolts of one connection
+export const CRANES = 3;
+const MS: Record<Kind, number> = { base: 350, column: 600, plate: 220, member: 550, bolts: 0 };
+const GAP = { big: 150, plate: 50 };
 export function timeline(parts: Part[], speed = 1): Map<number, Slot> {
   const out = new Map<number, Slot>();
   const byId = new Map(parts.map((p) => [p.id, p]));
-  let t = 0;
   const k = 1 / speed;
+  const cranes: number[] = Array(CRANES).fill(0);
+  let [lastBig, lastPlate] = [-Infinity, -Infinity];
+  const landOf = (id: string) => {
+    const q = byId.get(id);
+    return (q && out.get(q.step)?.land) ?? 0;
+  };
   for (const p of [...parts].sort((a, b) => a.step - b.step)) {
+    const ready = Math.max(0, ...p.supports.map(landOf));
+    const kind = p.kind ?? 'plate';
     let slot: Slot;
-    if (p.kind === 'bolts') {
-      const m = byId.get(p.supports[0]);
-      const start = (m && out.get(m.step)?.land) ?? t;
-      const dur = 250 * k + BOLT_MS * k * Math.max(0, p.dots.length - 1);
+    if (kind === 'bolts') {
+      const start = landOf(p.supports[0]);
+      const dur = (220 + BOLT_MS * Math.max(0, p.dots.length - 1)) * k;
       slot = { start, dur, land: start + dur };
+    } else if (kind === 'column' || kind === 'member') {
+      const c = cranes.indexOf(Math.min(...cranes));
+      const start = Math.max(ready, cranes[c], lastBig + GAP.big * k);
+      slot = { start, dur: MS[kind] * k, land: start + MS[kind] * k };
+      cranes[c] = slot.land;
+      lastBig = start;
     } else {
-      const [dur, next] = { base: [500, 300], column: [800, 700], plate: [300, 120], member: [650, 380] }[p.kind ?? 'plate'] ?? [400, 200];
-      slot = { start: t, dur: dur * k, land: t + dur * k };
-      t += next * k;
+      const start = Math.max(ready, lastPlate + GAP.plate * k);
+      slot = { start, dur: MS[kind] * k, land: start + MS[kind] * k };
+      lastPlate = start;
     }
     out.set(p.step, slot);
   }

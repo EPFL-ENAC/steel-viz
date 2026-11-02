@@ -1,12 +1,12 @@
 // node tools/steel-generator/cli.ts --seed 3 --view iso --family aisc --out x.svg
 //   [--detail members|plates|bolts] [--arms 5] [--height 6000] [--load 20]
-//   [--animate] [--frames] [--painter] [--flat] [--size px]
+//   [--form mix|tree|portal|corner] [--animate] [--frames] [--painter] [--flat] [--size px]
 import { readFileSync, writeFileSync } from 'node:fs';
 import { gzipSync } from 'node:zlib';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadCatalog, type Family } from './sections.ts';
-import { DEFAULTS, floating, generate, type Detail } from './generate.ts';
+import { DEFAULTS, floating, generate, type Detail, type Params } from './generate.ts';
 import { render as painter, VIEWS } from './steel.ts';
 import { renderHLR } from './hlr.ts';
 
@@ -31,7 +31,7 @@ const t0 = performance.now();
 const cat = loadCatalog(family, ...(tables[family] as [string, string]));
 const t1 = performance.now();
 const r = generate(
-  { seed: +opt('seed', '1'), arms: +opt('arms', `${DEFAULTS.arms}`), height: +opt('height', `${DEFAULTS.height}`), load: +opt('load', `${DEFAULTS.load}`), fy: family === 'eu' ? 355 : 345 },
+  { seed: +opt('seed', '1'), form: opt('form', 'mix') as Params['form'], arms: +opt('arms', `${DEFAULTS.arms}`), height: +opt('height', `${DEFAULTS.height}`), load: +opt('load', `${DEFAULTS.load}`), fy: family === 'eu' ? 355 : 345 },
   cat,
   detail,
 );
@@ -47,7 +47,7 @@ const lost = floating(r.parts);
 console.log(
   [
     `${out}: seed ${opt('seed', '1')}, ${family}, view ${view}, detail ${detail}, ${render === painter ? 'painter' : 'hlr'}`,
-    `  structure: column ${r.st.col.id}, ${r.st.arms.length} arms (${r.st.arms.map((a) => `${a.sec.id} ${a.conn}${a.brace ? ' + brace ' + a.brace.sec.id : ''}`).join('; ')})` +
+    `  structure: ${r.st.form}, ${r.st.cols.length} × column ${r.st.col.id}, ${r.st.arms.length} arms (${r.st.arms.map((a) => `${a.sec.id} ${a.conn}${a.braces.map((b) => ' + brace ' + b.sec.id).join('')}`).join('; ')})` +
       (r.st.secs.length ? `, ${r.st.secs.length} secondary (${r.st.secs.map((s) => `${s.sec.id} ${s.conn}`).join('; ')})` : ''),
     `  solver: ${r.ok ? 'stable' : 'MECHANISM'}, ${r.nodes} nodes, ${r.solves} solves`,
     ...r.log.map((l) => '    ' + l),
