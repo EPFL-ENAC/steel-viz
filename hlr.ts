@@ -32,6 +32,7 @@ import { add, cross, dot, mul, norm, sub, type V } from './vec.ts';
 import { BOLT_MS, camera, forSize, timeline, type Face, type Part, type RenderOpts } from './steel.ts';
 
 const HEAD = 13; // bolt head height, mm (M20)
+const SOLID = 400; // px: up to this drawing size, bolt heads are solid
 const DEEP = 50; // mm: a jump in depth bigger than this makes an outline
 const SIDE = 1.5; // mm: how far beside (or past the end of) a line we look
 const FRONT = 5; // mm: a surface this much in front of a line end hides it
@@ -145,6 +146,7 @@ export function renderHLR(parts: Part[], o: RenderOpts): { svg: string; faces: n
   const PAD = 150; // mm around the drawing
   const pxMm = o.size ? o.size / ((box.max.x - box.min.x) / M + 2 * PAD) : 0; // px per mm
   const weights = o.weights !== false;
+  const solid = !!o.size && o.size <= SOLID; // bolt heads as black dots
   const thinMm = pxMm ? (o.strokePx ?? (weights ? 1 : 1.4)) / pxMm : (o.stroke ?? (weights ? 4 : 7));
   const thickMm = pxMm ? (o.outlinePx ?? 2) / pxMm : (o.outline ?? 9);
   const gapMm = !weights || o.gap === false ? 0 : thickMm / 2 + thinMm / 2 + (typeof o.gap === 'number' ? o.gap : thickMm);
@@ -211,7 +213,7 @@ export function renderHLR(parts: Part[], o: RenderOpts): { svg: string; faces: n
   };
   // per part: visible lines (thin and thick, as 2D pieces in drawing units),
   // and hidden pieces keyed by the step that hides them
-  type Out = { vis: Seg[]; edge: Seg[]; until: Map<number, string[]>; fills: { d: string; until: number; head: number }[] };
+  type Out = { vis: Seg[]; edge: Seg[]; until: Map<number, string[]>; fills: { d: string; until: number; head: number; ring: boolean }[] };
   const outs: Out[] = shown.map(() => ({ vis: [], edge: [], until: new Map(), fills: [] }));
   const mid = new Vector3();
   const flat = (q: ArrayLike<number>): Seg => [(q[0] / M) * scale, (q[2] / M) * scale, (q[3] / M) * scale, (q[5] / M) * scale];
@@ -259,7 +261,22 @@ export function renderHLR(parts: Part[], o: RenderOpts): { svg: string; faces: n
     const s = occluder(new Vector3(...ctr));
     const own = shown[h.part].step;
     if (s <= own) continue;
-    outs[h.part].fills.push({ d: 'M' + hull(h.corners).map((p) => pt(p[0], p[2])).join('L') + 'Z', until: s, head: hi });
+    // small: a solid head reads best. Big: the hex outline (drawn by the
+    // projection) and the chamfer circle on its top face, like a drawing
+    if (solid) {
+      outs[h.part].fills.push({ d: 'M' + hull(h.corners).map((p) => pt(p[0], p[2])).join('L') + 'Z', until: s, head: hi, ring: false });
+      continue;
+    }
+    const top = h.corners.slice(6);
+    const [e1, e2] = [mul(sub(top[0], ctr), 0.85), mul(sub(top[1], ctr), 0.85)];
+    // a circle through the corners has a1 = top[0] - ctr and a2 = (2 top[1] - top[0] - ctr) / sqrt 3 from the centre
+    const a2 = mul(sub(mul(e2, 2), e1), 1 / Math.sqrt(3));
+    const ring = Array.from({ length: 24 }, (_, k) => {
+      const t = (k / 24) * 2 * Math.PI;
+      const q = add(ctr, add(mul(e1, Math.cos(t)), mul(a2, Math.sin(t))));
+      return pt(q[0], q[2]);
+    });
+    outs[h.part].fills.push({ d: 'M' + ring.join('L') + 'Z', until: s, head: hi, ring: true });
   }
 
   // merge the lines that lie on top of each other
@@ -277,7 +294,7 @@ export function renderHLR(parts: Part[], o: RenderOpts): { svg: string; faces: n
   const ms = (x: number) => `${Math.round(x)}ms`;
   const css =
     `.steel path{fill:none;stroke:currentColor;stroke-width:${sw};stroke-linecap:round;stroke-linejoin:round}` +
-    `.steel .o{stroke-width:${ow}}.steel .b{fill:currentColor;stroke:none}.steel .a{color:var(--accent,#e30713)}` +
+    `.steel .o{stroke-width:${ow}}.steel .b{fill:currentColor;stroke:none}.steel .r{fill:none}.steel .a{color:var(--accent,#e30713)}` +
     (o.animate
       ? `.steel .f{animation:fly .6s cubic-bezier(.2,.7,.25,1) both}` +
         `@keyframes fly{from{opacity:0;transform:translate(var(--dx),var(--dy))}15%{opacity:1}}` +
@@ -324,8 +341,10 @@ export function renderHLR(parts: Part[], o: RenderOpts): { svg: string; faces: n
     return `--dx:${f(ux * t)}px;--dy:${f(uy * t)}px;animation-delay:${ms(sl.start)};animation-duration:${ms(sl.dur)}`;
   };
   const hidden = (pi: number) => [...outs[pi].until].map(([s, list]) => `<path class="h" style="animation-delay:${ms(landAt(s))}" d="${list.join('')}"/>`);
-  const fill = (fl: Out['fills'][number]) =>
-    fl.until === Infinity ? `<path class="b" d="${fl.d}"/>` : o.animate ? `<path class="b h" style="animation-delay:${ms(landAt(fl.until))}" d="${fl.d}"/>` : '';
+  const fill = (fl: Out['fills'][number]) => {
+    const k = fl.ring ? 'r' : 'b';
+    return fl.until === Infinity ? `<path class="${k}" d="${fl.d}"/>` : o.animate ? `<path class="${k} h" style="animation-delay:${ms(landAt(fl.until))}" d="${fl.d}"/>` : '';
+  };
 
   // in step order, so a later part paints over an earlier one (only the bolt fills care)
   const order = shown.map((_, i) => i).sort((i, j) => shown[i].step - shown[j].step);

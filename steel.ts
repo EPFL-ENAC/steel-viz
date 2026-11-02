@@ -398,6 +398,35 @@ function webPlate(g: Geo, r: Resolved, t: number, L0: number, max: number, dots:
   return faces;
 }
 
+// the convex outline of points that lie in one plane, given two axes of it
+function hull2(pts: V[], ax: V, ay: V): V[] {
+  const o = pts[0];
+  const q = pts.map((v) => ({ v, x: dot(sub(v, o), ax), y: dot(sub(v, o), ay) })).sort((a, b) => a.x - b.x || a.y - b.y);
+  const turn = (a: (typeof q)[0], b: (typeof q)[0], c: (typeof q)[0]) => (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+  const half = (list: typeof q) => {
+    const h: typeof q = [];
+    for (const c of list) {
+      while (h.length >= 2 && turn(h[h.length - 2], h[h.length - 1], c) <= 1e-6) h.pop();
+      h.push(c);
+    }
+    h.pop();
+    return h;
+  };
+  return [...half(q), ...half([...q].reverse())].map((c) => c.v);
+}
+
+// a flat plate with any outline: `poly` is one face, the other is `t` along n
+function slab(poly: V[], n: V, t: number): Face[] {
+  const top = poly.map((v) => add(v, mul(n, t)));
+  const ring = poly.map((_, i) => [i, (i + 1) % poly.length] as [number, number]);
+  const faces: Face[] = [{ pts: poly, edges: ring }, { pts: [...top].reverse(), edges: ring }];
+  for (let i = 0; i < poly.length; i++) {
+    const k = (i + 1) % poly.length;
+    faces.push({ pts: [poly[i], poly[k], top[k], top[i]], edges: [[1, 2]] });
+  }
+  return faces;
+}
+
 export type ConnType = 'shear_tab' | 'end_plate' | 'flange_plates' | 'welded' | 'gusset';
 export const PINNED: ConnType[] = ['shear_tab', 'gusset'];
 // the gap a member leaves at its end, for each connection type. For a
@@ -461,9 +490,9 @@ export function hardware(g: Geo, typ: ConnType, r: Resolved): { faces: Face[]; d
     }
     faces.push(...webPlate(g, r, 10, 115, 3, dots, reach, boxes));
   } else if (typ === 'gusset') {
-    // A knife plate welded to the support face, slotted into the tube. The
-    // bolts sit on the free part of the plate, between the support and the
-    // tube end: 2 rows along the brace, 2 across, symmetric about its axis.
+    // Two plates and 4 bolts through both. The gusset is welded to the
+    // support face. The knife plate sits in a slot at the tube end and laps
+    // over the gusset. The bolts: 2 rows along the brace, 2 across.
     const t = 12;
     let nrm = cross(r.direc, g.u);
     if (len(nrm) < 1e-3) nrm = g.v;
@@ -472,22 +501,30 @@ export function hardware(g: Geo, typ: ConnType, r: Resolved): { faces: Face[]; d
     const side = norm(cross(nrm, inward)); // in the plate plane, across the brace
     const slot = 150;
     reach.push(slot);
-    const pts: V[] = [];
-    for (const [du, dv] of grid(2, 2, PITCH, PITCH)) {
-      const b = add(add(p, mul(inward, -(25 + EDGE + PITCH / 2) + du)), mul(side, dv));
-      pts.push(b);
-      dots.push({ p: b, axis: nrm, half: t / 2 + 1 });
-    }
-    // the plate is a rectangle on the support face that covers the bolts
-    // (plus the edge distance) and the part inside the slot
-    const hw = g.sec.bf / 2 + 10;
-    const cover = [...pts, add(p, mul(side, hw)), add(p, mul(side, -hw)), add(add(p, mul(inward, slot)), mul(side, hw)), add(add(p, mul(inward, slot)), mul(side, -hw))];
-    const xs = cover.map((q, i) => dot(sub(q, r.fp), r.direc) + (i < pts.length ? EDGE : 0));
-    const ys = cover.map((q) => dot(sub(q, r.fp), across));
-    const [y0, y1] = [Math.min(...ys) - EDGE, Math.max(...ys) + EDGE];
-    const x1 = Math.max(...xs);
-    const centre = add(add(r.fp, mul(r.direc, x1 / 2)), mul(across, (y0 + y1) / 2));
-    plate(centre, across, r.direc, t, y1 - y0, x1);
+    const [near, far] = [EDGE + 12, EDGE + 12 + PITCH]; // the two bolt rows, mm before the tube end
+    const half = PITCH / 2 + EDGE; // half width of the bolt area
+    const at = (u: number, s2: number, n = 0) => add(add(add(p, mul(inward, u)), mul(side, s2)), mul(nrm, n));
+    for (const u of [-near, -far])
+      for (const s2 of [-PITCH / 2, PITCH / 2]) dots.push({ p: at(u, s2, -t / 2), axis: nrm, half: t + 1 });
+    // knife plate: from the bolts into the slot, in the plane of the brace
+    // full width under the bolts, then down to the tube width at its end
+    const lk = far + EDGE + slot;
+    const w = Math.min(half, g.sec.bf / 2 + 10);
+    const knife = [at(-far - EDGE, -half), at(-far - EDGE, half), at(-near + EDGE, half), at(0, w), at(slot, w), at(slot, -w), at(0, -w), at(-near + EDGE, -half)];
+    faces.push(...slab(knife.map((q) => add(q, mul(nrm, -t / 2))), nrm, t));
+    boxes.push(boxOf(at((slot - far - EDGE) / 2, 0), side, inward, t, 2 * half, lk));
+    // gusset: beside the knife plate, from the support face to the bolts. Its
+    // outline joins the bolt area to its own foot on the face.
+    const area = [at(-near + EDGE, -half, -t), at(-near + EDGE, half, -t), at(-far - EDGE, half, -t), at(-far - EDGE, -half, -t)];
+    const foot = area.map((q) => sub(q, mul(r.direc, dot(sub(q, r.fp), r.direc))));
+    const poly = hull2([...area, ...foot], across, r.direc);
+    faces.push(...slab(poly, nrm, t));
+    // its solid for the clash check: the box around it, in the support frame
+    const xs = poly.map((q) => dot(sub(q, r.fp), r.direc));
+    const ys = poly.map((q) => dot(sub(q, r.fp), across));
+    const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+    const zc = dot(sub(poly[0], r.fp), nrm);
+    boxes.push(boxOf(add(add(add(r.fp, mul(r.direc, (x0 + x1) / 2)), mul(across, (y0 + y1) / 2)), mul(nrm, zc)), across, r.direc, t, y1 - y0, x1 - x0));
   }
   return { faces, dots, reach, boxes };
 }
