@@ -13,7 +13,7 @@ const cats = {
   eu: loadCatalog('eu', read('connection/european-sections.csv'), read('hss/hss-european-sections.csv')),
 };
 
-const forms: Form[] = ['tree', 'portal', 'corner'];
+const forms: Form[] = ['tree', 'portal', 'box'];
 
 test('no part goes through another one', () => {
   for (const [name, cat] of Object.entries(cats))

@@ -4,7 +4,7 @@ A test for the hub logo (#263). It builds a steel structure from a seed, in one 
 
 - Tree: one column on a base plate, with arms, braces and secondary beams.
 - Portal: two columns with beams between them, on one or two storeys, and a few arms out of the columns.
-- Corner: three columns in an L, so two bays at a right angle.
+- Box: four columns in a rectangle. Beams and braces stay in its four walls, nothing sticks out of them.
 
 Each bay storey gets its own bracing: none (moment connections), knee braces at both ends, a chevron (two braces up to the middle of the beam) or one diagonal. `--form` picks the form (`mix` lets the seed pick it, a tree seed gives the same tree in both).
 

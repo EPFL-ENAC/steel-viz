@@ -1,6 +1,6 @@
 // node tools/steel-generator/cli.ts --seed 3 --view iso --family aisc --out x.svg
 //   [--detail members|plates|bolts] [--arms 5] [--height 6000] [--load 20]
-//   [--form mix|tree|portal|corner] [--animate] [--frames] [--painter] [--flat] [--size px]
+//   [--form mix|tree|portal|box] [--animate] [--frames] [--painter] [--flat] [--size px]
 import { readFileSync, writeFileSync } from 'node:fs';
 import { gzipSync } from 'node:zlib';
 import { dirname, join } from 'node:path';

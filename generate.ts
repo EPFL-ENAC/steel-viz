@@ -3,7 +3,8 @@
 //   sometimes a brace under an arm or a secondary beam off it.
 // - portal: two columns with beams between them, one or two storeys, braced
 //   or not, and a few arms out of the columns.
-// - corner: the same with three columns in an L.
+// - box: four columns in a rectangle, beams and braces only in its four
+//   walls, nothing sticks out.
 // The solver checks it stands up, fixes it if not, and sizes the members.
 import { add, len, mul, sub, type V } from './vec.ts';
 import { solve, type Elem, type FNode } from './solver.ts';
@@ -48,7 +49,7 @@ const drop = (a: Arm, b: Brace) => a.z - a.sec.d - b.zb;
 const braceId = (a: Arm, i: number) => `${a.id}-brace${i ? i + 1 : ''}`;
 type Secondary = { id: string; arm: number; a: number; side: 1 | -1; L: number; conn: ConnType; sec: Section };
 type Col = { x: V };
-export type Form = 'tree' | 'portal' | 'corner';
+export type Form = 'tree' | 'portal' | 'box';
 export type Structure = { form: Form; H: number; col: Section; cols: Col[]; arms: Arm[]; secs: Secondary[] };
 const colId = (i: number) => (i ? `column${i + 1}` : 'column');
 const baseId = (i: number) => (i ? `base${i + 1}` : 'base');
@@ -114,21 +115,27 @@ function secondaries(p: Params, cat: Catalog, rng: () => number, arms: Arm[]): S
 }
 
 // portal: two columns and the beams between them, one or two storeys.
-// corner: three columns in an L, so two bays at a right angle.
+// box: four columns in a rectangle, so four walls. Nothing sticks out of
+// them: no arms out of the columns, no secondary beams.
 // Each bay storey gets its bracing: none (the connections take the
 // moments), knee braces at both ends, a chevron (two braces up to the
-// middle of the beam) or one diagonal. Then a few arms out of the columns.
-function frame(form: 'portal' | 'corner', p: Params, cat: Catalog, rng: () => number): Structure {
+// middle of the beam) or one diagonal. A portal also gets a few arms out of
+// its columns.
+function frame(form: 'portal' | 'box', p: Params, cat: Catalog, rng: () => number): Structure {
   const storeys = rng() < 0.4 ? 2 : 1;
   const H = r150(p.height * (storeys === 2 ? 1.5 : 1));
   const b0 = 90 * Math.floor(rng() * 4);
   const cols: Col[] = [{ x: [0, 0, 0] }];
   const bays: [number, number, number][] = []; // from column, to column, bearing
-  for (const db of form === 'corner' ? [0, 90] : [0]) {
-    const bearing = (b0 + db) % 360;
-    const span = r50((0.8 + 0.5 * rng()) * p.height);
-    cols.push({ x: mul(hdir(bearing), span) });
-    bays.push([0, cols.length - 1, bearing]);
+  const span = () => r50((0.8 + 0.5 * rng()) * p.height);
+  if (form === 'portal') {
+    cols.push({ x: mul(hdir(b0), span()) });
+    bays.push([0, 1, b0]);
+  } else {
+    const b1 = (b0 + 90) % 360;
+    const [u, v] = [mul(hdir(b0), span()), mul(hdir(b1), span())];
+    cols.push({ x: u }, { x: v }, { x: add(u, v) });
+    bays.push([0, 1, b0], [0, 2, b1], [1, 3, b1], [2, 3, b0]);
   }
   const levels = storeys === 2 ? [r150(0.5 * H), H - 150] : [H - 150];
   const arms: Arm[] = [];
@@ -140,7 +147,7 @@ function frame(form: 'portal' | 'corner', p: Params, cat: Catalog, rng: () => nu
       bracing.push(pick(rng, { none: 0.2, knee: 0.3, chevron: 0.3, diagonal: 0.2 }));
     }
   // a few arms out of the columns, never on the side of a bay
-  const nArms = Math.max(0, Math.min(3, Math.round((p.arms - arms.length) / 3)));
+  const nArms = form === 'box' ? 0 : Math.max(0, Math.min(3, Math.round((p.arms - arms.length) / 3)));
   for (let k = 0, tries = 0; k < nArms && tries < 100; tries++) {
     const col = Math.floor(rng() * cols.length);
     const bearing = 90 * Math.floor(rng() * 4);
@@ -159,7 +166,7 @@ function frame(form: 'portal' | 'corner', p: Params, cat: Catalog, rng: () => nu
     if (kind === 'diagonal') addBrace(a, arms, cat, rng() < 0.5 ? 0 : 1, 0, a.L - 500);
     if (kind === undefined && rng() < p.braceP) addBrace(a, arms, cat);
   });
-  return { form, H, col: mid(cat.columns), cols, arms, secs: secondaries(p, cat, rng, arms) };
+  return { form, H, col: mid(cat.columns), cols, arms, secs: form === 'box' ? [] : secondaries(p, cat, rng, arms) };
 }
 
 // A brace under the arm, down to the column at its `end`. It must stay
@@ -423,7 +430,7 @@ export function generate(p0: Partial<Params>, cat: Catalog, detail: Detail = 'bo
   const t0 = performance.now();
   // a draw of its own, so a tree seed gives the same tree in mix and in tree
   const roll = mulberry32(p.seed * 104729 + 7)();
-  const form: Form = p.form !== 'mix' ? p.form : roll < 0.45 ? 'tree' : roll < 0.75 ? 'portal' : 'corner';
+  const form: Form = p.form !== 'mix' ? p.form : roll < 0.45 ? 'tree' : roll < 0.75 ? 'portal' : 'box';
   const st = form === 'tree' ? tree(p, cat, rng) : frame(form, p, cat, rng);
   const t1 = performance.now();
   const log: string[] = [];

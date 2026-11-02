@@ -1,6 +1,6 @@
 // Scan many seeds and list the ones that read best as a logo (score.ts).
 // node tools/steel-generator/pick.ts --count 300 [--from 1] [--arms 4,5,6]
-//   [--form mix|tree|portal|corner] [--view iso] [--family aisc] [--top 12]
+//   [--form mix|tree|portal|box] [--view iso] [--family aisc] [--top 12]
 //   [--sheet best.html] [--size 160]
 // --sheet writes a page with the best drawings, at --size px.
 import { readFileSync, writeFileSync } from 'node:fs';
