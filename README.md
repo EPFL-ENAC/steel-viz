@@ -16,11 +16,17 @@ The exact renderer draws like a technical drawing:
 - Two line weights. Outlines are thick (9 mm at the drawing scale) and inner edges are thin (4 mm). To find an outline, it looks just beside each line, on both sides. The line is an outline when one side sees nothing, a surface more than 50 mm further back, or another part behind it. So each part keeps its own outline, a plate on a flange too.
 - Gaps. A line that goes behind something stops a little before it, so the depth reads better. The gap is as wide as an outline.
 - No double lines. Lines that lie on top of each other in the same part are merged, and a thin line under a thick one is removed.
-- Widths for a size. `--size 96` (or "96 px" in the playground) says the drawing will be shown 96 px wide. Then the outlines are 2 px and the inner lines 1 px, so a small logo keeps readable lines.
+- Widths for a size. `--size 96` (or "96 px" in the playground) says the drawing will be shown 96 px wide. Then the outlines are 2 px and the inner lines 1 px, so a small logo keeps readable lines. Small drawings also show less: no bolts at 160 px or less, no plates at 64 px or less, no secondary beams at 40 px or less (`DETAIL` in `steel.ts`).
 
 `--flat` (or "One weight" in the playground) draws every line at one width, as before, with no gaps.
 
 The build animation (`--animate`) shows the parts put in place, like on a site. The column comes down from above. Each beam slides in from outside the frame, along its own axis, after its plates. Then its bolts pop in one by one. Each part has a `kind` and a `from` direction for this (set in `generate.ts`), and `timeline()` in `steel.ts` says when each part moves and lands. A line that a later part hides stays visible until that part lands. While a beam moves, its lines are already cut where other parts will hide it at the end, so a small hole can move with it.
+
+To find a structure that works as a logo, `score.ts` gives each one a score from 0 to 1. It looks at the big shapes from the chosen view: do they fill a square, does the weight sit on the column, how many members, how many members cross each other. `pick.ts` scans many seeds and lists the best ones (450 structures take about 2 s). In the playground, "Find good seeds" does the same for 200 seeds and shows the best 8.
+
+```sh
+node pick.ts --count 150 --arms 4,5,6 --top 12 --sheet best.html  # best.html shows the 12 best drawings
+```
 
 It needs Node 24 or newer. Node runs the `.ts` files directly. Install the deps once (three.js, three-mesh-bvh, three-edge-projection, esbuild for the playground):
 
@@ -42,6 +48,7 @@ Files:
 - `generate.ts`: topology, the fix loop and the sizing.
 - `steel.ts`: geometry (profiles, copes, plates, bolts), camera and the painter renderer.
 - `clash.ts`: do two parts go through each other (each part as a few boxes).
+- `score.ts`, `pick.ts`: the logo score, and the scan over many seeds.
 - `hlr.ts`: the exact hidden-line renderer, with bolt heads as real hex solids.
 - `cli.ts`, `build-playground.ts`, `playground.entry.ts`, `playground.template.html`: command line and playground page. `build-playground.ts` bundles `playground.entry.ts` with esbuild.
 

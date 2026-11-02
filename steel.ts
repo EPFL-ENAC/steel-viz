@@ -26,6 +26,18 @@ export type Part = { id: string; step: number; faces: Face[]; dots: Dot[]; suppo
 // When each part starts to move and when it lands, in ms. Plates and
 // members come one after the other, a bit overlapped, like on a crane.
 // Bolts don't wait for the crane: they start when their member lands.
+// Less detail when the drawing is small: at 160 px or less bolts are only
+// noise, at 64 px plates too, at 40 px the secondary beams.
+export const DETAIL = { bolts: 160, plates: 64, secondaries: 40 };
+export function forSize(parts: Part[], size?: number): Part[] {
+  if (!size) return parts;
+  return parts
+    .filter((p) => !(size <= DETAIL.bolts && p.kind === 'bolts'))
+    .filter((p) => !(size <= DETAIL.plates && p.kind === 'plate'))
+    .filter((p) => !(size <= DETAIL.secondaries && /^sec\d/.test(p.id)))
+    .map((p) => (size <= DETAIL.bolts && p.dots.length ? { ...p, dots: [] } : p));
+}
+
 export type Slot = { start: number; dur: number; land: number };
 export const BOLT_MS = 70; // between two bolts of one connection
 export function timeline(parts: Part[], speed = 1): Map<number, Slot> {
@@ -509,6 +521,7 @@ function inside([x, y]: P2, poly: P2[]): boolean {
 }
 
 export function render(parts: Part[], o: RenderOpts): { svg: string; faces: number; dots: number } {
+  parts = forSize(parts, o.size);
   const { c, r, up } = camera(o.az, o.el);
   const scale = o.scale ?? 0.1;
   const f = (x: number) => (Math.round(x * 10) / 10).toString();

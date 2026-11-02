@@ -4,5 +4,6 @@ import { loadCatalog } from './sections.ts';
 import { floating, generate } from './generate.ts';
 import { render, VIEWS } from './steel.ts';
 import { renderHLR } from './hlr.ts';
+import { logoScore } from './score.ts';
 
-Object.assign(globalThis, { loadCatalog, floating, generate, render, renderHLR, VIEWS });
+Object.assign(globalThis, { loadCatalog, floating, generate, render, renderHLR, logoScore, VIEWS });

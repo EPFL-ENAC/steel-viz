@@ -29,7 +29,7 @@ import { BufferAttribute, BufferGeometry, DoubleSide, Mesh, MeshBasicMaterial, R
 import { MeshBVH } from 'three-mesh-bvh';
 import { ProjectionGenerator } from 'three-edge-projection/src/ProjectionGenerator.js';
 import { add, cross, dot, mul, norm, sub, type V } from './vec.ts';
-import { BOLT_MS, camera, timeline, type Face, type Part, type RenderOpts } from './steel.ts';
+import { BOLT_MS, camera, forSize, timeline, type Face, type Part, type RenderOpts } from './steel.ts';
 
 const HEAD = 13; // bolt head height, mm (M20)
 const DEEP = 50; // mm: a jump in depth bigger than this makes an outline
@@ -74,7 +74,8 @@ export function renderHLR(parts: Part[], o: RenderOpts): { svg: string; faces: n
   const f = (x: number) => (Math.round(x * 10) / 10).toString();
 
   // one mesh per part; bolt heads are real solids
-  const shown = parts.filter((p) => o.maxStep === undefined || p.step <= o.maxStep);
+  // less detail when the drawing is small
+  const shown = forSize(parts, o.size).filter((p) => o.maxStep === undefined || p.step <= o.maxStep);
   const meshes: Mesh[] = [];
   const both = new MeshBasicMaterial({ side: DoubleSide });
   const heads: { part: number; corners: V[] }[] = [];

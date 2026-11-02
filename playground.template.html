@@ -26,12 +26,14 @@
     :root:not([data-theme="light"]) {
       --bg: #1b1b1b; --bg-app: #121212; --fg: #e9e9e7; --fg-muted: #9b9b98; --border: #383838;
       --primary: #f0414a; --primary-hover: #ff6a71; --on-primary: #ffffff; --ok: #8fc35a; --warn: #f0a640;
+      --thumb: invert(0.9);
       color-scheme: dark;
     }
   }
   :root[data-theme="dark"] {
     --bg: #1b1b1b; --bg-app: #121212; --fg: #e9e9e7; --fg-muted: #9b9b98; --border: #383838;
     --primary: #f0414a; --primary-hover: #ff6a71; --on-primary: #ffffff; --ok: #8fc35a; --warn: #f0a640;
+    --thumb: invert(0.9);
     color-scheme: dark;
   }
   html, body { height: 100%; }
@@ -101,6 +103,11 @@
   .members li span:first-child { color: var(--fg-muted); }
   .log { margin: 0; padding-left: 16px; font-size: 12px; color: var(--fg-muted); }
   .note { font-size: 12px; color: var(--fg-muted); margin: 0; }
+  .picks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .picks button { display: grid; gap: 4px; padding: 6px; font: 11px var(--font-data); color: var(--fg-muted); }
+  .picks button[aria-current="true"] { border-color: var(--fg); color: var(--fg); }
+  /* an img, so the styles of each small drawing stay apart from the big one */
+  .picks img { width: 100%; height: auto; display: block; filter: var(--thumb, none); }
 </style>
 
 <div class="app">
@@ -157,6 +164,13 @@
       <button id="theme" type="button">Dark</button>
     </div>
     <p class="note" id="copyNote" hidden></p>
+
+    <fieldset>
+      <legend>Good seeds</legend>
+      <div class="actions"><button id="find" type="button">Find good seeds</button></div>
+      <p class="note" id="findNote">Scans 200 seeds from the current one, with these arms, height, load and view. Keeps the 8 that read best as a logo: they fill a square, sit on the column, have few members and few crossings.</p>
+      <div class="picks" id="picks"></div>
+    </fieldset>
 
     <fieldset>
       <legend>Analysis</legend>
@@ -274,6 +288,51 @@ for (const id of ['az', 'el']) {
   });
   $(id).addEventListener('change', () => update(false, false));
 }
+// scan seeds, a few at a time so the page stays alive, and show the best ones
+let scanning = 0;
+$('find').addEventListener('click', () => {
+  const fam = radio('family');
+  const base = { arms: +$('arms').value, height: +$('height').value, load: +$('load').value, fy: fam === 'eu' ? 355 : 345 };
+  const [az, el] = [+$('az').value, +$('el').value];
+  const [N, from] = [200, +$('seed').value || 1];
+  const run = ++scanning;
+  const found = [];
+  let s = from;
+  $('picks').replaceChildren();
+  const chunk = () => {
+    if (run !== scanning) return;
+    for (const end = Math.min(from + N, s + 10); s < end; s++) {
+      const r = generate({ ...base, seed: s }, catalog(fam), 'members');
+      if (r.ok) found.push({ seed: s, ...logoScore(r.parts, az, el) });
+    }
+    $('findNote').textContent = `Scanning, ${s - from} of ${N} seeds…`;
+    if (s < from + N) return void setTimeout(chunk, 0);
+    found.sort((a, b) => b.score - a.score);
+    $('picks').replaceChildren(
+      ...found.slice(0, 8).map((b) => {
+        const r = generate({ ...base, seed: b.seed }, catalog(fam), 'bolts');
+        const svg = renderHLR(r.parts, { az, el, size: 120 }).svg;
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.title = `fill ${b.fill.toFixed(2)}, aspect ${b.aspect.toFixed(2)}, balance ${b.balance.toFixed(2)}, ${b.members} members, ${b.crossings} crossings`;
+        btn.append(
+          Object.assign(document.createElement('img'), { src: 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg), alt: `Seed ${b.seed}` }),
+          Object.assign(document.createElement('span'), { textContent: `seed ${b.seed}, ${b.score.toFixed(2)}` }),
+        );
+        btn.addEventListener('click', () => {
+          for (const o of $('picks').children) o.removeAttribute('aria-current');
+          btn.setAttribute('aria-current', 'true');
+          $('seed').value = b.seed;
+          update(true, true);
+        });
+        return btn;
+      }),
+    );
+    $('findNote').textContent = `The best 8 of ${found.length} stable structures, seeds ${from} to ${from + N - 1}. Click one to open it.`;
+  };
+  chunk();
+});
+
 // turn the structure with the mouse (or a finger): fast drawing while it
 // moves, exact lines when it stops
 function turn(daz, del) {
