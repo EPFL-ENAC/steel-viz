@@ -223,31 +223,32 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
   const col = geo('column', st.col, [0, 0, 0], [0, 0, st.H], false);
   const tb = 40;
   out.push({
-    id: 'base', step: step++, supports: [],
+    id: 'base', step: step++, supports: [], kind: 'base', from: [0, 0, -1],
     faces: box3([0, 0, -tb / 2], [0, 1, 0], [0, 0, 1], st.col.bf + 150, st.col.d + 150, tb),
     boxes: [boxOf([0, 0, -tb / 2], [0, 1, 0], [0, 0, 1], st.col.bf + 150, st.col.d + 150, tb)],
     dots: bolts ? [-1, 1].flatMap((sx) => [-1, 1].map((sy) => ({ p: [sx * (st.col.bf / 2 + 40), sy * (st.col.d / 2 + 40), 1] as V, n: [0, 0, 1] as V }))) : [],
   });
-  out.push({ id: 'column', step: step++, supports: ['base'], faces: memberFaces(col, seg), boxes: memberBoxes(col), dots: [], accent: false });
+  out.push({ id: 'column', step: step++, supports: ['base'], kind: 'column', from: [0, 0, 1], faces: memberFaces(col, seg), boxes: memberBoxes(col), dots: [], accent: false });
 
   // one member and its end connections, in build order: plates, member, bolts
   type End = { S: Geo; sId: string; conn: ConnType; at: 'from' | 'to' };
-  const member = (g: Geo, ends: End[]) => {
+  // from: the direction the member (and its plates) come from
+  const member = (g: Geo, ends: End[], from: V) => {
     const rs = ends.map((e) => resolve(g, e.S, e.at));
     g.copes = rs.flatMap((r) => (r.cope ? [r.cope] : []));
     const hws = ends.map((e, i) => ({ e, hw: hardware(g, e.conn, rs[i]) }));
     const supports: string[] = [];
     for (const { e, hw } of hws) {
       if (plates && hw.faces.length) {
-        out.push({ id: `${g.id}-${e.at}-conn`, step: step++, supports: [e.sId], faces: hw.faces, boxes: hw.boxes, dots: [] });
+        out.push({ id: `${g.id}-${e.at}-conn`, step: step++, supports: [e.sId], kind: 'plate', from, faces: hw.faces, boxes: hw.boxes, dots: [] });
         supports.push(`${g.id}-${e.at}-conn`);
       } else supports.push(e.sId);
     }
     const Lg = len(sub(g.p1, g.p0));
     const cuts = hws.flatMap(({ e, hw }) => hw.reach.map((x) => (e.at === 'from' ? x : Lg - x)));
-    out.push({ id: g.id, step: step++, supports, faces: memberFaces(g, seg, cuts), boxes: memberBoxes(g), dots: [] });
+    out.push({ id: g.id, step: step++, supports, kind: 'member', from, faces: memberFaces(g, seg, cuts), boxes: memberBoxes(g), dots: [] });
     const dots = hws.flatMap(({ hw }) => hw.dots);
-    if (bolts && dots.length) out.push({ id: `${g.id}-bolts`, step: step++, supports: [g.id, ...supports], faces: [], dots });
+    if (bolts && dots.length) out.push({ id: `${g.id}-bolts`, step: step++, supports: [g.id, ...supports], kind: 'bolts', faces: [], dots });
   };
 
   const armGeo = new Map<string, Geo>();
@@ -257,7 +258,7 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
     const p0 = add(base, mul(h, supportFace(col, h) + SETBACK[a.conn]));
     const g = geo(a.id, a.sec, p0, add(base, mul(h, a.L)), true);
     armGeo.set(a.id, g);
-    member(g, [{ S: col, sId: 'column', conn: a.conn, at: 'from' }]);
+    member(g, [{ S: col, sId: 'column', conn: a.conn, at: 'from' }], h); // slides in along its axis
     if (a.brace) {
       const B: V = [0, 0, a.brace.zb];
       const C = add(add(base, mul(h, a.brace.a)), [0, 0, -a.sec.d]);
@@ -270,7 +271,7 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
       member(bg, [
         { S: col, sId: 'column', conn: 'gusset', at: 'from' },
         { S: g, sId: a.id, conn: 'gusset', at: 'to' },
-      ]);
+      ], h); // from outside, level
     }
   }
   for (const s of st.secs) {
@@ -279,7 +280,7 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
     const side = mul(ag.v, s.side);
     const p = add(add([0, 0, a.z], mul(hdir(a.bearing), s.a)), mul(side, supportFace(ag, side) + SETBACK[s.conn]));
     const g = geo(s.id, s.sec, p, add(add([0, 0, a.z], mul(hdir(a.bearing), s.a)), mul(side, s.L)), true);
-    member(g, [{ S: ag, sId: a.id, conn: s.conn, at: 'from' }]);
+    member(g, [{ S: ag, sId: a.id, conn: s.conn, at: 'from' }], side);
   }
   return out;
 }

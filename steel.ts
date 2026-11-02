@@ -18,7 +18,37 @@ export type Face = { pts: V[]; edges: [number, number][] };
 export type Dot = { p: V; axis?: V; half?: number; n?: V };
 // a solid box, for the clash check (clash.ts): centre, 3 unit axes, half sizes
 export type Box = { c: V; ax: [V, V, V]; h: [number, number, number] };
-export type Part = { id: string; step: number; faces: Face[]; dots: Dot[]; supports: string[]; boxes?: Box[]; accent?: boolean };
+export type Kind = 'base' | 'column' | 'plate' | 'member' | 'bolts';
+// kind and from: how the part arrives in the build animation (from: the 3D
+// direction it comes from)
+export type Part = { id: string; step: number; faces: Face[]; dots: Dot[]; supports: string[]; boxes?: Box[]; accent?: boolean; kind?: Kind; from?: V };
+
+// When each part starts to move and when it lands, in ms. Plates and
+// members come one after the other, a bit overlapped, like on a crane.
+// Bolts don't wait for the crane: they start when their member lands.
+export type Slot = { start: number; dur: number; land: number };
+export const BOLT_MS = 70; // between two bolts of one connection
+export function timeline(parts: Part[], speed = 1): Map<number, Slot> {
+  const out = new Map<number, Slot>();
+  const byId = new Map(parts.map((p) => [p.id, p]));
+  let t = 0;
+  const k = 1 / speed;
+  for (const p of [...parts].sort((a, b) => a.step - b.step)) {
+    let slot: Slot;
+    if (p.kind === 'bolts') {
+      const m = byId.get(p.supports[0]);
+      const start = (m && out.get(m.step)?.land) ?? t;
+      const dur = 250 * k + BOLT_MS * k * Math.max(0, p.dots.length - 1);
+      slot = { start, dur, land: start + dur };
+    } else {
+      const [dur, next] = { base: [500, 300], column: [800, 700], plate: [300, 120], member: [650, 380] }[p.kind ?? 'plate'] ?? [400, 200];
+      slot = { start: t, dur: dur * k, land: t + dur * k };
+      t += next * k;
+    }
+    out.set(p.step, slot);
+  }
+  return out;
+}
 
 // ------------------------------------------------------------- profiles
 function ccw(p: P2[]): P2[] {
@@ -462,7 +492,8 @@ export type RenderOpts = {
   bolt?: number; // bolt head size, corner to centre, mm (M20 head: 17)
   maxStep?: number; // draw only the parts up to this build step
   animate?: boolean;
-  stepMs?: number;
+  stepMs?: number; // painter only: ms between two steps
+  speed?: number; // exact renderer: speed of the build animation (default 1)
   bolts?: boolean;
 };
 

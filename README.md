@@ -8,7 +8,8 @@ The output is an SVG line drawing with the hidden lines removed. The SVG can als
 
 Two renderers:
 
-- `hlr.ts` (the default): exact hidden lines, from [three-edge-projection](https://github.com/gkjohnson/three-edge-projection). It takes 50 to 120 ms for one structure. In the animation, a line that a later part hides stays visible until that part arrives.
+- `hlr.ts` (the default): exact hidden lines, from [three-edge-projection](https://github.com/gkjohnson/three-edge-projection). It takes 50 to 150 ms for one structure.
+- `render` in `steel.ts` (`--painter`): the painter's trick, from `sculpture_render.py` on `feat/logo-aisc`. About 5 ms, but some lines are wrong. The playground uses it only while you drag the view sliders.
 
 The exact renderer draws like a technical drawing:
 
@@ -18,7 +19,8 @@ The exact renderer draws like a technical drawing:
 - Widths for a size. `--size 96` (or "96 px" in the playground) says the drawing will be shown 96 px wide. Then the outlines are 2 px and the inner lines 1 px, so a small logo keeps readable lines.
 
 `--flat` (or "One weight" in the playground) draws every line at one width, as before, with no gaps.
-- `render` in `steel.ts` (`--painter`): the painter's trick, from `sculpture_render.py` on `feat/logo-aisc`. About 5 ms, but some lines are wrong. The playground uses it only while you drag the view sliders.
+
+The build animation (`--animate`) shows the parts put in place, like on a site. The column comes down from above. Each beam slides in from outside the frame, along its own axis, after its plates. Then its bolts pop in one by one. Each part has a `kind` and a `from` direction for this (set in `generate.ts`), and `timeline()` in `steel.ts` says when each part moves and lands. A line that a later part hides stays visible until that part lands. While a beam moves, its lines are already cut where other parts will hide it at the end, so a small hole can move with it.
 
 It needs Node 24 or newer. Node runs the `.ts` files directly. Install the deps once (three.js, three-mesh-bvh, three-edge-projection, esbuild for the playground):
 

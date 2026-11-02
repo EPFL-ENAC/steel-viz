@@ -10,7 +10,9 @@
 // The build animation needs one more thing. A line hidden in the finished
 // drawing can be visible earlier, before the part in front of it arrives.
 // So for each hidden piece we find the part in front of it (a ray to the
-// camera), and draw the piece from its own step until that part arrives.
+// camera), and draw the piece from its own step until that part lands.
+// Parts fly in from outside the frame (members along their axis, the
+// column from above), then their bolts pop in one by one.
 //
 // Two line weights, as in a technical drawing: outlines thick, inner edges
 // thin. We look just beside each line, on both sides. It is an outline when
@@ -27,7 +29,7 @@ import { BufferAttribute, BufferGeometry, DoubleSide, Mesh, MeshBasicMaterial, R
 import { MeshBVH } from 'three-mesh-bvh';
 import { ProjectionGenerator } from 'three-edge-projection/src/ProjectionGenerator.js';
 import { add, cross, dot, mul, norm, sub, type V } from './vec.ts';
-import { camera, type Face, type Part, type RenderOpts } from './steel.ts';
+import { BOLT_MS, camera, timeline, type Face, type Part, type RenderOpts } from './steel.ts';
 
 const HEAD = 13; // bolt head height, mm (M20)
 const DEEP = 50; // mm: a jump in depth bigger than this makes an outline
@@ -208,7 +210,7 @@ export function renderHLR(parts: Part[], o: RenderOpts): { svg: string; faces: n
   };
   // per part: visible lines (thin and thick, as 2D pieces in drawing units),
   // and hidden pieces keyed by the step that hides them
-  type Out = { vis: Seg[]; edge: Seg[]; until: Map<number, string[]>; fills: { d: string; until: number }[] };
+  type Out = { vis: Seg[]; edge: Seg[]; until: Map<number, string[]>; fills: { d: string; until: number; head: number }[] };
   const outs: Out[] = shown.map(() => ({ vis: [], edge: [], until: new Map(), fills: [] }));
   const mid = new Vector3();
   const flat = (q: ArrayLike<number>): Seg => [(q[0] / M) * scale, (q[2] / M) * scale, (q[3] / M) * scale, (q[5] / M) * scale];
@@ -250,42 +252,80 @@ export function renderHLR(parts: Part[], o: RenderOpts): { svg: string; faces: n
       later(pi, s, q);
     }
   }
-  for (const h of heads) {
+  for (const [hi, h] of heads.entries()) {
     // the centre of the top face: if it can be seen, fill the whole head
     const ctr = h.corners.slice(6).reduce((s, p) => add(s, p), [0, 0, 0] as V).map((x) => x / 6) as V;
     const s = occluder(new Vector3(...ctr));
     const own = shown[h.part].step;
     if (s <= own) continue;
-    outs[h.part].fills.push({ d: 'M' + hull(h.corners).map((p) => pt(p[0], p[2])).join('L') + 'Z', until: s });
+    outs[h.part].fills.push({ d: 'M' + hull(h.corners).map((p) => pt(p[0], p[2])).join('L') + 'Z', until: s, head: hi });
   }
 
-  // merge the lines that lie on top of each other, then write them
-  const lines: { vis: string; edge: string }[] = outs.map((oo) => {
+  // merge the lines that lie on top of each other
+  const merged = outs.map((oo) => {
     const edge = merge(oo.edge, []);
-    const vis = merge(oo.vis, edge);
-    const d = (list: Seg[]) => list.map((g) => `M${pt(g[0] / scale * M, g[1] / scale * M)}L${pt(g[2] / scale * M, g[3] / scale * M)}`).join('');
-    return { vis: d(vis), edge: d(edge) };
+    return { edge, vis: merge(oo.vis, edge) };
   });
+  const d = (list: Seg[]) => list.map((g) => `M${pt(g[0] / scale * M, g[1] / scale * M)}L${pt(g[2] / scale * M, g[3] / scale * M)}`).join('');
+  const lines = merged.map((m) => ({ vis: d(m.vis), edge: d(m.edge) }));
 
   const pad = PAD * scale;
   [x0, y0, x1, y1] = [x0 - pad, y0 - pad, x1 + pad, y1 + pad];
   const sw = f(thinMm * scale);
   const ow = f(thickMm * scale);
-  const drop = f((y1 - y0) * 0.04);
-  const ms = o.stepMs ?? 60;
+  const ms = (x: number) => `${Math.round(x)}ms`;
   const css =
     `.steel path{fill:none;stroke:currentColor;stroke-width:${sw};stroke-linecap:round;stroke-linejoin:round}` +
     `.steel .o{stroke-width:${ow}}.steel .b{fill:currentColor;stroke:none}.steel .a{color:var(--accent,#e30713)}` +
     (o.animate
-      ? `.steel g{animation:sb .5s cubic-bezier(.2,.8,.3,1) both;animation-delay:calc(var(--i)*${ms}ms)}` +
-        `.steel .h{animation:sh .25s ease-in both;animation-delay:calc(var(--j)*${ms}ms + 150ms)}` +
-        `@keyframes sb{from{opacity:0;transform:translateY(-${drop}px)}}@keyframes sh{to{opacity:0}}` +
-        `@media (prefers-reduced-motion:reduce){.steel g{animation:none}.steel .h{display:none}}`
+      ? `.steel .f{animation:fly .6s cubic-bezier(.2,.7,.25,1) both}` +
+        `@keyframes fly{from{opacity:0;transform:translate(var(--dx),var(--dy))}15%{opacity:1}}` +
+        `.steel .k{animation:pop .25s cubic-bezier(.3,1.5,.5,1) both;transform-box:fill-box;transform-origin:center}` +
+        `@keyframes pop{from{opacity:0;transform:scale(2.5)}}` +
+        `.steel .h{animation:sh .2s ease-in both}@keyframes sh{to{opacity:0}}` +
+        `@media (prefers-reduced-motion:reduce){.steel .f,.steel .k{animation:none}.steel .h{display:none}}`
       : '');
   const out = [
     `<svg xmlns="http://www.w3.org/2000/svg" class="steel" viewBox="${f(x0)} ${f(y0)} ${f(x1 - x0)} ${f(y1 - y0)}">`,
     `<style>${css}</style>`,
   ];
+
+  // the build animation: when each part moves, and from where
+  const slots = timeline(shown, o.speed);
+  const landAt = (step: number) => slots.get(step)?.land ?? 0;
+  // how far to move a part along the 2D direction (ux, uy) so it is out of the frame
+  const away = (pi: number, ux: number, uy: number) => {
+    const all = [...merged[pi].vis, ...merged[pi].edge];
+    if (!all.length) return x1 - x0;
+    let [bx0, by0, bx1, by1] = [Infinity, Infinity, -Infinity, -Infinity];
+    for (const g of all) {
+      bx0 = Math.min(bx0, g[0], g[2]); bx1 = Math.max(bx1, g[0], g[2]);
+      by0 = Math.min(by0, g[1], g[3]); by1 = Math.max(by1, g[1], g[3]);
+    }
+    let t = Infinity;
+    if (ux > 1e-3) t = Math.min(t, (x1 - bx0) / ux);
+    if (ux < -1e-3) t = Math.min(t, (bx1 - x0) / -ux);
+    if (uy > 1e-3) t = Math.min(t, (y1 - by0) / uy);
+    if (uy < -1e-3) t = Math.min(t, (by1 - y0) / -uy);
+    return t + 0.05 * (x1 - x0);
+  };
+  const fly = (pi: number): string => {
+    const p = shown[pi];
+    const sl = slots.get(p.step)!;
+    const v = p.from ?? [0, 0, 1];
+    let [ux, uy] = [dot(v, r), -dot(v, up)];
+    const l = Math.hypot(ux, uy);
+    // a member that points at the camera comes from above instead
+    if (l < 0.3) [ux, uy] = [0, -1];
+    else [ux, uy] = [ux / l, uy / l];
+    // plates and the base only slide a little, members come from outside
+    const t = p.kind === 'plate' || p.kind === 'base' ? 0.06 * (x1 - x0) : away(pi, ux, uy);
+    return `--dx:${f(ux * t)}px;--dy:${f(uy * t)}px;animation-delay:${ms(sl.start)};animation-duration:${ms(sl.dur)}`;
+  };
+  const hidden = (pi: number) => [...outs[pi].until].map(([s, list]) => `<path class="h" style="animation-delay:${ms(landAt(s))}" d="${list.join('')}"/>`);
+  const fill = (fl: Out['fills'][number]) =>
+    fl.until === Infinity ? `<path class="b" d="${fl.d}"/>` : o.animate ? `<path class="b h" style="animation-delay:${ms(landAt(fl.until))}" d="${fl.d}"/>` : '';
+
   // in step order, so a later part paints over an earlier one (only the bolt fills care)
   const order = shown.map((_, i) => i).sort((i, j) => shown[i].step - shown[j].step);
   let nDots = 0;
@@ -294,16 +334,43 @@ export function renderHLR(parts: Part[], o: RenderOpts): { svg: string; faces: n
     const { until, fills } = outs[pi];
     const { vis, edge } = lines[pi];
     if (!vis && !edge && !until.size && !fills.length) continue;
-    const cls = p.accent ? ' class="a"' : '';
-    out.push(o.animate ? `<g${cls} style="--i:${p.step}">` : `<g${cls}>`);
+    nDots += fills.length;
+    const acc = p.accent ? 'a' : '';
+    if (o.animate && p.kind === 'bolts') {
+      // one group per bolt, each line goes with the nearest head
+      const start = slots.get(p.step)!.start;
+      const ids = [...new Set(fills.map((fl) => fl.head))];
+      const ctr = ids.map((hi) => {
+        const cs = heads[hi].corners;
+        return [cs.reduce((s, q) => s + q[0], 0) / cs.length / M * scale, cs.reduce((s, q) => s + q[2], 0) / cs.length / M * scale];
+      });
+      const near = (g: Seg) => {
+        const [mx, my] = [(g[0] + g[2]) / 2, (g[1] + g[3]) / 2];
+        let [best, bd] = [0, Infinity];
+        ctr.forEach(([cx, cy], k) => { const dd = Math.hypot(cx - mx, cy - my); if (dd < bd) [best, bd] = [k, dd]; });
+        return best;
+      };
+      out.push(acc ? `<g class="${acc}">` : '<g>');
+      ids.forEach((hi, k) => {
+        const v = merged[pi].vis.filter((g) => near(g) === k);
+        const e = merged[pi].edge.filter((g) => near(g) === k);
+        out.push(`<g class="k" style="animation-delay:${ms(start + k * BOLT_MS / (o.speed ?? 1))}">`);
+        if (v.length) out.push(`<path d="${d(v)}"/>`);
+        if (e.length) out.push(`<path class="o" d="${d(e)}"/>`);
+        for (const fl of fills) if (fl.head === hi) out.push(fill(fl));
+        out.push('</g>');
+      });
+      // lines with no visible head (rare): with the first bolt
+      if (!ids.length || until.size) out.push(`<g class="k" style="animation-delay:${ms(start)}">`, ...(ids.length ? [] : [vis && `<path d="${vis}"/>`, edge && `<path class="o" d="${edge}"/>`]), ...hidden(pi), '</g>');
+      out.push('</g>');
+      continue;
+    }
+    const cls = [acc, o.animate ? 'f' : ''].filter(Boolean).join(' ');
+    out.push(`<g${cls ? ` class="${cls}"` : ''}${o.animate ? ` style="${fly(pi)}"` : ''}>`);
     if (vis) out.push(`<path d="${vis}"/>`);
     if (edge) out.push(`<path class="o" d="${edge}"/>`);
-    for (const [s, list] of until) out.push(`<path class="h" style="--j:${s}" d="${list.join('')}"/>`);
-    for (const fl of fills) {
-      nDots++;
-      if (fl.until === Infinity) out.push(`<path class="b" d="${fl.d}"/>`);
-      else if (o.animate) out.push(`<path class="b h" style="--j:${fl.until}" d="${fl.d}"/>`);
-    }
+    if (o.animate) out.push(...hidden(pi));
+    for (const fl of fills) out.push(fill(fl));
     out.push('</g>');
   }
   out.push('</svg>');
