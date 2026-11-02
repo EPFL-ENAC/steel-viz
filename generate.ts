@@ -1,11 +1,11 @@
 // "Sculpture" mode: one column on a base plate, arms at random levels and
 // bearings, sometimes a brace under an arm or a secondary beam off it.
 // The solver checks it stands up, fixes it if not, and sizes the members.
-import { add, mul, sub, type V } from './vec.ts';
+import { add, len, mul, sub, type V } from './vec.ts';
 import { solve, type Elem, type FNode } from './solver.ts';
 import type { Catalog, Section } from './sections.ts';
 import {
-  box3, geo, hardware, memberFaces, resolve, supportFace, PINNED, SETBACK,
+  box3, boxOf, geo, hardware, memberBoxes, memberFaces, resolve, supportFace, PINNED, SETBACK,
   type ConnType, type Geo, type Part,
 } from './steel.ts';
 
@@ -33,7 +33,10 @@ export function mulberry32(a: number) {
 }
 
 type Arm = { id: string; z: number; bearing: number; L: number; conn: ConnType; sec: Section; brace?: Brace };
-type Brace = { a: number; drop: number; sec: Section };
+// a: where it meets the arm, from the column. zb: where it meets the column,
+// a height that stays put when sizing changes the depth of the arm.
+type Brace = { a: number; zb: number; sec: Section };
+const drop = (a: Arm) => a.z - a.sec.d - a.brace!.zb;
 type Secondary = { id: string; arm: number; a: number; side: 1 | -1; L: number; conn: ConnType; sec: Section };
 export type Structure = { H: number; col: Section; arms: Arm[]; secs: Secondary[] };
 
@@ -63,7 +66,7 @@ function topology(p: Params, cat: Catalog, rng: () => number): Structure {
   }
   arms.sort((a, b) => a.z - b.z);
   arms.forEach((a, i) => (a.id = `arm${i + 1}`));
-  for (const a of arms) if (rng() < p.braceP) addBrace(a, cat);
+  for (const a of arms) if (rng() < p.braceP) addBrace(a, arms, cat);
   const secs: Secondary[] = [];
   arms.forEach((a, i) => {
     if (rng() >= p.secondaryP) return;
@@ -76,10 +79,16 @@ function topology(p: Params, cat: Catalog, rng: () => number): Structure {
   return { H, col: mid(cat.columns), arms, secs };
 }
 
-function addBrace(a: Arm, cat: Catalog): boolean {
-  const drop = Math.min(0.55 * a.L, a.z - a.sec.d - 600);
-  if (drop < 600) return false;
-  a.brace = { a: Math.round(drop / 50) * 50, drop, sec: mid(cat.tubes) };
+// A brace under the arm, down to the column. It must stay above the arms
+// below it on the same side (or it goes through them), and be long enough
+// that its two gussets don't run into each other.
+const BRACE_MIN = 1000; // mm, along the arm and down the column
+function addBrace(a: Arm, arms: Arm[], cat: Catalog): boolean {
+  const below = arms.filter((b) => b !== a && b.bearing === a.bearing && b.z < a.z).map((b) => b.z + 600);
+  const zb = Math.max(600, ...below);
+  const d = Math.min(0.55 * a.L, a.z - a.sec.d - zb);
+  if (d < BRACE_MIN) return false;
+  a.brace = { a: Math.round(d / 50) * 50, zb: a.z - a.sec.d - d, sec: mid(cat.tubes) };
   return true;
 }
 
@@ -112,7 +121,7 @@ function model(st: Structure, p: Params): Model {
   const zs = new Set([0, st.H]);
   for (const a of st.arms) {
     zs.add(a.z);
-    if (a.brace) zs.add(a.z - a.sec.d - a.brace.drop);
+    if (a.brace) zs.add(a.brace.zb);
   }
   node([0, 0, 0], 'column', true);
   chain('column', [...zs].sort((x, y) => x - y).map((z) => [0, 0, z] as V), st.col, false, w(st.col));
@@ -124,7 +133,7 @@ function model(st: Structure, p: Params): Model {
     const pts = [...at].sort((x, y) => x - y).map((t) => add([0, 0, a.z], mul(h, t)));
     chain(a.id, pts, a.sec, PINNED.includes(a.conn), w(a.sec) + p.load);
     if (a.brace) {
-      const b0: V = [0, 0, a.z - a.sec.d - a.brace.drop];
+      const b0: V = [0, 0, a.brace.zb];
       const b1 = add([0, 0, a.z], mul(h, a.brace.a));
       elems.push({ i: node(b0, a.id + '-brace'), j: node(b1, a.id + '-brace'), p: a.brace.sec, pinI: true, pinJ: true, q: [0, 0, -w(a.brace.sec)] });
       owner.push(a.id + '-brace');
@@ -147,7 +156,7 @@ function fix(st: Structure, m: Model, nodeIdx: number, cat: Catalog, rng: () => 
   const arms = st.arms.filter((a) => who.includes(a.id) || st.secs.some((s) => who.includes(s.id) && st.arms[s.arm] === a));
   for (const a of arms) {
     if (!PINNED.includes(a.conn)) continue;
-    if (!a.brace && rng() < 0.5 && addBrace(a, cat)) {
+    if (!a.brace && rng() < 0.5 && addBrace(a, st.arms, cat)) {
       log.push(`${a.id}: mechanism, added a brace`);
       return true;
     }
@@ -190,7 +199,7 @@ function size(st: Structure, m: Model, res: { N: number; My: number; Mz: number 
   for (const a of st.arms) {
     a.sec = choose(cat.beams, a.id, (s) => s.d >= 200);
     if (a.brace) {
-      const L = Math.hypot(a.brace.a, a.brace.drop);
+      const L = Math.hypot(a.brace.a, drop(a));
       a.brace.sec = choose(cat.tubes, a.id + '-brace', (s) => L / s.rmin < 200);
     }
   }
@@ -216,22 +225,27 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
   out.push({
     id: 'base', step: step++, supports: [],
     faces: box3([0, 0, -tb / 2], [0, 1, 0], [0, 0, 1], st.col.bf + 150, st.col.d + 150, tb),
+    boxes: [boxOf([0, 0, -tb / 2], [0, 1, 0], [0, 0, 1], st.col.bf + 150, st.col.d + 150, tb)],
     dots: bolts ? [-1, 1].flatMap((sx) => [-1, 1].map((sy) => ({ p: [sx * (st.col.bf / 2 + 40), sy * (st.col.d / 2 + 40), 1] as V, n: [0, 0, 1] as V }))) : [],
   });
-  out.push({ id: 'column', step: step++, supports: ['base'], faces: memberFaces(col, seg), dots: [], accent: false });
+  out.push({ id: 'column', step: step++, supports: ['base'], faces: memberFaces(col, seg), boxes: memberBoxes(col), dots: [], accent: false });
 
   // one member and its end connections, in build order: plates, member, bolts
   type End = { S: Geo; sId: string; conn: ConnType; at: 'from' | 'to' };
   const member = (g: Geo, ends: End[]) => {
-    const hws = ends.map((e) => ({ e, r: resolve(g, e.S, e.at) })).map(({ e, r }) => ({ e, hw: hardware(g, e.conn, r) }));
+    const rs = ends.map((e) => resolve(g, e.S, e.at));
+    g.copes = rs.flatMap((r) => (r.cope ? [r.cope] : []));
+    const hws = ends.map((e, i) => ({ e, hw: hardware(g, e.conn, rs[i]) }));
     const supports: string[] = [];
     for (const { e, hw } of hws) {
       if (plates && hw.faces.length) {
-        out.push({ id: `${g.id}-${e.at}-conn`, step: step++, supports: [e.sId], faces: hw.faces, dots: [] });
+        out.push({ id: `${g.id}-${e.at}-conn`, step: step++, supports: [e.sId], faces: hw.faces, boxes: hw.boxes, dots: [] });
         supports.push(`${g.id}-${e.at}-conn`);
       } else supports.push(e.sId);
     }
-    out.push({ id: g.id, step: step++, supports, faces: memberFaces(g, seg), dots: [] });
+    const Lg = len(sub(g.p1, g.p0));
+    const cuts = hws.flatMap(({ e, hw }) => hw.reach.map((x) => (e.at === 'from' ? x : Lg - x)));
+    out.push({ id: g.id, step: step++, supports, faces: memberFaces(g, seg, cuts), boxes: memberBoxes(g), dots: [] });
     const dots = hws.flatMap(({ hw }) => hw.dots);
     if (bolts && dots.length) out.push({ id: `${g.id}-bolts`, step: step++, supports: [g.id, ...supports], faces: [], dots });
   };
@@ -245,7 +259,7 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
     armGeo.set(a.id, g);
     member(g, [{ S: col, sId: 'column', conn: a.conn, at: 'from' }]);
     if (a.brace) {
-      const B: V = [0, 0, a.z - a.sec.d - a.brace.drop];
+      const B: V = [0, 0, a.brace.zb];
       const C = add(add(base, mul(h, a.brace.a)), [0, 0, -a.sec.d]);
       const u = sub(C, B);
       const L = Math.hypot(...u);

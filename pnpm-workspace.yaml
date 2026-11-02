@@ -1,0 +1,9 @@
+# Not a workspace: pnpm 10+ reads its settings from this file.
+# Dependency install scripts only run when listed here.
+allowBuilds:
+  esbuild: true # checks the platform binary shipped as an optional dep
+
+# three-edge-projection lists clipper2-js as a peer, and clipper2-js pulls in
+# Angular. hlr.ts never loads it (it imports ProjectionGenerator.js only), so
+# don't install peers we don't list ourselves.
+autoInstallPeers: false

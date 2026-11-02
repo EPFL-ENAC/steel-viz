@@ -1,13 +1,14 @@
 // node tools/steel-generator/cli.ts --seed 3 --view iso --family aisc --out x.svg
 //   [--detail members|plates|bolts] [--arms 5] [--height 6000] [--load 20]
-//   [--animate] [--frames]
+//   [--animate] [--frames] [--painter] [--flat] [--size px]
 import { readFileSync, writeFileSync } from 'node:fs';
 import { gzipSync } from 'node:zlib';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadCatalog, type Family } from './sections.ts';
 import { DEFAULTS, floating, generate, type Detail } from './generate.ts';
-import { render, VIEWS } from './steel.ts';
+import { render as painter, VIEWS } from './steel.ts';
+import { renderHLR } from './hlr.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const assets = join(here, '../../frontend/src/assets');
@@ -23,6 +24,8 @@ const view = opt('view', 'iso');
 const [az, el] = VIEWS[view] ?? view.split(',').map(Number);
 const out = opt('out', `steel-${opt('seed', '1')}-${view}.svg`);
 const detail = opt('detail', 'bolts') as Detail;
+// exact hidden lines by default; --painter for the old, fast painter's trick
+const render = args.includes('--painter') ? painter : renderHLR;
 
 const t0 = performance.now();
 const cat = loadCatalog(family, ...(tables[family] as [string, string]));
@@ -33,7 +36,9 @@ const r = generate(
   detail,
 );
 const t2 = performance.now();
-const svg = render(r.parts, { az, el, animate: args.includes('--animate') });
+const weights = !args.includes('--flat');
+const size = opt('size', '') ? +opt('size', '') : undefined;
+const svg = render(r.parts, { az, el, animate: args.includes('--animate'), weights, size });
 const t3 = performance.now();
 writeFileSync(out, svg.svg);
 
@@ -41,7 +46,7 @@ const kb = (s: string) => (Buffer.byteLength(s) / 1024).toFixed(1);
 const lost = floating(r.parts);
 console.log(
   [
-    `${out}: seed ${opt('seed', '1')}, ${family}, view ${view}, detail ${detail}`,
+    `${out}: seed ${opt('seed', '1')}, ${family}, view ${view}, detail ${detail}, ${render === painter ? 'painter' : 'hlr'}`,
     `  structure: column ${r.st.col.id}, ${r.st.arms.length} arms (${r.st.arms.map((a) => `${a.sec.id} ${a.conn}${a.brace ? ' + brace ' + a.brace.sec.id : ''}`).join('; ')})` +
       (r.st.secs.length ? `, ${r.st.secs.length} secondary (${r.st.secs.map((s) => `${s.sec.id} ${s.conn}`).join('; ')})` : ''),
     `  solver: ${r.ok ? 'stable' : 'MECHANISM'}, ${r.nodes} nodes, ${r.solves} solves`,
@@ -56,7 +61,7 @@ if (args.includes('--frames')) {
   const last = Math.max(...r.parts.map((p) => p.step));
   for (const pct of [25, 50, 75, 100]) {
     const f = out.replace(/\.svg$/, `-${pct}.svg`);
-    writeFileSync(f, render(r.parts, { az, el, maxStep: Math.round((last * pct) / 100) }).svg);
+    writeFileSync(f, render(r.parts, { az, el, maxStep: Math.round((last * pct) / 100), weights }).svg);
     console.log(`  frame ${pct}%: ${f}`);
   }
 }

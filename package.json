@@ -1,1 +1,12 @@
-{ "type": "module", "private": true }
+{
+  "type": "module",
+  "private": true,
+  "dependencies": {
+    "three": "0.187.0",
+    "three-edge-projection": "github:gkjohnson/three-edge-projection#v0.0.11",
+    "three-mesh-bvh": "0.9.17"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.12"
+  }
+}
