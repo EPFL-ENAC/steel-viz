@@ -46,7 +46,7 @@ const members = computed(() => {
 });
 const column = computed(() => {
   const st = built.value?.r.st;
-  return st ? `${st.form}, ${st.cols.length > 1 ? st.cols.length + ' × ' : ''}${st.col.id}${st.splice ? ' / ' + st.splice.sec.id : ''}, ${(st.H / 1000).toFixed(2)} m${st.studs ? ', studs' : ''}` : '';
+  return st ? `${st.form}, ${st.cols.length > 1 ? st.cols.length + ' × ' : ''}${st.col.id}${st.splice ? ' / ' + st.splice.sec.id : ''}, ${(st.H / 1000).toFixed(2)} m` : '';
 });
 
 // ---- the view

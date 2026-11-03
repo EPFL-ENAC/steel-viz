@@ -34,11 +34,10 @@ Trusses and tension rods also come from a draw of their own, after the fix loop:
 
 The solver checks the structure again with them and sizes the chords, the diagonals and the rods. If the structure does not stand up anymore, they are left out.
 
-Then come posts, beam splices and shear studs, each from a draw of its own (`postP`, `beamSpliceP` and `studP` in `Params`, 0.3 each). With the three at 0, a seed gives the same parts as before they existed.
+Then come posts and beam splices, each from a draw of its own (`postP` and `beamSpliceP` in `Params`, 0.3 each). With both at 0, a seed gives the same parts as before they existed.
 
 - Post: a short column, 400 to 900 mm high, on the top flange of a beam. It has a base plate bolted to the flange with 4 bolts, and a cap plate. It is free at the top. It goes on an arm that sticks out (with no rod and no truss, and only if the column has room above it), or on a bay beam of the top storey. At most 2 in a structure. Its flanges are not wider than the beam flange. The solver takes it: it is fixed on the beam, and it brings the load of 800 mm of beam as a point load at its top. The solver sizes it, and if the structure does not stand up with the posts, they are left out.
 - Beam splice: a bay beam of 2000 mm or more, with no truss, is cut in two pieces. Bolted plates on both flanges and on the web join them, the same plates as a flange splice of a column. The cut is between 20 and 40 % of the span from one end, where the moment is small, and clear of the end plates, the braces, the secondary beams and a post. A box gets it less often, because it has many bay beams. It is a full strength splice, so the solver keeps the beam in one piece.
-- Shear studs: headed studs welded on the top flange of the beams, in pairs about every 300 mm (one row on a flange under 120 mm). They stay away from the end plates, a splice, a post, a rod and the secondary beams, and a stud that hits another part is left out. They are not in the solver. Like the bolts, they are hidden at 160 px or less.
 
 A detail plate that would go through another part is left out. For example, a continuity plate on the side of the web where another beam frames in.
 
@@ -46,7 +45,7 @@ Parts must not go through each other. A secondary beam is coped (its flanges cut
 
 It can also draw a real test of RESSLab Hub instead of a seed: a specimen. For now it draws a beam-to-column subassembly (the test of one connection): one column on a base plate, with one or two beams. That's what the `connection` table of the hub describes, 99 of its 100 tests.
 
-The sections are the real ones, so there is no fix loop and no sizing. The solver runs once, and the log gives the max ratio under `--load`, only as information. The cap plate and the continuity plates are drawn. Splices, foot gussets, trusses, rods, posts and studs are not.
+The sections are the real ones, so there is no fix loop and no sizing. The solver runs once, and the log gives the max ratio under `--load`, only as information. The cap plate and the continuity plates are drawn. Splices, foot gussets, trusses, rods and posts are not.
 
 `specimen.ts` reads two kinds of JSON file. The first one is a record of the hub `connection` table, as the hub API gives it (numbers, `null`) or as a row of `connections.csv` (strings, `NA`). A file with a `specimen_type` is a hub record. The two files in `specimens/` are hub records (resslab-hub-data is public domain). The second one is our own `Specimen`, for a test that is not in the hub:
 
@@ -144,7 +143,7 @@ Files:
 - `sections.ts`: section properties and the CSV tables, plus the round rods (not in the hub tables).
 - `sections/`, `tables.ts`: the CSV tables, and how Node reads them.
 - `solver.ts`: 3D frame solver (6 DOF per node, pinned ends, finds mechanisms).
-- `generate.ts`: topology, the fix loop, trusses and rods, posts, beam splices and studs, and the sizing. Also the specimen path (`buildSpecimen`).
+- `generate.ts`: topology, the fix loop, trusses and rods, posts and beam splices, and the sizing. Also the specimen path (`buildSpecimen`).
 - `specimen.ts`, `specimens/`: a real test as input (the `Specimen` type, the section lookup, the hub record reader), and two hub records as examples and test data.
 - `steel.ts`: geometry (profiles, copes, plates, clevis, bolts), camera and the painter renderer.
 - `clash.ts`: do two parts go through each other (each part as a few boxes).

@@ -24,13 +24,12 @@ export type Kind = 'base' | 'column' | 'plate' | 'member' | 'bolts';
 export type Part = { id: string; step: number; faces: Face[]; dots: Dot[]; supports: string[]; boxes?: Box[]; accent?: boolean; kind?: Kind; from?: V };
 
 // Less detail when the drawing is small: at 160 px or less bolts are only
-// noise (and the shear studs with them), at 64 px plates too, at 40 px the
-// secondary beams.
+// noise, at 64 px plates too, at 40 px the secondary beams.
 export const DETAIL = { bolts: 160, plates: 64, secondaries: 40 };
 export function forSize(parts: Part[], size?: number): Part[] {
   if (!size) return parts;
   return parts
-    .filter((p) => !(size <= DETAIL.bolts && (p.kind === 'bolts' || /-studs$/.test(p.id))))
+    .filter((p) => !(size <= DETAIL.bolts && p.kind === 'bolts'))
     .filter((p) => !(size <= DETAIL.plates && p.kind === 'plate'))
     .filter((p) => !(size <= DETAIL.secondaries && /^sec\d/.test(p.id)))
     .map((p) => (size <= DETAIL.bolts && p.dots.length ? { ...p, dots: [] } : p));
@@ -105,9 +104,8 @@ export const profRect = (h: number, b: number): P2[][] => [
 ];
 
 // a round bar, as 16 sides: few enough to stay light, enough to read as round
-// (n sides for small things, like the studs)
-export const profRound = (D: number, n = 16): P2[][] => [
-  ccw([...Array(n).keys()].map((i): P2 => [(D / 2) * Math.cos((i * 2 * Math.PI) / n), (D / 2) * Math.sin((i * 2 * Math.PI) / n)])),
+export const profRound = (D: number): P2[][] => [
+  ccw([...Array(16).keys()].map((i): P2 => [(D / 2) * Math.cos((i * Math.PI) / 8), (D / 2) * Math.sin((i * Math.PI) / 8)])),
 ];
 
 // ---------------------------------------------------------------- frames

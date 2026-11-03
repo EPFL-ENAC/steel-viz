@@ -12,8 +12,8 @@ import { add, cross, len, mul, norm, sub, type V } from './vec.ts';
 import { solve, type Elem, type FNode } from './solver.ts';
 import type { Catalog, Section } from './sections.ts';
 import {
-  box3, boxOf, flat, geo, hardware, memberBoxes, memberFaces, prism, profRound, resolve, splicePlates, stiffener, supportFace, BEARING_T, EDGE, PINNED, SETBACK, SPLICE_HALF,
-  type Box, type ConnType, type Geo, type P2, type Part, type Plate,
+  box3, boxOf, flat, geo, hardware, memberBoxes, memberFaces, resolve, splicePlates, stiffener, supportFace, BEARING_T, EDGE, PINNED, SETBACK, SPLICE_HALF,
+  type ConnType, type Geo, type P2, type Part, type Plate,
 } from './steel.ts';
 import { overlap } from './clash.ts';
 import { BEAM_CONNS, findSection, type Specimen } from './specimen.ts';
@@ -29,12 +29,11 @@ export type Params = {
   secondaryP: number;
   postP: number; // the chance of a post, on each beam that can take one
   beamSpliceP: number; // the chance of a splice, on each long bay beam (less on a box)
-  studP: number; // the chance that the beams get shear studs, for the whole structure
   seg: number;
   form: Form | 'mix'; // mix: the seed picks the form
   specimen?: Specimen; // a real test: seed, form, arms, height, braceP and secondaryP are not used
 };
-export const DEFAULTS: Params = { seed: 1, arms: 8, height: 2500, load: 100, fy: 345, braceP: 0.3, secondaryP: 0.35, postP: 0.3, beamSpliceP: 0.3, studP: 0.3, seg: 400, form: 'mix' };
+export const DEFAULTS: Params = { seed: 1, arms: 8, height: 2500, load: 100, fy: 345, braceP: 0.3, secondaryP: 0.35, postP: 0.3, beamSpliceP: 0.3, seg: 400, form: 'mix' };
 
 export function mulberry32(a: number) {
   return () => {
@@ -88,7 +87,6 @@ type Base = 'none' | 'flange' | 'all';
 // id: the specimen id. continuity: false leaves out the continuity plates.
 export type Structure = {
   form: Form | 'specimen'; id?: string; H: number; col: Section; cols: Col[]; arms: Arm[]; secs: Secondary[]; splice?: Splice; base?: Base; continuity?: boolean;
-  studs?: boolean; // shear studs on the top flange of the beams
 };
 const colId = (i: number) => (i ? `column${i + 1}` : 'column');
 const baseId = (i: number) => (i ? `base${i + 1}` : 'base');
@@ -782,7 +780,6 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
   // one member and its end connections, in build order: plates, member, bolts
   type End = { S: Geo; sId: string; conn: ConnType; at: 'from' | 'to' };
   // from: the direction the member (and its plates) come from
-  // it gives back how far its end plates reach along it, at each end
   const member = (g: Geo, ends: End[], from: V) => {
     const rs = ends.map((e) => resolve(g, e.S, e.at));
     g.copes = rs.flatMap((r) => (r.cope ? [r.cope] : []));
@@ -799,14 +796,9 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
     out.push({ id: g.id, step: step++, supports, kind: 'member', from, faces: memberFaces(g, seg, cuts), boxes: memberBoxes(g), dots: [] });
     const dots = hws.flatMap(({ hw }) => hw.dots);
     if (bolts && dots.length) out.push({ id: `${g.id}-bolts`, step: step++, supports: [g.id, ...supports], kind: 'bolts', faces: [], dots });
-    const reach = { from: 0, to: 0 };
-    for (const { e, hw } of hws) reach[e.at] = Math.max(0, ...hw.reach) + (e.conn === 'end_plate' ? 25 : 0);
-    return reach;
   };
 
   const armGeo = new Map<string, Geo>();
-  // each piece of beam, for the studs, with how far its end plates reach
-  const pieces: { a: Arm; g: Geo; ends: [number, number] }[] = [];
   // a post on the top flange at T, on the beam piece P: base plate, post, cap, bolts
   const post = (a: Arm, T: V, P: Geo) => {
     const { h, sec } = a.post!;
@@ -846,8 +838,7 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
     // an arm slides in along its axis, a bay beam is lowered between its columns
     if (a.splice === undefined) {
       armGeo.set(a.id, g);
-      const r = member(g, ends, a.to === undefined ? h : [0, 0, 1]);
-      pieces.push({ a, g, ends: [r.from, r.to] });
+      member(g, ends, a.to === undefined ? h : [0, 0, 1]);
     } else {
       // two pieces, each on its column, then the splice plates on both
       const cut = add(o, mul(h, a.splice));
@@ -855,8 +846,8 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
       const g2 = geo(farId(a), a.sec, cut, p1, true);
       armGeo.set(g1.id, g1);
       armGeo.set(g2.id, g2);
-      pieces.push({ a, g: g1, ends: [member(g1, [ends[0]], [0, 0, 1]).from, 0] });
-      pieces.push({ a, g: g2, ends: [0, member(g2, [ends[1]], [0, 0, 1]).to] });
+      member(g1, [ends[0]], [0, 0, 1]);
+      member(g2, [ends[1]], [0, 0, 1]);
       const sid = `${a.id}-splice`;
       const k = splicePlates(g1, g2, 'flange');
       if (plates) out.push({ id: sid, step: step++, supports: [g1.id, g2.id], kind: 'plate', from: [0, 0, 1], faces: k.faces, boxes: k.boxes, dots: [] });
@@ -942,20 +933,10 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
     boxes.push(...part.boxes!);
     kept.push(part);
   }
-  // the studs last, so they make room for all the rest
-  const studded = new Map<string, Part>();
-  if (st.studs && plates) {
-    for (const { a, g, ends } of pieces) {
-      const sp = studs(st, a, g, ends, boxes);
-      if (sp) studded.set(g.id, sp);
-    }
-  }
   const res: Part[] = [];
   for (const q of out) {
     res.push(q);
     res.push(...kept.filter((k) => extras.find((e) => e.part === k)!.after === q.id));
-    const sp = studded.get(q.id);
-    if (sp) res.push(sp);
   }
   res.forEach((q, i) => (q.step = i));
   return res;
@@ -964,59 +945,6 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
 // the piece of a beam at t mm along it: the far piece after a beam splice
 const pieceAt = (armGeo: Map<string, Geo>, a: Arm, t: number): Geo =>
   armGeo.get(a.splice !== undefined && t > a.splice ? farId(a) : a.id)!;
-
-// Shear studs on the top flange of a beam piece, in pairs about every
-// STUD_PITCH, in the free stretches: away from the end plates, a splice, a
-// post, a rod and the secondary beams. A stud that hits a part already there
-// is left out.
-const STUD_PITCH = 300;
-const STUD = { d: 19, h: 90, head: 32, ht: 10 };
-function studs(st: Structure, a: Arm, g: Geo, ends: [number, number], boxes: Box[]): Part | undefined {
-  const L = len(sub(g.p1, g.p0));
-  const s0 = start(st, a);
-  const h = hdir(a.bearing);
-  // along the arm, from its start, for this piece
-  const t0 = (g.p0[0] - s0[0]) * h[0] + (g.p0[1] - s0[1]) * h[1];
-  const busy: [number, number][] = [];
-  if (a.splice !== undefined) busy.push([a.splice - SPLICE_HALF - 50, a.splice + SPLICE_HALF + 50]);
-  if (a.post) {
-    const half = a.post.sec.d / 2 + 2 * EDGE + 50;
-    busy.push([a.post.a - half, a.post.a + half]);
-  }
-  if (a.rod) busy.push([a.rod.a - 150, a.rod.a + 150]);
-  for (const s of st.secs) if (st.arms[s.arm] === a) busy.push([s.a - s.sec.bf / 2 - 50, s.a + s.sec.bf / 2 + 50]);
-  // free stretches along the piece, in mm from g.p0
-  let free: [number, number][] = [[ends[0] + 50, L - ends[1] - 50]];
-  for (const [lo, hi] of busy) {
-    const [b0, b1] = [lo - t0, hi - t0];
-    free = free.flatMap(([f0, f1]): [number, number][] => (b1 <= f0 || b0 >= f1 ? [[f0, f1]] : [[f0, b0], [b1, f1]]));
-  }
-  const up = mul(g.w, -1);
-  const top = add(g.p0, mul(g.w, g.sh - g.sec.d / 2));
-  const vs = g.sec.bf < 120 ? [0] : [-1, 1].map((k) => k * Math.min(50, g.sec.bf / 2 - 25));
-  const faces: Part['faces'] = [];
-  const bs: Box[] = [];
-  for (const [f0, f1] of free) {
-    if (f1 - f0 < 0) continue;
-    const n = Math.floor((f1 - f0) / STUD_PITCH) + 1;
-    const step = n > 1 ? (f1 - f0) / (n - 1) : 0;
-    for (let i = 0; i < n; i++) {
-      const t = n > 1 ? f0 + i * step : (f0 + f1) / 2;
-      for (const v of vs) {
-        const b = add(add(top, mul(g.u, t)), mul(g.v, v));
-        const box = boxOf(add(b, mul(up, (STUD.h + STUD.ht) / 2)), g.u, up, STUD.head, STUD.head, STUD.h + STUD.ht);
-        if (boxes.some((q) => overlap(box, q))) continue;
-        const neck = add(b, mul(up, STUD.h));
-        faces.push(...prism(b, neck, profRound(STUD.d, 6), up, g.v, g.u, 1e9));
-        faces.push(...prism(neck, add(neck, mul(up, STUD.ht)), profRound(STUD.head, 6), up, g.v, g.u, 1e9));
-        bs.push(box);
-      }
-    }
-  }
-  if (!faces.length) return undefined;
-  boxes.push(...bs);
-  return { id: `${g.id}-studs`, step: 0, supports: [g.id], kind: 'plate', from: [0, 0, 1], faces, boxes: bs, dots: [] };
-}
 
 // The small plates that make a frame look built: a cap on each column, plates
 // across the column where a moment beam pulls on its flanges, stiffeners in a
@@ -1206,12 +1134,8 @@ export function generate(p0: Partial<Params>, cat: Catalog, detail: Detail = 'bo
       log.push(`splice at ${st.splice.z} mm (${st.splice.kind}), ${st.col.id} below, ${st.splice.sec.id} above`);
     } else st.splice = undefined;
   }
-  // splices in the bay beams and shear studs: geometry only, each from a draw of its own
+  // splices in the bay beams: geometry only, from a draw of their own
   if (ok) addBeamSplices(st, p, mulberry32(p.seed * 32452843 + 11), log);
-  if (ok && p.studP > 0 && mulberry32(p.seed * 67867967 + 19)() < p.studP) {
-    st.studs = true;
-    log.push('shear studs on the beams');
-  }
   log.push(`${sized} sizing passes, final max ratio ${ratio.toFixed(2)} (limit ${LIMIT})`);
   const t2 = performance.now();
   const ps = parts(st, detail, p.seg);
