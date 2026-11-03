@@ -17,18 +17,28 @@ It builds a steel structure from a seed, in one of three forms:
 
 Each bay storey gets its own bracing: none (moment connections), knee braces at both ends, a chevron (two braces up to the middle of the beam) or one diagonal. `--form` picks the form (`mix` lets the seed pick it, a tree seed gives the same tree in both).
 
-A small frame solver checks that the structure stands up. If it does not, the generator adds a brace or changes a pinned connection to a moment connection. Then it sizes each member from the AISC or EU section tables of RESSLab Hub. They are copied in `sections/` (from `frontend/src/assets/connection/` and `frontend/src/assets/hss/` in the hub). Copy them again when the hub changes them.
+A small frame solver checks that the structure stands up. If it does not, the generator adds a brace or changes a pinned connection to a moment connection. Then it sizes each member from the AISC or EU section tables in `sections/`. The I and tube tables are copies of RESSLab Hub (from `frontend/src/assets/connection/` and `frontend/src/assets/hss/` in the hub). Copy them again when the hub changes them. The channel and angle tables are ours until the hub has them. `sections/README.md` says where they come from and how to make them again. The tees are not in a table: a tee is an I cut in two (`W16X50` gives `WT8X25`, `IPE 300` gives `1/2 IPE 300`).
+
+Some members get another shape, from a draw of their own. `shapeP` gives the chance (0.35 by default, `--shapes` in the CLI, "Channels, angles, tees" in the playground):
+
+| member | usual shape | other shape |
+|---|---|---|
+| the braces of an arm (all of them, one draw per arm) | square tube, on a gusset with a knife plate | double angle (two equal angles back to back, legs from 75 to about 200 mm), bolted on a gusset plate that sits in the gap between the angles (`gusset_lap`) |
+| a secondary beam | I | channel (C, MC, UPN, UPE), coped like an I, on the same shear tab |
+| a truss bottom chord | I | tee (WT, or half an IPE or HE), flange up, stem down. The diagonals land on its flange like on an I. |
+
+The sizing rules are the same for both shapes: L / r under 200 for a brace, a secondary fits between the flanges of its arm, the same depth limits for a chord. A tee chord gets only one continuity plate in the column and no stiffener at the truss nodes, because it has no bottom flange. Each draw is seeded from the member id, so it takes nothing from the other draws. With `--shapes 0`, a seed gives only I, tube and rod members, as before these shapes.
 
 The sizing works in two steps, with public formulas from EC3 (Eurocode 3) and AISC 360-22:
 
 1. The whole structure: the solver finds the elastic critical load factor `alphaCr`. It is how many times the load the structure takes before it buckles as a whole (a buckling analysis with the geometric stiffness, in `solver.ts`). The moments are then multiplied by `1 / (1 - 1/alphaCr)`, for the sway effects (EC3 5.2.2). This rule needs `alphaCr >= 3`. If it is lower, the member with the most strain energy in the buckling mode gets a heavier section, and the solver runs again.
 2. Each member, in `checks.ts`: flexural buckling (AISC E3), lateral torsional buckling of I sections (F2), weak axis bending (F6), and the two together with the axial force (H1-1). The buckling length is the member length, because step 1 already has the sway. The ratio must stay under 0.6. There are no AISC phi factors, the 0.6 is the margin.
 
-Not checked: shear, local buckling of thin plates (E7, F3), torsional buckling (E4), and notional loads (the small side loads for the frame imperfections). Cb is 1, which is on the safe side for cantilevers. The same AISC formulas size the EU sections too. A few trees with a cantilever truss stay under `alphaCr` 3 (2 of the 240 seeds of the tests): the bottom chord sways out of the truss plane, and nothing braces it sideways. The log says it.
+Not checked: shear, local buckling of thin plates (E7, F3), torsional buckling (E4), and notional loads (the small side loads for the frame imperfections). The channels, double angles and tees take their full plastic moment: no lateral torsional buckling for them (F2 for a channel, F9 for a tee), and E4 is the check that matters most for a double angle or a tee. Cb is 1, which is on the safe side for cantilevers. The same AISC formulas size the EU sections too. A few trees with a cantilever truss stay under `alphaCr` 3 (eu tree 19 of the 240 structures of the tests, and also eu tree 7 with `shapeP` 0): the bottom chord sways out of the truss plane, and nothing braces it sideways. The log says it.
 
 Then come the small details, from a random draw of their own, so a seed keeps the same structure:
 
-- Column splice (on about a third of the structures): above a free level between 30 and 70 % of the height, the columns change to a lighter section, sized from the forces up there. A bearing splice is a cap plate and a base plate bolted at the corners. A flange splice has bolted plates on both flanges and on the web, with fill plates when the two sections don't have the same depth.
+- Column splice (on about a third of the structures): above a free level between 30 and 70 % of the height, the columns change to a lighter section, sized from the forces up there. A bearing splice is a cap plate and a base plate bolted at the corners. A flange splice has bolted plates on both flanges and on the web, with fill plates when the two sections don't have the same depth. If the plates would go through a brace or its gusset (a steep brace, or a wide double angle), the splice moves to the nearest free height, or is left out.
 - A cap plate on top of each column.
 - Continuity plates: plates across the column, at the flange levels of each moment beam that lands on a column flange.
 - Stiffeners in a beam, over the point where a brace pushes on it.
@@ -48,7 +58,7 @@ Then come posts and beam splices, each from a draw of its own (`postP` and `beam
 
 A detail plate that would go through another part is left out. For example, a continuity plate on the side of the web where another beam frames in.
 
-Parts must not go through each other. A secondary beam is coped (its flanges cut back) where it meets the flanges of its arm, and its plate fits between those flanges. A brace stays above the arms under it on the same face of its column, and is long enough that its two gussets don't touch. `clash.ts` checks this with boxes, and `geometry.test.ts` runs it on every form, 240 structures.
+Parts must not go through each other. A secondary beam is coped (its flanges cut back) where it meets the flanges of its arm, and its plate fits between those flanges. A brace stays above the arms under it on the same face of its column, and is long enough that its two gussets don't touch. `clash.ts` checks this with boxes, and `geometry.test.ts` runs it on every form, 240 structures, and on 72 more with every member in its other shape (`shapeP` 1).
 
 It can also draw a real test of RESSLab Hub instead of a seed: a specimen. For now it draws a beam-to-column subassembly (the test of one connection): one column on a base plate, with one or two beams. That's what the `connection` table of the hub describes, 99 of its 100 tests.
 
@@ -147,8 +157,8 @@ three-edge-projection is not on npm, it comes from GitHub (tag `v0.0.11`). Impor
 Files:
 
 - `vec.ts`: vector helpers.
-- `sections.ts`: section properties and the CSV tables, plus the round rods (not in the hub tables).
-- `sections/`, `tables.ts`: the CSV tables, and how Node reads them.
+- `sections.ts`: section properties (I, tube, rod, channel, double angle, tee) from the CSV tables. The rods and the tees are made in code.
+- `sections/`, `tables.ts`: the CSV tables (see `sections/README.md`), and how Node reads them.
 - `solver.ts`: 3D frame solver (6 DOF per node, pinned ends, finds mechanisms), and the buckling analysis (`alphaCr`).
 - `checks.ts`: the member checks (AISC 360-22 E3, F2, F6, H1-1).
 - `generate.ts`: topology, the fix loop, trusses and rods, posts and beam splices, and the sizing. Also the specimen path (`buildSpecimen`).
@@ -195,6 +205,8 @@ const { svg } = render(parts, { az, el, animate: true }); // an SVG that builds 
 
 For the EU family, pass `european-sections.csv` and `hss-european-sections.csv` with `'eu'`. A test of the hub goes through `fromHubConnection(record)`, then `generate({ specimen }, catalog)`.
 
+The hub has no channel or angle table, so this catalog has no channels and no double angles: the braces and the secondary beams keep their tube and I sections. The tees still come, because they are made from the I table. To get the same drawing as here, also pass the channel and angle CSV files of `sections/` (`loadCatalog('aisc', iCsv, hssCsv, channelCsv, angleCsv)`). For no other shape at all, pass `shapeP: 0` to `generate()`.
+
 The 3D entry needs three.js, three-mesh-bvh and three-edge-projection. They are optional peer dependencies, so the light entry installs none of them. To use the 3D entry, the hub adds them itself, with the versions of our `package.json`:
 
 ```json
@@ -235,6 +247,6 @@ To make a release (a human does it):
 `pnpm dev` serves the playground on `PLAYGROUND_PORT` (5180 when it is not set). With wtx, each worktree runs it in its own `playground` pane, on its own port. `wtx open playground` opens it.
 
 - It reloads on each save. A change in `app/` is a hot reload. A change in the generator, a renderer or a table reloads the page.
-- The settings (seed, form, view, viewer...) live in the URL hash. A reload keeps them, and you can send the link.
+- The settings (seed, form, shapes, view, viewer...) live in the URL hash. A reload keeps them, and you can send the link.
 - Above the controls: the branch, its commit, and if it has changes not committed.
 - The "vs main" viewer draws the same structure twice: with this checkout on the left, and with the code of `main` on the right (the merge base, so only what the branch changed). The title block says "same drawing" or what differs. `PLAYGROUND_BASE` picks another base branch. That code comes from `git archive`, in `node_modules/.cache/steel-viz-base/`.

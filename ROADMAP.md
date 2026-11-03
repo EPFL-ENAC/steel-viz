@@ -4,7 +4,10 @@ What we plan to do next. A checked item is done.
 
 ## Generator
 
-- [ ] Channel, angle and WT profiles (C, L and T sections), with their own section tables.
+- [x] Channel, angle and WT profiles (C, L and T sections), with their own section tables. Double angle braces, channel secondaries and tee truss chords (`shapeP`, `--shapes`).
+- [ ] Move the channel and angle tables to RESSLab Hub when the hub needs them (its `steel_braces.csv` has angle and channel braces). Paired worktree and a hub pull request, then the usual rule: change them in the hub first.
+- [ ] Tee chords with the stem up, and the gussets on the stem.
+- [ ] Double angle truss diagonals, unequal angles, single angle braces.
 - [x] Bolted beam splice and posts.
 - [ ] Shear studs, with a slab or a deck on the beams. Without one they look like loose bolts.
 - [x] Trusses on trees. Today a tree never gets one: its arms are too short, too low, or have an arm below them on the same face. Allow a lower truss there.
@@ -17,8 +20,9 @@ What we plan to do next. A checked item is done.
 - [x] Buckling: `alphaCr` of the whole structure, and member checks with buckling (AISC 360-22 E3, F2, H1-1).
 - [ ] Notional loads (small side loads for the frame imperfections, EC3 5.3).
 - [ ] A shear check.
+- [ ] Checks for the channels, double angles and tees: lateral torsional buckling (F2 for a channel, F9 for a tee) and flexural-torsional buckling (E4). Today they take their full plastic moment.
 - [ ] EC3 member checks for the `eu` family. Today the AISC formulas size both.
-- [ ] A lateral brace for the bottom chord of a cantilever truss. Without it, eu trees 7 and 19 stay under `alphaCr` 3.
+- [ ] A lateral brace for the bottom chord of a cantilever truss. Without it, eu tree 19 stays under `alphaCr` 3 (and eu tree 7 with `--shapes 0`).
 
 ## Use in RESSLab Hub
 
@@ -45,6 +49,7 @@ The specimen input draws the beam-to-column tests of the hub `connection` table.
 - [ ] Braces and EBF. The hub tables have no frame layout (bay, storey), so we can't build the frame from them yet.
 - [ ] "Exterior - Frame" (one test in the hub).
 - [ ] A specimen input in the playground: paste a hub record, or pick one from a list.
+- [ ] Specimens with channel, angle or tee sections. Today `findSection` and `all` know only the I sections and the tubes.
 
 ## Repo
 
