@@ -1,0 +1,16 @@
+{
+  // Builds the package into lib/: JS and .d.ts, one file per module.
+  // Only the two entries and what they import. pnpm run build:lib
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "rewriteRelativeImportExtensions": true,
+    "outDir": "lib",
+    "rootDir": ".",
+    // no Node types: the package runs in the browser
+    "types": []
+  },
+  "include": [],
+  "files": ["index.ts", "3d.ts", "three-edge-projection.d.ts"]
+}

@@ -165,16 +165,6 @@ settings:
 importers:
 
   .:
-    dependencies:
-      three:
-        specifier: 0.187.0
-        version: 0.187.0
-      three-edge-projection:
-        specifier: github:gkjohnson/three-edge-projection#v0.0.11
-        version: https://codeload.github.com/gkjohnson/three-edge-projection/tar.gz/cc3904df2b583372cce767d6daa70582f99d5ed1(three-mesh-bvh@0.9.17(three@0.187.0))(three@0.187.0)
-      three-mesh-bvh:
-        specifier: 0.9.17
-        version: 0.9.17(three@0.187.0)
     devDependencies:
       '@types/node':
         specifier: 24.19.2
@@ -188,6 +178,15 @@ importers:
       esbuild:
         specifier: 0.25.12
         version: 0.25.12
+      three:
+        specifier: 0.187.0
+        version: 0.187.0
+      three-edge-projection:
+        specifier: github:gkjohnson/three-edge-projection#v0.0.11
+        version: https://codeload.github.com/gkjohnson/three-edge-projection/tar.gz/cc3904df2b583372cce767d6daa70582f99d5ed1(three-mesh-bvh@0.9.17(three@0.187.0))(three@0.187.0)
+      three-mesh-bvh:
+        specifier: 0.9.17
+        version: 0.9.17(three@0.187.0)
       typescript:
         specifier: 7.0.2
         version: 7.0.2

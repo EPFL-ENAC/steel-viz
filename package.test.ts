@@ -1,0 +1,33 @@
+// The two entries of the package. The light entry (index.ts) is for a loading
+// animation in RESSLab Hub: it must not load three.js, or any other package,
+// or a Node API. esbuild bundles each entry for the browser and lists the
+// files that went in.
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { build } from 'esbuild';
+
+const inputs = async (entry: string) => {
+  const r = await build({
+    entryPoints: [entry],
+    absWorkingDir: import.meta.dirname,
+    bundle: true,
+    write: false,
+    metafile: true,
+    format: 'esm',
+    platform: 'browser', // a node: import fails the build
+    logLevel: 'silent',
+  });
+  return Object.keys(r.metafile.inputs);
+};
+
+test('the light entry loads no package and no Node API', async () => {
+  const files = await inputs('index.ts');
+  assert.ok(files.includes('steel.ts') && files.includes('generate.ts'));
+  assert.deepEqual(files.filter((f) => f.includes('node_modules')), []);
+});
+
+test('the 3D entry loads three.js', async () => {
+  // so the test above can fail: the same bundle finds three.js here
+  const files = await inputs('3d.ts');
+  assert.ok(files.some((f) => /node_modules\/(.*\/)?three\/build\//.test(f)), 'three.js is not in the 3D bundle');
+});

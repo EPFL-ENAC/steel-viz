@@ -5,7 +5,7 @@ Steel structures drawn like a technical drawing, with a 3D view and a build anim
 What RESSLab Hub uses it for:
 
 - Now: the logo. The hub takes an exported SVG, not this code.
-- Maybe later: the build animation as a loading animation, and a view of each experiment in the hub. The input for it is ready: `--specimen` draws a beam-to-column test from its real sections, not from a seed (see below).
+- Next: the build animation as a loading animation, then a view of each experiment in the hub. For that, the repo is also a package with two entries (see "Use as a package" below). The input for the experiments is ready: `--specimen` draws a beam-to-column test from its real sections, not from a seed (see below).
 
 What comes next is in [ROADMAP.md](ROADMAP.md).
 
@@ -148,8 +148,74 @@ Files:
 - `three-edge-projection.d.ts`: types for the part of three-edge-projection that `hlr.ts` uses (the library ships none).
 - `cli.ts`: the command line.
 - `app/`, `vite.config.ts`: the playground, a Vue app served by Vite.
+- `index.ts`, `3d.ts`: the two entries of the package (see below).
+- `package.test.ts`: checks that the light entry loads no three.js, no other package and no Node API.
+- `tsconfig.lib.json`, `release.sh`: the package build, and the release tag.
 
-`dist/` and the SVGs are build output, they stay out of git.
+`dist/`, `lib/` and the SVGs are build output, they stay out of git. `lib/` is only in the commit of a release tag.
+
+## Use as a package (RESSLab Hub)
+
+The repo is also the package `@epfl-enac/steel-viz`. It is not on npm. The hub takes it from a git tag:
+
+```json
+"@epfl-enac/steel-viz": "github:EPFL-ENAC/steel-viz#v0.1.0"
+```
+
+It has two entries:
+
+- `@epfl-enac/steel-viz`: the light entry. `generate`, `loadCatalog`, the painter `render`, `timeline`, `camera`, `VIEWS`, and the specimen input (`toSpecimen`, `fromHubConnection`). It loads no three.js and no other package. `package.test.ts` checks it. Use it for the loading animation.
+- `@epfl-enac/steel-viz/3d`: `renderHLR` (the exact drawing) and `createViewer` (the WebGL view). It loads three.js. Import it with a dynamic `import()`, only on the page that needs it, so three.js stays out of the main bundle.
+
+The package has no section table. The hub has the same CSV files (ours are copies of them), so it passes their text to `loadCatalog()`:
+
+```ts
+import iCsv from '@/assets/connection/aisc-sections.csv?raw';
+import hssCsv from '@/assets/hss/hss-aisc-sections.csv?raw';
+import { generate, loadCatalog, render, VIEWS } from '@epfl-enac/steel-viz';
+
+const catalog = loadCatalog('aisc', iCsv, hssCsv);
+const { parts } = generate({ seed: 5 }, catalog);
+const [az, el] = VIEWS.iso;
+const { svg } = render(parts, { az, el, animate: true }); // an SVG that builds itself with CSS
+```
+
+For the EU family, pass `european-sections.csv` and `hss-european-sections.csv` with `'eu'`. A test of the hub goes through `fromHubConnection(record)`, then `generate({ specimen }, catalog)`.
+
+The 3D entry needs three.js, three-mesh-bvh and three-edge-projection. They are optional peer dependencies, so the light entry installs none of them. To use the 3D entry, the hub adds them itself, with the versions of our `package.json`:
+
+```json
+"three": "0.187.0",
+"three-mesh-bvh": "0.9.17",
+"three-edge-projection": "github:gkjohnson/three-edge-projection#v0.0.11"
+```
+
+three-edge-projection asks for `clipper2-js` as a peer, and pnpm installs missing peers by default (with Angular for clipper2-js). We don't use it. So in `frontend/pnpm-workspace.yaml` of the hub, make it optional:
+
+```yaml
+packageExtensions:
+  three-edge-projection:
+    peerDependenciesMeta:
+      clipper2-js:
+        optional: true
+```
+
+Then:
+
+```ts
+const { createViewer } = await import('@epfl-enac/steel-viz/3d');
+```
+
+### How the package is built and released
+
+`pnpm run build:lib` runs `tsc` with `tsconfig.lib.json`. It writes one JS file and one `.d.ts` file per module into `lib/`, only for the modules that the two entries import. `lib/` is never committed on `main`. Only the commit of a release tag has it, so the hub install needs no build. Never add a `prepare` or `prepack` script: pnpm would run it when it installs the git dependency.
+
+To make a release (a human does it):
+
+1. Bump `version` in `package.json` in a normal pull request, and merge it.
+2. In the main checkout, on `main`, run `./release.sh 0.1.0`. It checks that `main` is clean and the same as `origin/main`, runs the tests, builds `lib/`, and makes a commit on top of `main` with `lib/` in it. Then it tags that commit `v0.1.0`. `main` doesn't move, and it pushes nothing.
+3. `git push origin v0.1.0`. CI runs on the tag too, and checks that the `lib/` of the tag is the same as a fresh build.
+4. Change the version in the dependency line of the hub.
 
 ## Playground and worktrees
 

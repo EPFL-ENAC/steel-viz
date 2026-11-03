@@ -1,5 +1,6 @@
 {
   "name": "@epfl-enac/steel-viz",
+  "version": "0.1.0",
   "description": "Steel structures as technical line drawings, a 3D view and a build animation",
   "type": "module",
   "private": true,
@@ -7,22 +8,52 @@
   "engines": {
     "node": ">=24"
   },
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./3d": {
+      "types": "./lib/3d.d.ts",
+      "default": "./lib/3d.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib"
+  ],
+  "sideEffects": false,
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:lib": "rm -rf lib && tsc -p tsconfig.lib.json",
     "test": "node --test",
     "type-check": "tsc"
   },
-  "dependencies": {
-    "three": "0.187.0",
-    "three-edge-projection": "github:gkjohnson/three-edge-projection#v0.0.11",
-    "three-mesh-bvh": "0.9.17"
+  "peerDependencies": {
+    "three": ">=0.187.0",
+    "three-edge-projection": ">=0.0.11",
+    "three-mesh-bvh": ">=0.9.17"
+  },
+  "peerDependenciesMeta": {
+    "three": {
+      "optional": true
+    },
+    "three-edge-projection": {
+      "optional": true
+    },
+    "three-mesh-bvh": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@types/node": "24.19.2",
     "@types/three": "0.187.0",
     "@vitejs/plugin-vue": "^6.0.10",
     "esbuild": "0.25.12",
+    "three": "0.187.0",
+    "three-edge-projection": "github:gkjohnson/three-edge-projection#v0.0.11",
+    "three-mesh-bvh": "0.9.17",
     "typescript": "7.0.2",
     "vite": "^8.3.5",
     "vue": "^3.5.44"
