@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Steel structures from a seed, drawn as technical line drawings (SVG with hidden lines removed), with a 3D view and a build animation. Read `README.md` first: it explains every part. `ROADMAP.md` lists what comes next.
 
-It comes from `resslab-hub` (`tools/steel-generator`, branch `feat/simulator-steel-structure`), moved here with its history in November 2026. RESSLab Hub uses it for its logo (RESSLab-Team/resslab-hub#263) through an exported SVG, not as a dependency. Later it may be a package for a loading animation and a view of each experiment. So keep the core (sections, generate, steel, the painter renderer) free of three.js: only `hlr.ts` and `webgl.ts` load it.
+It comes from `resslab-hub` (`tools/steel-generator`, branch `feat/simulator-steel-structure`), moved here with its history in November 2026. RESSLab Hub uses it for its logo (RESSLab-Team/resslab-hub#263) through an exported SVG, not as a dependency. Later it may be a package for a loading animation and a view of each experiment. So keep the core (sections, generate, steel, the painter renderer) free of three.js: only `hlr.ts` and `webgl.ts` load it. `package.test.ts` checks it: the light entry `index.ts` must load no package and no Node API.
 
 ## Commands
 
@@ -18,6 +18,7 @@ node --test solver.test.ts                         # one file
 node --test --test-name-pattern "clash|support"    # some tests by name
 pnpm dev                  # the playground (Vue app in app/) with live reload, on PLAYGROUND_PORT or 5180
 pnpm build                # the playground as a static site in dist/ (build output, never commit it)
+pnpm run build:lib        # the package (index.ts, 3d.ts) as JS and .d.ts in lib/ (only a release tag has it, see release.sh)
 node cli.ts --seed 5 --view iso --out s5.svg       # also --form, --family eu, --animate, --frames, --painter, --size 96
 node pick.ts --count 150 --top 12 --sheet best.html
 node cli.ts --specimen specimens/Chi_and_Uang_2002_DC2.json --view iso   # a real test from a JSON file (specimen.ts)
@@ -33,7 +34,8 @@ Node only strips the types. `pnpm run type-check` checks them (`tsc` with `tscon
 2. `generate(params, catalog)` in `generate.ts` builds a `Structure` (topology), then loops: `solve()` from `solver.ts`, `fix()` on a mechanism, `size()` from the forces. Then it adds trusses and rods, then the details (splice, base gussets). Last, `parts()` turns the structure into `Part[]` with the geometry helpers of `steel.ts`. With `params.specimen` (a real test, from `specimen.ts`), `generate()` skips all that: `buildSpecimen()` builds the given column and beams, solves once with no fix and no sizing, adds the cap and continuity plates, then calls `parts()`.
 3. A `Part` (type in `steel.ts`) is what every renderer takes: faces in mm, bolts as `dots`, `step` (build order), `supports` (ids of the parts it stands on), `boxes` (for `clash.ts`), `kind` and `from` (for the animation).
 4. Three renderers take `Part[]`: `render` in `steel.ts` (painter, fast, sometimes wrong), `renderHLR` in `hlr.ts` (exact, the default, the only one for export), `createViewer` in `webgl.ts` (3D view of the playground). All of them share `camera()` and `timeline()` from `steel.ts`, so the views and the animation match.
-5. The playground is a Vue 3 app in `app/`, served by Vite (`vite.config.ts`). It imports the core modules directly. `app/state.ts` holds the settings and keeps them in the URL hash, `Drawing.vue` draws (3D, SVG, both, or vs main). `app/dev-plugin.ts` is for the dev server only: the branch info, the "vs main" bundle (the merge base with `main`, from `git archive`), and a full reload when a file outside `app/` changes.
+5. The package has two entries. `index.ts` (`@epfl-enac/steel-viz`) re-exports the core: generate, loadCatalog, the painter render, timeline, the specimen input. `3d.ts` (`@epfl-enac/steel-viz/3d`) re-exports `renderHLR` and `createViewer`. three.js and its two helpers are optional peer dependencies (and dev dependencies here). The hub passes its own CSV text to `loadCatalog()`, the package ships no table. When you export something new for the hub, add it to `index.ts` (or `3d.ts` if it needs three.js).
+6. The playground is a Vue 3 app in `app/`, served by Vite (`vite.config.ts`). It imports the core modules directly. `app/state.ts` holds the settings and keeps them in the URL hash, `Drawing.vue` draws (3D, SVG, both, or vs main). `app/dev-plugin.ts` is for the dev server only: the branch info, the "vs main" bundle (the merge base with `main`, from `git archive`), and a full reload when a file outside `app/` changes.
 
 Seeds must stay stable. `generate()` uses a separate `mulberry32` random stream for each stage (form, topology, trusses and rods, details). When you add a new random feature, give it its own stream. If it takes draws from the main `rng`, every seed after it changes, and the seeds picked for the logo change too.
 
@@ -44,6 +46,7 @@ Units are mm everywhere. `hlr.ts` converts to metres before it calls three-edge-
 - AISC copyright: the AISC Steel Sculpture drawings and plans are AISC's work. Never commit or publish anything taken from them. Only generic kinds of steel details (splices, gussets, clevis, trusses) go into the generator.
 - `sections/*.csv` are copies of the RESSLab Hub tables. Change them in the hub first, then copy them here.
 - Commits use Conventional Commits.
+- Never add a `prepare` or `prepack` script to `package.json`: pnpm runs them when the hub installs the git dependency. The built `lib/` goes into the release tag only (`release.sh`, run by a human). Never commit `lib/` on a branch, and never create or push a tag.
 
 ## Worktrees (wtx)
 

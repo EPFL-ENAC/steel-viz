@@ -15,10 +15,11 @@ What we plan to do next. A checked item is done.
 
 Today the hub only takes an exported SVG for its logo (RESSLab-Team/resslab-hub#263). Later:
 
-- [ ] A light entry point: the painter renderer and `timeline()`, with no three.js. It is for a loading animation in the slow parts of the hub.
-- [ ] A separate 3D entry point (`webgl.ts`, `hlr.ts`), loaded only where it is needed.
+- [x] A light entry point: the painter renderer and `timeline()`, with no three.js. It is for a loading animation in the slow parts of the hub. Done: `index.ts` (`@epfl-enac/steel-viz`), and `package.test.ts` checks it loads no three.js.
+- [x] A separate 3D entry point (`webgl.ts`, `hlr.ts`), loaded only where it is needed. Done: `3d.ts` (`@epfl-enac/steel-viz/3d`), three.js as optional peers.
 - [x] A specimen input: build the structure of a real experiment from its sections, next to the random seed. Then the hub can show a view of each experiment. Done for beam-to-column tests (`specimen.ts`, `--specimen`), the next steps are under "Specimens".
-- [ ] Ship built JS and `.d.ts` on a git tag, so the hub can depend on it the same way it depends on three-edge-projection (`github:EPFL-ENAC/steel-viz#v0.1.0`).
+- [x] Ship built JS and `.d.ts` on a git tag, so the hub can depend on it the same way it depends on three-edge-projection (`github:EPFL-ENAC/steel-viz#v0.1.0`). Done: `pnpm run build:lib` and `release.sh` (see the README).
+- [ ] The first release, `v0.1.0`: a human runs `./release.sh 0.1.0` on `main` and pushes the tag. Then use the light entry in the hub for the loading animation (a hub pull request).
 
 ## Specimens
 

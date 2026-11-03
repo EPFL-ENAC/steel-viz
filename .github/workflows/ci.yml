@@ -20,3 +20,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: node --test
       - run: pnpm run type-check
+      - run: pnpm run build:lib
+      # lib/ is only committed on a release tag (release.sh). There it must be
+      # the same as a fresh build. On other commits lib/ is ignored.
+      - run: git diff --exit-code -- lib

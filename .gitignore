@@ -1,5 +1,6 @@
 node_modules/
 dist/
+lib/
 *.svg
 
 # wtx: per-worktree files, local to one checkout
