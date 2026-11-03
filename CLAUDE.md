@@ -44,7 +44,7 @@ Units are mm everywhere. `hlr.ts` converts to metres before it calls three-edge-
 ## Rules
 
 - AISC copyright: the AISC Steel Sculpture drawings and plans are AISC's work. Never commit or publish anything taken from them. Only generic kinds of steel details (splices, gussets, clevis, trusses) go into the generator.
-- `sections/*.csv` are copies of the RESSLab Hub tables. Change them in the hub first, then copy them here.
+- The I and HSS tables in `sections/` are copies of the RESSLab Hub tables. Change them in the hub first, then copy them here. The channel and angle tables are ours until the hub has them: `sections/README.md` says where they come from and how to make them again.
 - Commits use Conventional Commits.
 - Never add a `prepare` or `prepack` script to `package.json`: pnpm runs them when the hub installs the git dependency. The built `lib/` goes into the release tag only (`release.sh`, run by a human). Never commit `lib/` on a branch, and never create or push a tag.
 
