@@ -17,7 +17,11 @@ The output is an SVG line drawing with the hidden lines removed. The SVG can als
 Two renderers:
 
 - `hlr.ts` (the default): exact hidden lines, from [three-edge-projection](https://github.com/gkjohnson/three-edge-projection). It takes 50 to 150 ms for one structure.
-- `render` in `steel.ts` (`--painter`): the painter's trick, from `sculpture_render.py` on `feat/logo-aisc`. About 5 ms, but some lines are wrong. The playground uses it only while you drag the view sliders.
+- `render` in `steel.ts` (`--painter`): the painter's trick, from `sculpture_render.py` on `feat/logo-aisc`. About 5 ms, but some lines are wrong. The playground uses it only while you drag the view in an SVG mode.
+
+The playground also has a 3D view (`webgl.ts`, the "3D" choice, on by default). It is for looking at the structure, not for export. It runs in WebGL with three.js, and builds the geometry once per structure, so you can turn it, move it and zoom with every bolt shown, at the frame rate of the screen. Faces are filled with the background and the GPU depth buffer hides the hidden lines. Edges are thin lines. A second pass gives the thick outlines with the same rule as `hlr.ts` (a jump in depth over 50 mm, or another part behind), read from a depth and part-id texture. Bolt heads get thin lines only. The build animation plays in 3D too, on the same `timeline()`. The lines are close to the exact drawing but not the same (no gaps, no merged lines). "Copy SVG" always gives the exact drawing from `hlr.ts`, for the current view. "Full SVG" and the px sizes show the exact drawing.
+
+In the 3D view: drag to turn, right drag (or shift drag) to move, the wheel or two fingers to zoom, double click to see the whole structure again. The view sliders follow.
 
 The exact renderer draws like a technical drawing:
 
@@ -58,6 +62,7 @@ Files:
 - `clash.ts`: do two parts go through each other (each part as a few boxes).
 - `score.ts`, `pick.ts`: the logo score, and the scan over many seeds.
 - `hlr.ts`: the exact hidden-line renderer, with bolt heads as real hex solids.
+- `webgl.ts`: the 3D view of the playground.
 - `cli.ts`, `build-playground.ts`, `playground.entry.ts`, `playground.template.html`: command line and playground page. `build-playground.ts` bundles `playground.entry.ts` with esbuild.
 
 `playground.html` and the SVGs are build output, they stay out of git.

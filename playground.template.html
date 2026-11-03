@@ -84,6 +84,11 @@
   .drawing svg { width: 100%; height: 100%; max-width: 100%; }
   .drawing.px svg { width: var(--px); height: auto; }
   .drawing { cursor: grab; touch-action: none; user-select: none; }
+  /* two views of the same structure: the WebGL one to turn and zoom, the exact SVG for export */
+  #svg { width: 100%; height: 100%; display: grid; place-items: center; min-height: 0; }
+  #gl { width: 100%; height: 100%; min-height: 0; overflow: hidden; }
+  .drawing.gl { display: block; padding: 0; }
+  .drawing.gl #svg, .drawing:not(.gl) #gl { display: none; }
   .drawing.turning { cursor: grabbing; }
   .drawing:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
   .hint { position: absolute; top: 10px; right: 12px; font-size: 12px; color: var(--fg-muted); pointer-events: none; }
@@ -154,8 +159,9 @@
         <label><input type="radio" name="weights" id="w-two" value="two" checked><span>Two weights</span></label>
         <label><input type="radio" name="weights" id="w-one" value="one"><span>One weight</span></label>
       </div>
-      <div class="seg" role="radiogroup" aria-label="Line widths for">
-        <label><input type="radio" name="size" id="s-full" value="0" checked><span>Full size</span></label>
+      <div class="seg" role="radiogroup" aria-label="Show">
+        <label><input type="radio" name="size" id="s-3d" value="3d" checked><span>3D</span></label>
+        <label><input type="radio" name="size" id="s-full" value="0"><span>Full SVG</span></label>
         <label><input type="radio" name="size" id="s-256" value="256"><span>256 px</span></label>
         <label><input type="radio" name="size" id="s-96" value="96"><span>96 px</span></label>
         <label><input type="radio" name="size" id="s-48" value="48"><span>48 px</span></label>
@@ -187,8 +193,8 @@
   </aside>
 
   <main class="sheet">
-    <div class="drawing" id="drawing" tabindex="0" role="img" aria-label="Generated steel structure. Drag, or use the arrow keys, to turn it."></div>
-    <div class="hint" aria-hidden="true">Drag to turn</div>
+    <div class="drawing" id="drawing" tabindex="0" role="img" aria-label="Generated steel structure. Drag, or use the arrow keys, to turn it."><div id="svg"></div><div id="gl"></div></div>
+    <div class="hint" id="hint" aria-hidden="true">Drag to turn</div>
     <dl class="titleblock">
       <div><dt>Column</dt><dd id="tb-col"></dd></div>
       <div><dt>Solver</dt><dd id="tb-solve"></dd></div>
@@ -209,6 +215,24 @@ const radio = (name) => document.querySelector(`input[name="${name}"]:checked`).
 const label = { shear_tab: 'shear tab', end_plate: 'end plate', flange_plates: 'flange plates', welded: 'welded', gusset: 'gusset' };
 let current = null;
 let lastSvg = '';
+// the WebGL view; null when the browser has no WebGL, then only the SVG
+let viewer = null;
+let inViewer = null; // the structure the viewer shows
+try {
+  viewer = createViewer($('gl'), (az, el) => {
+    for (const v of document.querySelectorAll('input[name="view"]')) v.checked = false;
+    $('az').value = Math.round(az);
+    $('el').value = Math.round(el);
+    outputs();
+  });
+} catch {
+  $('s-3d').closest('label').remove();
+  $('s-full').checked = true;
+}
+const is3d = () => !!viewer && radio('size') === '3d';
+const css = (k, d) => getComputedStyle(document.documentElement).getPropertyValue(k).trim() || d;
+const paint = () => viewer?.setColors({ bg: css('--bg', '#ffffff'), fg: css('--fg', '#212121'), accent: css('--accent', '#e30713') });
+paint();
 
 function setView(name) {
   const [az, el] = VIEWS[name];
@@ -232,6 +256,23 @@ function build() {
 function draw(animate, fast = false) {
   if (!current) return;
   const t0 = performance.now();
+  const gl = is3d();
+  $('drawing').classList.toggle('gl', gl);
+  $('hint').textContent = gl ? 'Drag to turn, right drag to move, wheel to zoom, double click to see it all' : 'Drag to turn';
+  if (gl) {
+    if (inViewer !== current.r) {
+      viewer.show(current.r.parts);
+      inViewer = current.r;
+    }
+    viewer.setWeights($('w-two').checked);
+    viewer.view(+$('az').value, +$('el').value);
+    if (animate) viewer.build();
+    lastSvg = ''; // made on Copy SVG
+    const s = viewer.stats();
+    $('tb-draw').textContent = `${s.faces} faces, ${s.bolts} bolts, ${s.lines} lines, WebGL`;
+    $('tb-ms').textContent = `${current.ms.toFixed(0)} ms build, ${(performance.now() - t0).toFixed(0)} ms to load`;
+    return;
+  }
   // a px size: widths in px, and the drawing shown at that size
   const size = +document.querySelector('input[name="size"]:checked').value || undefined;
   $('drawing').classList.toggle('px', !!size);
@@ -239,7 +280,7 @@ function draw(animate, fast = false) {
   const out = (fast ? render : renderHLR)(current.r.parts, { az: +$('az').value, el: +$('el').value, animate, stepMs: 70, weights: $('w-two').checked, size });
   const ms = performance.now() - t0;
   lastSvg = out.svg;
-  $('drawing').innerHTML = out.svg;
+  $('svg').innerHTML = out.svg;
   $('tb-draw').textContent = `${out.faces} faces, ${out.dots} bolts, ${(out.svg.length / 1024).toFixed(0)} kB`;
   $('tb-ms').textContent = `${current.ms.toFixed(0)} ms build, ${ms.toFixed(0)} ms draw`;
 }
@@ -348,7 +389,7 @@ function turn(daz, del) {
 }
 let drag = null;
 $('drawing').addEventListener('pointerdown', (e) => {
-  if (e.button !== 0) return;
+  if (e.button !== 0 || is3d()) return; // the viewer turns itself
   drag = { x: e.clientX, y: e.clientY, az: +$('az').value, el: +$('el').value, moved: false };
   try { $('drawing').setPointerCapture(e.pointerId); } catch {} // keep the drag when the pointer leaves
   $('drawing').classList.add('turning');
@@ -385,6 +426,8 @@ $('copy').addEventListener('click', async () => {
   const note = $('copyNote');
   note.hidden = false;
   try {
+    // the exact drawing, at full size, from the same view
+    if (!lastSvg) lastSvg = renderHLR(current.r.parts, { az: +$('az').value, el: +$('el').value, weights: $('w-two').checked }).svg;
     await navigator.clipboard.writeText(lastSvg);
     note.textContent = 'SVG copied.';
   } catch {
@@ -394,7 +437,10 @@ $('copy').addEventListener('click', async () => {
 const isDark = () => document.documentElement.dataset.theme
   ? document.documentElement.dataset.theme === 'dark'
   : matchMedia('(prefers-color-scheme: dark)').matches;
-const themeLabel = () => ($('theme').textContent = isDark() ? 'Light' : 'Dark');
+const themeLabel = () => {
+  $('theme').textContent = isDark() ? 'Light' : 'Dark';
+  paint();
+};
 $('theme').addEventListener('click', () => {
   document.documentElement.dataset.theme = isDark() ? 'light' : 'dark';
   themeLabel();

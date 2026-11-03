@@ -5,5 +5,6 @@ import { floating, generate } from './generate.ts';
 import { render, VIEWS } from './steel.ts';
 import { renderHLR } from './hlr.ts';
 import { logoScore } from './score.ts';
+import { createViewer } from './webgl.ts';
 
-Object.assign(globalThis, { loadCatalog, floating, generate, render, renderHLR, logoScore, VIEWS });
+Object.assign(globalThis, { loadCatalog, floating, generate, render, renderHLR, logoScore, VIEWS, createViewer });
