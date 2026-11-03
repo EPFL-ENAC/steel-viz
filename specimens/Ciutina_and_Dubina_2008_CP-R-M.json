@@ -1,0 +1,22 @@
+{
+  "id": "Ciutina_and_Dubina_2008_CP-R-M",
+  "specimen_type": "Interior - Column Loaded - Subassembly",
+  "connection_type": "WUF-W",
+  "section_c": "HEB 300",
+  "d_c": 299.9999997,
+  "b_cf": 299.9999997,
+  "t_cf": 18.99999998,
+  "t_cw": 10.99999999,
+  "h_c": 2500,
+  "section_b": "IPE 360",
+  "d_b": 359.9999996,
+  "b_bf": 170.0022,
+  "t_bf": 12.7,
+  "t_bw": 7.999984,
+  "l_b": 3209.999997,
+  "t_cp": 17.018,
+  "n_dp": 0,
+  "slab": false,
+  "reference": "Ciutina, A. L., and Dubina, D. (2008). “Column web stiffening of steel beam-to-column joints subjected to seismic actions.” Journal of Structural Engineering, 134(3), 505–510. https://doi.org/10.1061/(ASCE)0733-9445(2008)134:3(505).",
+  "link": "https://doi.org/10.1061/(ASCE)0733-9445(2008)134:3(505)"
+}
