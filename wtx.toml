@@ -1,0 +1,60 @@
+# wtx: every branch gets its own worktree, ports, tmux session and agent.
+# Reference for every key: https://github.com/EPFL-ENAC/wtx/blob/main/docs/schema.md
+schema_version = 1
+
+[repo]
+name = "steel-viz"
+base_branch = "main"
+# The single source for the push guard, the completion and the deny rules.
+protected_branches = ["main"]
+
+[deps]
+
+[[deps.step]]
+if_missing = "node_modules"
+cwd = "."
+run = "pnpm install --frozen-lockfile"
+
+# The agent pane fills the left half, the rest stack on the right.
+[panes]
+
+[[panes.pane]]
+name = "agent"
+role = "agent"
+
+[[panes.pane]]
+name = "shell"
+role = "shell"
+
+[agent]
+tool = "claude"
+llm = "opus"
+subagent_model = "sonnet"
+auto_compact_window = 200000
+explore_agent_model = "haiku"
+
+# Plan on one model, implement on another. A brief starts on
+# plan_model in plan mode. With Claude, accepting the plan carries
+# the same conversation on to build_model, at the effort the plan
+# asked for. With opencode the agent switch does it, and the
+# effort routing does not apply.
+[agent.orchestration]
+enabled = true
+plan_model = "opus"
+plan_effort = "xhigh"
+build_model = "opus"
+build_effort = "xhigh"
+
+# Added to the baseline wtx ships. A repo can tighten, never loosen.
+[permissions]
+allow = ["Bash(node --test*)", "Bash(pnpm run test)", "Bash(node build-playground.ts)", "Bash(node cli.ts *)", "Bash(node pick.ts *)"]
+
+# Run by `wtx land --local`.
+[checks]
+test = ["node --test"]
+
+[[repos]]
+name = "resslab-hub"
+path = "../resslab-hub"
+access = "pair"   # read free, edits only through a paired worktree
+base_branch = "dev"
