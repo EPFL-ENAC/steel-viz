@@ -520,11 +520,12 @@ export function splicePlates(lo: Geo, hi: Geo, kind: 'bearing' | 'flange'): { fa
   return { faces, boxes, dots };
 }
 
-export type ConnType = 'shear_tab' | 'end_plate' | 'flange_plates' | 'welded' | 'gusset' | 'clevis';
-export const PINNED: ConnType[] = ['shear_tab', 'gusset', 'clevis'];
+export type ConnType = 'shear_tab' | 'end_plate' | 'flange_plates' | 'welded' | 'gusset' | 'gusset_small' | 'clevis';
+export const PINNED: ConnType[] = ['shear_tab', 'gusset', 'gusset_small', 'clevis'];
 // the gap a member leaves at its end, for each connection type. For a
 // gusset it leaves room for the 2 x 2 bolt group, whatever the brace angle.
-export const SETBACK: Record<ConnType, number> = { shear_tab: 13, flange_plates: 13, end_plate: 25, welded: 0, gusset: 195, clevis: 110 };
+// The small gusset (the diagonals of a low truss) has one row of 2 bolts.
+export const SETBACK: Record<ConnType, number> = { shear_tab: 13, flange_plates: 13, end_plate: 25, welded: 0, gusset: 195, gusset_small: 130, clevis: 110 };
 
 // the solid of one connection and its bolt dots
 // `reach`: how far the plates go along the member, in mm from its end.
@@ -582,22 +583,24 @@ export function hardware(g: Geo, typ: ConnType, r: Resolved): { faces: Face[]; d
         }
     }
     faces.push(...webPlate(g, r, 10, 115, 3, dots, reach, boxes));
-  } else if (typ === 'gusset') {
+  } else if (typ === 'gusset' || typ === 'gusset_small') {
     // Two plates and 4 bolts through both. The gusset is welded to the
     // support face. The knife plate sits in a slot at the tube end and laps
-    // over the gusset. The bolts: 2 rows along the brace, 2 across.
+    // over the gusset. The bolts: 2 rows along the brace, 2 across. The
+    // small gusset has 1 row (2 bolts) and a shorter slot.
     const t = 12;
     let nrm = cross(r.direc, g.u);
     if (len(nrm) < 1e-3) nrm = g.v;
     nrm = norm(nrm);
     const across = norm(cross(nrm, r.direc)); // in the plate plane, along the support face
     const side = norm(cross(nrm, inward)); // in the plate plane, across the brace
-    const slot = 150;
+    const slot = typ === 'gusset' ? 150 : 100;
     reach.push(slot);
-    const [near, far] = [EDGE + 12, EDGE + 12 + PITCH]; // the two bolt rows, mm before the tube end
+    const near = EDGE + 12; // the bolt rows, mm before the tube end
+    const far = typ === 'gusset' ? near + PITCH : near;
     const half = PITCH / 2 + EDGE; // half width of the bolt area
     const at = (u: number, s2: number, n = 0) => add(add(add(p, mul(inward, u)), mul(side, s2)), mul(nrm, n));
-    for (const u of [-near, -far])
+    for (const u of far > near ? [-near, -far] : [-near])
       for (const s2 of [-PITCH / 2, PITCH / 2]) dots.push({ p: at(u, s2, -t / 2), axis: nrm, half: t + 1 });
     // knife plate: from the bolts into the slot, in the plane of the brace
     // full width under the bolts, then down to the tube width at its end
