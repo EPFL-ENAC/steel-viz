@@ -12,6 +12,14 @@ What we plan to do next. A checked item is done.
 - [ ] Trusses on portal arms. They never get one either. The low truss of trees would fit on a few, but it changes portal 143, #2 of the top 12.
 - [ ] A rod clevis goes through an arm connection on aisc tree 140 (today's code, outside the seeds the tests run).
 
+## Solver
+
+- [x] Buckling: `alphaCr` of the whole structure, and member checks with buckling (AISC 360-22 E3, F2, H1-1).
+- [ ] Notional loads (small side loads for the frame imperfections, EC3 5.3).
+- [ ] A shear check.
+- [ ] EC3 member checks for the `eu` family. Today the AISC formulas size both.
+- [ ] A lateral brace for the bottom chord of a cantilever truss. Without it, eu trees 7 and 19 stay under `alphaCr` 3.
+
 ## Use in RESSLab Hub
 
 Today the hub only takes an exported SVG for its logo (RESSLab-Team/resslab-hub#263). Later:
@@ -41,5 +49,5 @@ The specimen input draws the beam-to-column tests of the hub `connection` table.
 ## Repo
 
 - [x] TypeScript as a dev dependency, a `tsconfig.json` and a `type-check` script.
-- [ ] A LICENSE.
+- [x] A LICENSE (MIT).
 - [x] A GitHub Actions CI that runs `node --test` (and the type check).

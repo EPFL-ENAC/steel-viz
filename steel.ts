@@ -45,6 +45,9 @@ export const BOLT_MS = 60; // between two bolts of one connection
 export const CRANES = 3;
 const MS: Record<Kind, number> = { base: 350, column: 600, plate: 220, member: 550, bolts: 0 };
 const GAP = { big: 150, plate: 50 };
+// when the last part lands, in ms
+export const buildEnd = (slots: Map<number, Slot>) => Math.max(0, ...[...slots.values()].map((s) => s.land));
+
 export function timeline(parts: Part[], speed = 1): Map<number, Slot> {
   const out = new Map<number, Slot>();
   const byId = new Map(parts.map((p) => [p.id, p]));

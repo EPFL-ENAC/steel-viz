@@ -5,11 +5,13 @@
 //   or not, and a few arms out of the columns.
 // - box: four columns in a rectangle, beams and braces only in its four
 //   walls, nothing sticks out.
-// The solver checks it stands up, fixes it if not, and sizes the members.
+// The solver checks it stands up, fixes it if not, and sizes the members
+// (checks.ts), with the sway effects from its buckling factor alphaCr.
 // A real test specimen (specimen.ts) skips all the random draws: its column
 // and beams are given, the solver only checks it.
 import { add, cross, len, mul, norm, sub, type V } from './vec.ts';
-import { solve, type Elem, type FNode } from './solver.ts';
+import { buckling, solve, type Elem, type FNode, type Solved } from './solver.ts';
+import { memberRatio } from './checks.ts';
 import type { Catalog, Section } from './sections.ts';
 import {
   box3, boxOf, flat, geo, hardware, memberBoxes, memberFaces, resolve, splicePlates, stiffener, supportFace, BEARING_T, EDGE, PINNED, SETBACK, SPLICE_HALF,
@@ -85,8 +87,10 @@ type Splice = { z: number; sec: Section; kind: 'bearing' | 'flange' };
 // base: the gussets on the base plates, none, on the flange faces, or on all four faces
 type Base = 'none' | 'flange' | 'all';
 // id: the specimen id. continuity: false leaves out the continuity plates.
+// minA: the lightest area sizing may pick for a member (raised when alphaCr is too low).
 export type Structure = {
   form: Form | 'specimen'; id?: string; H: number; col: Section; cols: Col[]; arms: Arm[]; secs: Secondary[]; splice?: Splice; base?: Base; continuity?: boolean;
+  minA?: Record<string, number>;
 };
 const colId = (i: number) => (i ? `column${i + 1}` : 'column');
 const baseId = (i: number) => (i ? `base${i + 1}` : 'base');
@@ -494,7 +498,8 @@ function specimen(spec: Specimen, cat: Catalog): Structure {
 }
 
 // ------------------------------------------------------------- analysis
-type Model = { nodes: FNode[]; elems: Elem[]; owner: string[]; nodeOwner: string[][] };
+// len: the length of each member (owner), its buckling length in checks.ts
+type Model = { nodes: FNode[]; elems: Elem[]; owner: string[]; nodeOwner: string[][]; len: Map<string, number> };
 
 function model(st: Structure, p: Params): Model {
   const nodes: FNode[] = [];
@@ -592,7 +597,13 @@ function model(st: Structure, p: Params): Model {
     const p0 = add(start(st, a), mul(h, s.a));
     chain(s.id, [p0, add(p0, mul(side, s.L))], s.sec, PINNED.includes(s.conn), w(s.sec) + p.load / 2);
   }
-  return { nodes, elems, owner, nodeOwner };
+  // a column is one member from the base to the splice, then to the top
+  const lengths = new Map<string, number>([['column', sp ? sp.z : st.H], ['column-top', sp ? st.H - sp.z : 0]]);
+  elems.forEach((e, i) => {
+    const who = owner[i];
+    if (who !== 'column' && who !== 'column-top') lengths.set(who, (lengths.get(who) ?? 0) + len(sub(nodes[e.j].x, nodes[e.i].x)));
+  });
+  return { nodes, elems, owner, nodeOwner, len: lengths };
 }
 
 // a mechanism at a node: fix the pinned connection highest up the support
@@ -627,32 +638,103 @@ function fix(st: Structure, m: Model, nodeIdx: number, cat: Catalog, rng: () => 
 
 // ------------------------------------------------------------- sizing
 const LIMIT = 0.6;
-type Forces = { N: number; My: number; Mz: number };
-const ratioOf = (s: Section, f: Forces, fy: number) => f.N / (s.A * fy) + f.My / (s.Ws * fy) + f.Mz / (s.Ww * fy);
+type Forces = { N: number; Nc: number; My: number; Mz: number };
+// L: the member length, its buckling length (K = 1, see checks.ts)
+const ratioOf = (s: Section, f: Forces, fy: number, L: number) => memberRatio(s, f, L, fy);
 function worstOf(m: Model, res: Forces[]) {
   const worst = new Map<string, Forces>();
   m.owner.forEach((who, i) => {
-    const w = worst.get(who) ?? { N: 0, My: 0, Mz: 0 };
-    worst.set(who, { N: Math.max(w.N, res[i].N), My: Math.max(w.My, res[i].My), Mz: Math.max(w.Mz, res[i].Mz) });
+    const w = worst.get(who) ?? { N: 0, Nc: 0, My: 0, Mz: 0 };
+    worst.set(who, { N: Math.max(w.N, res[i].N), Nc: Math.max(w.Nc, res[i].Nc), My: Math.max(w.My, res[i].My), Mz: Math.max(w.Mz, res[i].Mz) });
   });
   return worst;
 }
+
+// Sway effects (EC3 5.2.2(5)B): the moments times 1 / (1 - 1/alphaCr). The
+// rule needs alphaCr >= 3: below, stiffen() makes a member heavier, and the
+// factor stays at its value for 3 (1.5).
+const ALPHA_MIN = 3;
+type Stability = { alpha: number; amp: number; forces: Forces[]; energy: Map<string, number> };
+// Not the posts: their top is held by what they carry, which we don't draw.
+// Free, a short post with its load sways and twists the beam (alphaCr < 1).
+// The member check covers the buckling of the post itself.
+function stability(m: Model, r: Extract<Solved, { ok: true }>): Stability {
+  const axial = r.axial.map((n, i) => (m.owner[i].endsWith('-post') ? 0 : n));
+  const b = buckling(m.nodes, m.elems, { ...r, axial });
+  const amp = 1 / (1 - 1 / Math.max(b.alpha, ALPHA_MIN));
+  const forces = r.forces.map((f) => ({ ...f, My: f.My * amp, Mz: f.Mz * amp }));
+  const energy = new Map<string, number>();
+  m.owner.forEach((who, i) => energy.set(who, (energy.get(who) ?? 0) + b.energy[i]));
+  return { alpha: b.alpha, amp, forces, energy };
+}
+
+// the section of a member, by its owner id
+function sectionOf(st: Structure, who: string): Section | undefined {
+  if (who === 'column') return st.col;
+  if (who === 'column-top') return st.splice?.sec;
+  for (const a of st.arms) {
+    if (who === a.id) return a.sec;
+    if (a.truss && who === chordId(a)) return a.truss.chord;
+    const w = a.truss?.webs.find((_, k) => who === webId(a, k));
+    if (w) return w.sec;
+    const b = a.braces.find((_, k) => who === braceId(a, k));
+    if (b) return b.sec;
+    if (a.rod && who === rodId(a)) return a.rod.sec;
+    if (a.post && who === postId(a)) return a.post.sec;
+  }
+  return st.secs.find((s) => s.id === who)?.sec;
+}
+
+// alphaCr too low: the member with the most strain energy in the buckling
+// mode gets a heavier section (a sizing pass with a minimum area, so the
+// other sizing rules still hold). If the rules leave it as it is, the next one.
+// A member with a small share of the energy can't raise alphaCr much (about
+// its share), so only members with 10 % or more. generate.ts has no lateral
+// bracing: the usual case is the bottom chord of a cantilever truss, which
+// sways out of the truss plane.
+const SHARE_MIN = 0.1;
+function stiffen(st: Structure, m: Model, stab: Stability, cat: Catalog, fy: number, log: string[]): boolean {
+  const total = [...stab.energy.values()].reduce((a, e) => a + Math.max(e, 0), 0);
+  const order = [...stab.energy].filter(([, e]) => e >= SHARE_MIN * total).sort((a, b) => b[1] - a[1]);
+  for (const [who] of order) {
+    const cur = sectionOf(st, who);
+    if (!cur) continue;
+    const minA = (st.minA ??= {});
+    const old = minA[who];
+    // alphaCr grows about like the stiffness: aim for 3 in one step, 1.2 to 2 times the area
+    minA[who] = cur.A * Math.min(2, Math.max(1.2, ALPHA_MIN / stab.alpha));
+    size(st, m, stab.forces, cat, fy);
+    const next = sectionOf(st, who);
+    if (next && next.A > cur.A) {
+      log.push(`alphaCr ${stab.alpha.toFixed(1)} below ${ALPHA_MIN}: ${who} ${cur.id} -> ${next.id}`);
+      return true;
+    }
+    if (old === undefined) delete minA[who];
+    else minA[who] = old;
+  }
+  log.push(`alphaCr ${stab.alpha.toFixed(1)} below ${ALPHA_MIN}: no member left to make heavier`);
+  return false;
+}
+const alphaLog = (a: number, amp: number) =>
+  a === Infinity ? 'alphaCr: nothing in compression' : `alphaCr ${a.toFixed(1)}, moments × ${amp.toFixed(2)}${a < ALPHA_MIN ? ` (below ${ALPHA_MIN})` : ''}`;
 // beams that frame into the column web (above `z`) must fit between its flanges
 const webClear = (arms: Arm[], z = -Infinity) => Math.max(0, ...arms.filter((a) => a.bearing % 180 === 90).flatMap((a) => [
   ...(a.z - a.sec.d > z ? [a.sec.bf + 40] : []),
   ...(a.truss && a.z - a.truss.D - a.truss.chord.d > z ? [a.truss.chord.bf + 40] : []),
 ]));
 
-function size(st: Structure, m: Model, res: { N: number; My: number; Mz: number }[], cat: Catalog, fy: number, check = false): number {
+function size(st: Structure, m: Model, res: Forces[], cat: Catalog, fy: number, check = false): number {
   const worst = worstOf(m, res);
-  const ratio = (s: Section, f: Forces) => ratioOf(s, f, fy);
   let maxRatio = 0;
   // the lightest section that works; in check mode, the current one is kept
-  const choose = (list: Section[], who: string, cur: Section, ok: (s: Section) => boolean = () => true) => {
+  const choose = (list: Section[], who: string, cur: Section, rule: (s: Section) => boolean = () => true) => {
     const f = worst.get(who)!;
-    // none works: the heaviest one that keeps the rule
-    const s = check ? cur : (list.find((s) => ok(s) && ratio(s, f) < LIMIT) ?? list.findLast(ok) ?? list[list.length - 1]);
-    maxRatio = Math.max(maxRatio, ratio(s, f));
+    const ok = (s: Section) => rule(s) && s.A >= (st.minA?.[who] ?? 0);
+    const L = m.len.get(who)!;
+    const ratio = (s: Section) => ratioOf(s, f, fy, L);
+    // none works: the heaviest one that keeps the rule (the minimum area can't break it)
+    const s = check ? cur : (list.find((s) => ok(s) && ratio(s) < LIMIT) ?? list.findLast(ok) ?? list.findLast(rule) ?? list[list.length - 1]);
+    maxRatio = Math.max(maxRatio, ratio(s));
     return s;
   };
   for (const a of st.arms) {
@@ -684,10 +766,11 @@ function size(st: Structure, m: Model, res: { N: number; My: number; Mz: number 
     s.sec = choose(cat.beams, s.id, s.sec, (x) => x.d <= arm.sec.d - 2 * arm.sec.tf);
   }
   const needClear = webClear(st.arms);
-  st.col = choose(cat.columns, 'column', st.col, (c) => c.d - 2 * c.tf >= needClear && c.d >= 250);
+  const colL = m.len.get('column')!;
+  st.col = choose(cat.columns, 'column', st.col, (c) => c.d - 2 * c.tf >= needClear && c.d >= 250 && colL / c.rmin < 200);
   // the upper shaft is sized by sizeTop, here it is only checked
   const top = worst.get('column-top');
-  if (st.splice && top) maxRatio = Math.max(maxRatio, ratio(st.splice.sec, top));
+  if (st.splice && top) maxRatio = Math.max(maxRatio, ratioOf(st.splice.sec, top, fy, m.len.get('column-top')!));
   return maxRatio;
 }
 
@@ -732,7 +815,9 @@ function sizeTop(st: Structure, m: Model, res: Forces[], cat: Catalog, fy: numbe
   const sp = st.splice!;
   const f = worstOf(m, res).get('column-top')!;
   const need = webClear(st.arms, sp.z);
-  sp.sec = cat.columns.find((s) => s.A <= st.col.A && s.d >= 200 && s.d - 2 * s.tf >= need && ratioOf(s, f, fy) < LIMIT) ?? st.col;
+  const L = m.len.get('column-top')!;
+  const minA = st.minA?.['column-top'] ?? 0;
+  sp.sec = cat.columns.find((s) => s.A <= st.col.A && s.A >= minA && s.d >= 200 && s.d - 2 * s.tf >= need && ratioOf(s, f, fy, L) < LIMIT) ?? st.col;
   // the same section above and below: no reason to splice
   if (sp.sec === st.col) st.splice = undefined;
   // a flange splice between two very different depths needs thick fills: bear instead
@@ -1033,6 +1118,7 @@ export type Result = {
   ok: boolean;
   log: string[];
   ratio: number;
+  alpha: number; // alphaCr of the final structure, Infinity if nothing is in compression
   solves: number;
   ms: { topology: number; solve: number; geometry: number };
   nodes: number;
@@ -1052,6 +1138,8 @@ export function generate(p0: Partial<Params>, cat: Catalog, detail: Detail = 'bo
   let solves = 0;
   let ok = false;
   let ratio = 0;
+  let alpha = Infinity;
+  let amp = 1;
   let m = model(st, p);
   let sized = 0;
   for (let k = 0; k < 40; k++) {
@@ -1067,27 +1155,42 @@ export function generate(p0: Partial<Params>, cat: Catalog, detail: Detail = 'bo
       continue;
     }
     ok = true;
+    const stab = stability(m, r);
+    ({ alpha, amp } = stab);
+    // too soft for the sway rule: a heavier member, not counted as a sizing pass
+    if (alpha < ALPHA_MIN && stiffen(st, m, stab, cat, p.fy, log)) continue;
     // three sizing passes, then one more solve to check the final sections
-    ratio = size(st, m, r.forces, cat, p.fy, sized === 3);
+    ratio = size(st, m, stab.forces, cat, p.fy, sized === 3);
     if (sized === 3) break;
     sized++;
   }
-  const again = () => (solves++, solve((m = model(st, p)).nodes, m.elems));
+  // solve again, with the sway effects in the forces. Too soft: a heavier
+  // member and solve again (a few times at most).
+  const again = () => {
+    for (let k = 0; ; k++) {
+      solves++;
+      const r = solve((m = model(st, p)).nodes, m.elems);
+      if (!r.ok) return undefined;
+      const stab = stability(m, r);
+      ({ alpha, amp } = stab);
+      if (k === 8 || alpha >= ALPHA_MIN || !stiffen(st, m, stab, cat, p.fy, log)) return stab.forces;
+    }
+  };
   // trusses and rods, from a draw of their own: size them, then check. If
   // the structure does not stand up with them, go back to it without them.
   if (ok) {
-    const keep = { ratio, col: st.col, arms: st.arms.map((a) => ({ sec: a.sec, braces: a.braces })), secs: st.secs.map((s) => s.sec) };
+    const keep = { ratio, alpha, amp, col: st.col, arms: st.arms.map((a) => ({ sec: a.sec, braces: a.braces })), secs: st.secs.map((s) => s.sec) };
     const n = log.length;
     if (addTrussesAndRods(st, cat, mulberry32(p.seed * 2654435 + 5), log)) {
       let good = true;
       for (let k = 0; k < 4 && good; k++) {
-        const r = again();
-        if (r.ok) ratio = size(st, m, r.forces, cat, p.fy, k === 3);
+        const f = again();
+        if (f) ratio = size(st, m, f, cat, p.fy, k === 3);
         else good = false;
       }
       if (!good) {
         st.col = keep.col;
-        ratio = keep.ratio;
+        ({ ratio, alpha, amp } = keep);
         st.arms.forEach((a, i) => Object.assign(a, keep.arms[i], { truss: undefined, rod: undefined }));
         st.secs.forEach((s, i) => (s.sec = keep.secs[i]));
         log.splice(n, log.length - n, 'trusses and rods: mechanism, left out');
@@ -1098,18 +1201,18 @@ export function generate(p0: Partial<Params>, cat: Catalog, detail: Detail = 'bo
   // posts, from a draw of their own: they bring loads, so size again and
   // check. If the structure does not stand up with them, leave them out.
   if (ok) {
-    const keep = { ratio, secs: snapshot(st) };
+    const keep = { ratio, alpha, amp, secs: snapshot(st) };
     const n = log.length;
     if (addPosts(st, p, cat, mulberry32(p.seed * 49979687 + 17), log)) {
       let good = true;
       for (let k = 0; k < 4 && good; k++) {
-        const r = again();
-        if (r.ok) ratio = size(st, m, r.forces, cat, p.fy, k === 3);
+        const f = again();
+        if (f) ratio = size(st, m, f, cat, p.fy, k === 3);
         else good = false;
       }
       if (!good) {
         restore(st, keep.secs);
-        ratio = keep.ratio;
+        ({ ratio, alpha, amp } = keep);
         st.arms.forEach((a) => (a.post = undefined));
         log.splice(n, log.length - n, 'posts: mechanism, left out');
         m = model(st, p);
@@ -1123,24 +1226,31 @@ export function generate(p0: Partial<Params>, cat: Catalog, detail: Detail = 'bo
   st.splice = ok ? pickSplice(st, det) : undefined;
   // solve with the cut, size the upper shaft, then check it (sizeTop can drop the splice)
   if (st.splice) {
-    const r = again();
-    if (r.ok) sizeTop(st, m, r.forces, cat, p.fy);
+    const before = { ratio, alpha, amp };
+    const f = again();
+    if (f) sizeTop(st, m, f, cat, p.fy);
     else st.splice = undefined;
-  }
-  if (st.splice) {
-    const r = again();
-    if (r.ok) {
-      ratio = size(st, m, r.forces, cat, p.fy, true);
-      log.push(`splice at ${st.splice.z} mm (${st.splice.kind}), ${st.col.id} below, ${st.splice.sec.id} above`);
-    } else st.splice = undefined;
+    if (st.splice) {
+      const f = again();
+      // a lighter upper shaft must not make the structure too soft
+      if (f && alpha >= Math.min(ALPHA_MIN, before.alpha)) {
+        ratio = size(st, m, f, cat, p.fy, true);
+        log.push(`splice at ${st.splice.z} mm (${st.splice.kind}), ${st.col.id} below, ${st.splice.sec.id} above`);
+      } else st.splice = undefined;
+    }
+    if (!st.splice) {
+      ({ ratio, alpha, amp } = before);
+      m = model(st, p);
+    }
   }
   // splices in the bay beams: geometry only, from a draw of their own
   if (ok) addBeamSplices(st, p, mulberry32(p.seed * 32452843 + 11), log);
+  log.push(alphaLog(alpha, amp));
   log.push(`${sized} sizing passes, final max ratio ${ratio.toFixed(2)} (limit ${LIMIT})`);
   const t2 = performance.now();
   const ps = parts(st, detail, p.seg);
   const t3 = performance.now();
-  return { st, parts: ps, ok, log, ratio, solves, ms: { topology: t1 - t0, solve: t2 - t1, geometry: t3 - t2 }, nodes: m.nodes.length };
+  return { st, parts: ps, ok, log, ratio, alpha, solves, ms: { topology: t1 - t0, solve: t2 - t1, geometry: t3 - t2 }, nodes: m.nodes.length };
 }
 
 // A real specimen: no random draw, no fix and no sizing. The solver checks
@@ -1155,12 +1265,16 @@ function buildSpecimen(p: Params, spec: Specimen, cat: Catalog, detail: Detail):
   const m = model(st, p);
   const r = solve(m.nodes, m.elems);
   let ratio = 0;
+  let alpha = Infinity;
   if (r.ok) {
-    ratio = size(st, m, r.forces, cat, p.fy, true);
+    const stab = stability(m, r);
+    alpha = stab.alpha;
+    ratio = size(st, m, stab.forces, cat, p.fy, true);
+    log.push(alphaLog(stab.alpha, stab.amp));
     log.push(`sections as given, max ratio ${ratio.toFixed(2)} under ${p.load} N/mm on the beams`);
   } else log.push(`mechanism at node ${r.node} (${m.nodeOwner[r.node].join(', ')}) ${r.dofName}: it does not stand up as given`);
   const t2 = performance.now();
   const ps = parts(st, detail, p.seg);
   const t3 = performance.now();
-  return { st, parts: ps, ok: r.ok, log, ratio, solves: 1, ms: { topology: t1 - t0, solve: t2 - t1, geometry: t3 - t2 }, nodes: m.nodes.length };
+  return { st, parts: ps, ok: r.ok, log, ratio, alpha, solves: 1, ms: { topology: t1 - t0, solve: t2 - t1, geometry: t3 - t2 }, nodes: m.nodes.length };
 }
