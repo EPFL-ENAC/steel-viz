@@ -104,7 +104,8 @@ const ID_MAT = {
 // base: the triangle and line floats before the bolt heads; per: heads per bolt
 type Piece = { part: Part; group: Group; fill: Mesh; lines?: LineSegments2; base: [number, number]; per: number; mat: LineMaterial };
 
-export function createViewer(host: HTMLElement, onTurn: (az: number, el: number) => void): Viewer {
+// onTurn: the user turned the view (done: the drag is over)
+export function createViewer(host: HTMLElement, onTurn: (az: number, el: number, done: boolean) => void): Viewer {
   const renderer = new WebGLRenderer({ antialias: true });
   renderer.setPixelRatio(Math.min(2, devicePixelRatio));
   const canvas = renderer.domElement;
@@ -119,6 +120,7 @@ export function createViewer(host: HTMLElement, onTurn: (az: number, el: number)
   let [az, el] = [225, 35.264];
   let [radius, centre] = [1, new Vector3()];
   let [zoom, pan] = [1, new Vector3()];
+  let fitted = true; // no zoom or pan by hand: a new size fits the structure again
   let [w, h] = [1, 1];
 
   const fillMat = new MeshBasicMaterial({ side: DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 2 });
@@ -202,7 +204,8 @@ export function createViewer(host: HTMLElement, onTurn: (az: number, el: number)
     outline.uniforms.texel.value = [1 / (w * pr), 1 / (h * pr)];
     outline.uniforms.width.value = THICK * pr;
     for (const p of pieces) p.mat.resolution.set(w, h);
-    place();
+    if (fitted && pieces.length) reset();
+    else place();
     redraw();
   };
   new ResizeObserver(resize).observe(host);
@@ -324,7 +327,7 @@ export function createViewer(host: HTMLElement, onTurn: (az: number, el: number)
   // ---- mouse and fingers: drag turns, right drag or shift drag pans,
   // the wheel or two fingers zoom, double click shows it all again
   const pointers = new Map<number, { x: number; y: number }>();
-  let drag: { x: number; y: number; az: number; el: number; pan: boolean } | null = null;
+  let drag: { x: number; y: number; az: number; el: number; pan: boolean; turned?: boolean } | null = null;
   let pinch = 0;
   canvas.addEventListener('contextmenu', (e) => e.preventDefault());
   canvas.addEventListener('pointerdown', (e) => {
@@ -355,18 +358,22 @@ export function createViewer(host: HTMLElement, onTurn: (az: number, el: number)
       const { r, up } = camera(az, el);
       const mmPx = (cam.top - cam.bottom) / h;
       pan.add(new Vector3(...add(mul(r, -(e.clientX - last.x) * mmPx), mul(up, (e.clientY - last.y) * mmPx))));
+      fitted = false;
       place();
       redraw();
       return;
     }
     const [dx, dy] = [e.clientX - drag.x, e.clientY - drag.y];
+    if (!drag.turned && Math.hypot(dx, dy) < 3) return;
+    drag.turned = true;
     view((((drag.az + dx * 0.5) % 360) + 360) % 360, Math.min(90, Math.max(0, drag.el + dy * 0.35)));
-    onTurn(az, el);
+    onTurn(az, el, false);
   });
   const end = (e: PointerEvent) => {
     pointers.delete(e.pointerId);
     if (pointers.size < 2) pinch = 0;
     if (!pointers.size) {
+      if (drag?.turned) onTurn(az, el, true);
       drag = null;
       host.classList.remove('turning');
     }
@@ -375,6 +382,7 @@ export function createViewer(host: HTMLElement, onTurn: (az: number, el: number)
   canvas.addEventListener('pointercancel', end);
   const zoomBy = (k: number) => {
     zoom = Math.min(40, Math.max(0.5, zoom * k));
+    fitted = false;
     place();
     redraw();
   };
@@ -408,6 +416,7 @@ export function createViewer(host: HTMLElement, onTurn: (az: number, el: number)
     const asp = w / h;
     zoom = (1.1 * radius * 0.9) / Math.max(1, asp > 1 ? Math.max(ey, ex / asp) : Math.max(ex, ey * asp));
     pan.copy(new Vector3(...add(mul(r, (x0 + x1) / 2), mul(up, (y0 + y1) / 2))));
+    fitted = true;
     place();
     redraw();
   };

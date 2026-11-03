@@ -80,15 +80,21 @@
   button.primary:hover { background: var(--primary-hover); border-color: var(--primary-hover); }
 
   .sheet { position: relative; background: var(--bg); border: 1px solid var(--border); min-width: 0; min-height: 0; display: flex; flex-direction: column; }
-  .drawing { flex: 1; min-height: 0; display: grid; place-items: center; padding: 16px; color: var(--fg); }
+  .drawing { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); color: var(--fg); }
   .drawing svg { width: 100%; height: 100%; max-width: 100%; }
   .drawing.px svg { width: var(--px); height: auto; }
   .drawing { cursor: grab; touch-action: none; user-select: none; }
   /* two views of the same structure: the WebGL one to turn and zoom, the exact SVG for export */
-  #svg { width: 100%; height: 100%; display: grid; place-items: center; min-height: 0; }
-  #gl { width: 100%; height: 100%; min-height: 0; overflow: hidden; }
-  .drawing.gl { display: block; padding: 0; }
-  .drawing.gl #svg, .drawing:not(.gl) #gl { display: none; }
+  #svg { position: relative; min-width: 0; min-height: 0; box-sizing: border-box; padding: 16px; display: grid; place-items: center; }
+  #gl { position: relative; min-width: 0; min-height: 0; overflow: hidden; }
+  .drawing.v-3d #svg, .drawing.v-svg #gl { display: none; }
+  /* both: the 3D view on the left, the exact drawing on the right */
+  .drawing.v-both { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .drawing.v-both #gl { border-right: 1px solid var(--border); }
+  .drawing.v-both #gl::before, .drawing.v-both #svg::before {
+    content: attr(data-label); position: absolute; top: 10px; left: 12px; z-index: 1;
+    font-size: 12px; color: var(--fg-muted); pointer-events: none;
+  }
   .drawing.turning { cursor: grabbing; }
   .drawing:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
   .hint { position: absolute; top: 10px; right: 12px; font-size: 12px; color: var(--fg-muted); pointer-events: none; }
@@ -159,9 +165,13 @@
         <label><input type="radio" name="weights" id="w-two" value="two" checked><span>Two weights</span></label>
         <label><input type="radio" name="weights" id="w-one" value="one"><span>One weight</span></label>
       </div>
-      <div class="seg" role="radiogroup" aria-label="Show">
-        <label><input type="radio" name="size" id="s-3d" value="3d" checked><span>3D</span></label>
-        <label><input type="radio" name="size" id="s-full" value="0"><span>Full SVG</span></label>
+      <div class="seg" role="radiogroup" aria-label="Viewer" id="viewers">
+        <label><input type="radio" name="viewer" id="vw-3d" value="3d" checked><span>3D</span></label>
+        <label><input type="radio" name="viewer" id="vw-svg" value="svg"><span>SVG</span></label>
+        <label><input type="radio" name="viewer" id="vw-both" value="both"><span>Both</span></label>
+      </div>
+      <div class="seg" role="radiogroup" aria-label="SVG size">
+        <label><input type="radio" name="size" id="s-full" value="0" checked><span>Full size</span></label>
         <label><input type="radio" name="size" id="s-256" value="256"><span>256 px</span></label>
         <label><input type="radio" name="size" id="s-96" value="96"><span>96 px</span></label>
         <label><input type="radio" name="size" id="s-48" value="48"><span>48 px</span></label>
@@ -193,7 +203,7 @@
   </aside>
 
   <main class="sheet">
-    <div class="drawing" id="drawing" tabindex="0" role="img" aria-label="Generated steel structure. Drag, or use the arrow keys, to turn it."><div id="svg"></div><div id="gl"></div></div>
+    <div class="drawing" id="drawing" tabindex="0" role="img" aria-label="Generated steel structure. Drag, or use the arrow keys, to turn it."><div id="gl" data-label="3D (WebGL)"></div><div id="svg" data-label="Exact SVG"></div></div>
     <div class="hint" id="hint" aria-hidden="true">Drag to turn</div>
     <dl class="titleblock">
       <div><dt>Column</dt><dd id="tb-col"></dd></div>
@@ -219,17 +229,20 @@ let lastSvg = '';
 let viewer = null;
 let inViewer = null; // the structure the viewer shows
 try {
-  viewer = createViewer($('gl'), (az, el) => {
+  viewer = createViewer($('gl'), (az, el, done) => {
     for (const v of document.querySelectorAll('input[name="view"]')) v.checked = false;
     $('az').value = Math.round(az);
     $('el').value = Math.round(el);
     outputs();
+    // the SVG beside it: the fast drawing while it turns, exact when it stops
+    if (mode() === 'both') update(false, false, !done);
   });
 } catch {
-  $('s-3d').closest('label').remove();
-  $('s-full').checked = true;
+  $('viewers').style.display = 'none';
+  $('vw-svg').checked = true;
 }
-const is3d = () => !!viewer && radio('size') === '3d';
+// which viewers show: 3d, svg or both
+const mode = () => (viewer ? radio('viewer') : 'svg');
 const css = (k, d) => getComputedStyle(document.documentElement).getPropertyValue(k).trim() || d;
 const paint = () => viewer?.setColors({ bg: css('--bg', '#ffffff'), fg: css('--fg', '#212121'), accent: css('--accent', '#e30713') });
 paint();
@@ -256,10 +269,10 @@ function build() {
 function draw(animate, fast = false) {
   if (!current) return;
   const t0 = performance.now();
-  const gl = is3d();
-  $('drawing').classList.toggle('gl', gl);
-  $('hint').textContent = gl ? 'Drag to turn, right drag to move, wheel to zoom, double click to see it all' : 'Drag to turn';
-  if (gl) {
+  const m = mode();
+  for (const k of ['3d', 'svg', 'both']) $('drawing').classList.toggle(`v-${k}`, m === k);
+  $('hint').textContent = { '3d': 'Drag to turn, right drag to move, wheel to zoom, double click to see it all', svg: 'Drag to turn', both: 'Drag either one to turn. In 3D: right drag to move, wheel to zoom' }[m];
+  if (m !== 'svg') {
     if (inViewer !== current.r) {
       viewer.show(current.r.parts);
       inViewer = current.r;
@@ -267,6 +280,8 @@ function draw(animate, fast = false) {
     viewer.setWeights($('w-two').checked);
     viewer.view(+$('az').value, +$('el').value);
     if (animate) viewer.build();
+  }
+  if (m === '3d') {
     lastSvg = ''; // made on Copy SVG
     const s = viewer.stats();
     $('tb-draw').textContent = `${s.faces} faces, ${s.bolts} bolts, ${s.lines} lines, WebGL`;
@@ -326,7 +341,7 @@ function update(rebuild, animate, fast = false) {
 for (const id of ['seed', 'arms', 'height', 'load']) $(id).addEventListener('input', () => update(true, true));
 for (const el of document.querySelectorAll('input[name="family"], input[name="form"]')) el.addEventListener('change', () => update(true, true));
 for (const el of document.querySelectorAll('input[name="detail"]')) el.addEventListener('change', () => update(true, false));
-for (const el of document.querySelectorAll('input[name="weights"], input[name="size"]')) el.addEventListener('change', () => update(false, false));
+for (const el of document.querySelectorAll('input[name="weights"], input[name="size"], input[name="viewer"]')) el.addEventListener('change', () => update(false, false));
 for (const el of document.querySelectorAll('input[name="view"]')) el.addEventListener('change', () => { setView(el.value); update(false, false); });
 for (const id of ['az', 'el']) {
   $(id).addEventListener('input', () => {
@@ -389,7 +404,7 @@ function turn(daz, del) {
 }
 let drag = null;
 $('drawing').addEventListener('pointerdown', (e) => {
-  if (e.button !== 0 || is3d()) return; // the viewer turns itself
+  if (e.button !== 0 || $('gl').contains(e.target)) return; // the 3D view turns itself
   drag = { x: e.clientX, y: e.clientY, az: +$('az').value, el: +$('el').value, moved: false };
   try { $('drawing').setPointerCapture(e.pointerId); } catch {} // keep the drag when the pointer leaves
   $('drawing').classList.add('turning');
