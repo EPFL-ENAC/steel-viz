@@ -119,14 +119,15 @@ To find a structure that works as a logo, `score.ts` gives each one a score from
 node pick.ts --count 150 --arms 4,5,6 --top 12 --sheet best.html  # best.html shows the 12 best drawings
 ```
 
-It needs Node 24 or newer. Node runs the `.ts` files directly. Install the deps once (three.js, three-mesh-bvh, three-edge-projection, esbuild for the playground):
+It needs Node 24 or newer. Node runs the `.ts` files directly. Install the deps once (three.js, three-mesh-bvh, three-edge-projection, and Vite and Vue for the playground):
 
 ```sh
 pnpm install                                          # once
 node --test                                           # solver and geometry tests
 pnpm run type-check                                   # checks the types (Node only strips them)
 node cli.ts --seed 5 --view iso --frames --out s5.svg # one structure, plus build frames
-node build-playground.ts                              # writes playground.html, one page with sliders
+pnpm dev                                              # the playground, with live reload
+pnpm build                                            # the playground as a static site in dist/
 ```
 
 three-edge-projection is not on npm, it comes from GitHub (tag `v0.0.11`). Import `three-edge-projection/src/ProjectionGenerator.js`, not the package root: the root also loads `SilhouetteGenerator`, which needs `clipper2-js`. The library works in metres: it only looks for faces up to 1000 units in front of an edge. So `hlr.ts` turns mm into m before it calls it.
@@ -145,6 +146,16 @@ Files:
 - `hlr.ts`: the exact hidden-line renderer, with bolt heads as real hex solids.
 - `webgl.ts`: the 3D view of the playground.
 - `three-edge-projection.d.ts`: types for the part of three-edge-projection that `hlr.ts` uses (the library ships none).
-- `cli.ts`, `build-playground.ts`, `playground.entry.ts`, `playground.template.html`: command line and playground page. `build-playground.ts` bundles `playground.entry.ts` with esbuild.
+- `cli.ts`: the command line.
+- `app/`, `vite.config.ts`: the playground, a Vue app served by Vite.
 
-`playground.html` and the SVGs are build output, they stay out of git.
+`dist/` and the SVGs are build output, they stay out of git.
+
+## Playground and worktrees
+
+`pnpm dev` serves the playground on `PLAYGROUND_PORT` (5180 when it is not set). With wtx, each worktree runs it in its own `playground` pane, on its own port. `wtx open playground` opens it.
+
+- It reloads on each save. A change in `app/` is a hot reload. A change in the generator, a renderer or a table reloads the page.
+- The settings (seed, form, view, viewer...) live in the URL hash. A reload keeps them, and you can send the link.
+- Above the controls: the branch, its commit, and if it has changes not committed.
+- The "vs main" viewer draws the same structure twice: with this checkout on the left, and with the code of `main` on the right (the merge base, so only what the branch changed). The title block says "same drawing" or what differs. `PLAYGROUND_BASE` picks another base branch. That code comes from `git archive`, in `node_modules/.cache/steel-viz-base/`.

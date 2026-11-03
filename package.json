@@ -8,9 +8,10 @@
     "node": ">=24"
   },
   "scripts": {
+    "dev": "vite",
+    "build": "vite build",
     "test": "node --test",
-    "type-check": "tsc",
-    "playground": "node build-playground.ts"
+    "type-check": "tsc"
   },
   "dependencies": {
     "three": "0.187.0",
@@ -20,7 +21,10 @@
   "devDependencies": {
     "@types/node": "24.19.2",
     "@types/three": "0.187.0",
+    "@vitejs/plugin-vue": "^6.0.10",
     "esbuild": "0.25.12",
-    "typescript": "7.0.2"
+    "typescript": "7.0.2",
+    "vite": "^8.3.5",
+    "vue": "^3.5.44"
   }
 }
