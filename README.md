@@ -5,7 +5,7 @@ Steel structures drawn like a technical drawing, with a 3D view and a build anim
 What RESSLab Hub uses it for:
 
 - Now: the logo. The hub takes an exported SVG, not this code.
-- Maybe later: the build animation as a loading animation, and a view of each experiment in the hub (built from its real sections, not from a seed).
+- Maybe later: the build animation as a loading animation, and a view of each experiment in the hub. The input for it is ready: `--specimen` draws a beam-to-column test from its real sections, not from a seed (see below).
 
 What comes next is in [ROADMAP.md](ROADMAP.md).
 
@@ -37,6 +37,57 @@ The solver checks the structure again with them and sizes the chords, the diagon
 A detail plate that would go through another part is left out. For example, a continuity plate on the side of the web where another beam frames in.
 
 Parts must not go through each other. A secondary beam is coped (its flanges cut back) where it meets the flanges of its arm, and its plate fits between those flanges. A brace stays above the arms under it on the same face of its column, and is long enough that its two gussets don't touch. `clash.ts` checks this with boxes, and `geometry.test.ts` runs it on every form, 240 structures.
+
+It can also draw a real test of RESSLab Hub instead of a seed: a specimen. For now it draws a beam-to-column subassembly (the test of one connection): one column on a base plate, with one or two beams. That's what the `connection` table of the hub describes, 99 of its 100 tests.
+
+The sections are the real ones, so there is no fix loop and no sizing. The solver runs once, and the log gives the max ratio under `--load`, only as information. The cap plate and the continuity plates are drawn. Splices, foot gussets, trusses and rods are not.
+
+`specimen.ts` reads two kinds of JSON file. The first one is a record of the hub `connection` table, as the hub API gives it (numbers, `null`) or as a row of `connections.csv` (strings, `NA`). A file with a `specimen_type` is a hub record. The two files in `specimens/` are hub records (resslab-hub-data is public domain). The second one is our own `Specimen`, for a test that is not in the hub:
+
+```json
+{
+  "id": "my-test",
+  "family": "eu",
+  "column": { "section": "HEB 300", "height": 2500 },
+  "beams": [
+    { "section": "IPE 360", "bearing": 0, "length": 1600, "connection": "welded" },
+    { "section": { "id": "H 300x150x7x10", "d": 300, "bf": 150, "tf": 10, "tw": 7 },
+      "bearing": 90, "length": 1200, "at": 1600, "connection": "end_plate" }
+  ]
+}
+```
+
+- `section`: a name from the table of `family` (`W14x82` and `HEB 300` work, written the hub way), a built-up name read as d x bf x tw x tf (`H-700x300x13x24`), or the dimensions in mm. With a name, the full table is used, also the deep W sections that the random generator never takes.
+- `bearing`: 0 and 180 put the beam on a column flange, 90 and 270 on the web.
+- `length`: from the column axis to the beam tip, in mm.
+- `at`: the height of the beam centre line above the column foot. By default, half the column height.
+- `connection`: `shear_tab`, `end_plate`, `flange_plates` or `welded`. A beam alone on a shear tab is a mechanism: the log says so, and the drawing still comes out.
+- `continuity: false` leaves out the continuity plates. `beams: []` gives a column alone.
+
+From a hub record:
+
+- The sections come from the numbers (`d_c b_cf t_cf t_cw`, `d_b b_bf t_bf t_bw`), not from the names. The names are free text (`build up H section`) and don't link to the section tables.
+- An exterior test has one beam of length `l_b`. An interior test has two, one on each flange, `l_b / 2` each (there `l_b` is the whole span). The beams are at half the column height `h_c`.
+- `t_cp` 0 means no continuity plates.
+- The connection is the closest one we can draw:
+
+| hub | drawn as | not drawn yet |
+|---|---|---|
+| WUF-W | welded | |
+| WUF-B | welded | the bolted shear tab on the beam web |
+| RBS | welded | the cut in the beam flanges |
+| BFP | flange plates | |
+| WFP | flange plates | the plates are welded, we draw them bolted |
+| BEEP | end plate | |
+| KBB | flange plates | the Kaiser bracket |
+
+What we draw differently from the real test goes into the log as a note: the connection, the doubler plates (`n_dp`) and the slab. A test that is not a subassembly ("Exterior - Frame"), or a missing number, throws an error that names the field.
+
+```sh
+node cli.ts --specimen specimens/Chi_and_Uang_2002_DC2.json --view iso   # writes steel-Chi_and_Uang_2002_DC2-iso.svg
+```
+
+`--specimen` takes the same drawing options as a seed (`--view`, `--detail`, `--animate`, `--frames`, `--painter`, `--size`). The family comes from `--family`, else from the file, else aisc. `--seed`, `--form`, `--arms` and `--height` don't apply. `specimen.test.ts` covers the two hub files, the format and the errors.
 
 The output is an SVG line drawing with the hidden lines removed. The SVG can also build itself step by step, as an animation.
 
@@ -86,7 +137,8 @@ Files:
 - `sections.ts`: section properties and the CSV tables, plus the round rods (not in the hub tables).
 - `sections/`, `tables.ts`: the CSV tables, and how Node reads them.
 - `solver.ts`: 3D frame solver (6 DOF per node, pinned ends, finds mechanisms).
-- `generate.ts`: topology, the fix loop, trusses and rods, and the sizing.
+- `generate.ts`: topology, the fix loop, trusses and rods, and the sizing. Also the specimen path (`buildSpecimen`).
+- `specimen.ts`, `specimens/`: a real test as input (the `Specimen` type, the section lookup, the hub record reader), and two hub records as examples and test data.
 - `steel.ts`: geometry (profiles, copes, plates, clevis, bolts), camera and the painter renderer.
 - `clash.ts`: do two parts go through each other (each part as a few boxes).
 - `score.ts`, `pick.ts`: the logo score, and the scan over many seeds.

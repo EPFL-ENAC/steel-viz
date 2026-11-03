@@ -19,8 +19,11 @@ export type Section = {
   rmin: number;
 };
 
-export type Catalog = { beams: Section[]; columns: Section[]; tubes: Section[]; rods: Section[] };
+// beams, columns, tubes, rods: what the random generator picks from.
+// all: every I section and tube of the table, with no filter (a real
+// specimen can use a W36 or a rectangular tube).
 export type Family = 'aisc' | 'eu';
+export type Catalog = { family: Family; beams: Section[]; columns: Section[]; tubes: Section[]; rods: Section[]; all: Section[] };
 
 export function iSection(id: string, d: number, bf: number, tf: number, tw: number): Section {
   const hw = d - 2 * tf;
@@ -72,17 +75,19 @@ const byArea = (a: Section, b: Section) => a.A - b.A;
 
 // i: the I-section table, hss: the tube table, both raw CSV text
 export function loadCatalog(family: Family, i: string, hss: string): Catalog {
-  const shapes = parseCsv(i)
+  const allShapes = parseCsv(i)
     .filter((r) => (family === 'aisc' ? /^W\d/.test(r.id) : /^(IPE|HE) /.test(r.id)))
     .map((r) => iSection(r.id, +r.d, +r.bf, +r.tf, +r.tw))
-    .filter((s) => s.d > 0 && s.d <= 700);
-  const tubes = parseCsv(hss)
-    .map((r) => rhsSection(r.id, +r.h, +r.b, +r.t))
-    .filter((s) => s.d === s.bf && s.d >= 60 && s.d <= 300); // square tubes only
+    .filter((s) => s.d > 0);
+  const allTubes = parseCsv(hss).map((r) => rhsSection(r.id, +r.h, +r.b, +r.t)).filter((s) => s.d > 0);
+  const shapes = allShapes.filter((s) => s.d <= 700);
+  const tubes = allTubes.filter((s) => s.d === s.bf && s.d >= 60 && s.d <= 300); // square tubes only
   return {
+    family,
     beams: shapes.filter((s) => (family === 'aisc' ? s.bf / s.d < 0.75 : s.id.startsWith('IPE'))).sort(byArea),
     columns: shapes.filter((s) => s.bf / s.d >= 0.8).sort(byArea),
     tubes: tubes.sort(byArea),
     rods: RODS[family].map(([id, D]) => rodSection(id, D)),
+    all: [...allShapes, ...allTubes],
   };
 }

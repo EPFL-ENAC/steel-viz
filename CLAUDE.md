@@ -12,13 +12,14 @@ Node 24 or newer runs the `.ts` files directly. Imports keep the `.ts` extension
 
 ```sh
 pnpm install              # once
-node --test               # solver tests, and no clash and no floating part on 240 structures (about 4 s)
+node --test               # solver tests, no clash and no floating part on 240 structures, the specimens (about 4 s)
 pnpm run type-check       # tsc, strict, no emit (about 0.2 s)
 node --test solver.test.ts                         # one file
 node --test --test-name-pattern "clash|support"    # some tests by name
 node build-playground.ts  # playground.html, one page with sliders (build output, never commit it)
 node cli.ts --seed 5 --view iso --out s5.svg       # also --form, --family eu, --animate, --frames, --painter, --size 96
 node pick.ts --count 150 --top 12 --sheet best.html
+node cli.ts --specimen specimens/Chi_and_Uang_2002_DC2.json --view iso   # a real test from a JSON file (specimen.ts)
 ```
 
 Run `node --test` after every change to `generate.ts`, `steel.ts` or `clash.ts`. `cli.ts` prints the solver log, the part count and `FLOATING` if a part comes before the part it stands on. It's the fastest way to look at one seed.
@@ -28,7 +29,7 @@ Node only strips the types. `pnpm run type-check` checks them (`tsc` with `tscon
 ## How it fits together
 
 1. `sections.ts` turns the CSV tables into a `Catalog`. In Node, `tables.ts` reads `sections/`. In the playground, `build-playground.ts` puts the tables inline in the page.
-2. `generate(params, catalog)` in `generate.ts` builds a `Structure` (topology), then loops: `solve()` from `solver.ts`, `fix()` on a mechanism, `size()` from the forces. Then it adds trusses and rods, then the details (splice, base gussets). Last, `parts()` turns the structure into `Part[]` with the geometry helpers of `steel.ts`.
+2. `generate(params, catalog)` in `generate.ts` builds a `Structure` (topology), then loops: `solve()` from `solver.ts`, `fix()` on a mechanism, `size()` from the forces. Then it adds trusses and rods, then the details (splice, base gussets). Last, `parts()` turns the structure into `Part[]` with the geometry helpers of `steel.ts`. With `params.specimen` (a real test, from `specimen.ts`), `generate()` skips all that: `buildSpecimen()` builds the given column and beams, solves once with no fix and no sizing, adds the cap and continuity plates, then calls `parts()`.
 3. A `Part` (type in `steel.ts`) is what every renderer takes: faces in mm, bolts as `dots`, `step` (build order), `supports` (ids of the parts it stands on), `boxes` (for `clash.ts`), `kind` and `from` (for the animation).
 4. Three renderers take `Part[]`: `render` in `steel.ts` (painter, fast, sometimes wrong), `renderHLR` in `hlr.ts` (exact, the default, the only one for export), `createViewer` in `webgl.ts` (3D view of the playground). All of them share `camera()` and `timeline()` from `steel.ts`, so the views and the animation match.
 5. `playground.entry.ts` puts the functions the page needs on `globalThis`. `playground.template.html` uses them. If the page needs a new function, export it there.

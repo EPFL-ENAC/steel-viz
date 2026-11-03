@@ -1,21 +1,26 @@
 // node cli.ts --seed 3 --view iso --family aisc --out x.svg
 //   [--detail members|plates|bolts] [--arms 5] [--height 6000] [--load 20]
 //   [--form mix|tree|portal|box] [--animate] [--frames] [--painter] [--flat] [--size px]
-import { writeFileSync } from 'node:fs';
+// node cli.ts --specimen specimens/Chi_and_Uang_2002_DC2.json --view iso
+//   a real test from a JSON file (specimen.ts), with the same view and drawing options
+import { readFileSync, writeFileSync } from 'node:fs';
 import { gzipSync } from 'node:zlib';
 import { loadCatalog, type Family } from './sections.ts';
 import { DEFAULTS, floating, generate, type Detail, type Params } from './generate.ts';
 import { render as painter, VIEWS } from './steel.ts';
 import { renderHLR } from './hlr.ts';
 import { readTables } from './tables.ts';
+import { toSpecimen } from './specimen.ts';
 
 
 const args = process.argv.slice(2);
 const opt = (k: string, d: string) => (args.includes(`--${k}`) ? args[args.indexOf(`--${k}`) + 1] : d);
-const family = opt('family', 'aisc') as Family;
+const specFile = opt('specimen', '');
+const spec = specFile ? toSpecimen(JSON.parse(readFileSync(specFile, 'utf8'))) : undefined;
+const family = opt('family', spec?.family ?? 'aisc') as Family;
 const view = opt('view', 'iso');
 const [az, el] = VIEWS[view] ?? view.split(',').map(Number);
-const out = opt('out', `steel-${opt('seed', '1')}-${view}.svg`);
+const out = opt('out', `steel-${spec ? spec.id : opt('seed', '1')}-${view}.svg`);
 const detail = opt('detail', 'bolts') as Detail;
 // exact hidden lines by default; --painter for the old, fast painter's trick
 const render = args.includes('--painter') ? painter : renderHLR;
@@ -24,7 +29,7 @@ const t0 = performance.now();
 const cat = loadCatalog(family, ...readTables(family));
 const t1 = performance.now();
 const r = generate(
-  { seed: +opt('seed', '1'), form: opt('form', 'mix') as Params['form'], arms: +opt('arms', `${DEFAULTS.arms}`), height: +opt('height', `${DEFAULTS.height}`), load: +opt('load', `${DEFAULTS.load}`), fy: family === 'eu' ? 355 : 345 },
+  { seed: +opt('seed', '1'), form: opt('form', 'mix') as Params['form'], arms: +opt('arms', `${DEFAULTS.arms}`), height: +opt('height', `${DEFAULTS.height}`), load: +opt('load', `${DEFAULTS.load}`), fy: family === 'eu' ? 355 : 345, specimen: spec },
   cat,
   detail,
 );
@@ -37,11 +42,14 @@ writeFileSync(out, svg.svg);
 
 const kb = (s: string) => (Buffer.byteLength(s) / 1024).toFixed(1);
 const lost = floating(r.parts);
+const beams = r.st.arms.map((a) => `${a.sec.id} ${a.conn}${a.braces.map((b) => ' + brace ' + b.sec.id).join('')}`).join('; ');
 console.log(
   [
-    `${out}: seed ${opt('seed', '1')}, ${family}, view ${view}, detail ${detail}, ${render === painter ? 'painter' : 'hlr'}`,
-    `  structure: ${r.st.form}, ${r.st.cols.length} × column ${r.st.col.id}, ${r.st.arms.length} arms (${r.st.arms.map((a) => `${a.sec.id} ${a.conn}${a.braces.map((b) => ' + brace ' + b.sec.id).join('')}`).join('; ')})` +
-      (r.st.secs.length ? `, ${r.st.secs.length} secondary (${r.st.secs.map((s) => `${s.sec.id} ${s.conn}`).join('; ')})` : ''),
+    `${out}: ${spec ? `specimen ${spec.id}` : `seed ${opt('seed', '1')}`}, ${family}, view ${view}, detail ${detail}, ${render === painter ? 'painter' : 'hlr'}`,
+    spec
+      ? `  structure: specimen, column ${r.st.col.id} ${r.st.H} mm high, ${r.st.arms.length} beam${r.st.arms.length === 1 ? '' : 's'} (${beams})${r.st.continuity === false ? ', no continuity plates' : ''}`
+      : `  structure: ${r.st.form}, ${r.st.cols.length} × column ${r.st.col.id}, ${r.st.arms.length} arms (${beams})` +
+        (r.st.secs.length ? `, ${r.st.secs.length} secondary (${r.st.secs.map((s) => `${s.sec.id} ${s.conn}`).join('; ')})` : ''),
     `  solver: ${r.ok ? 'stable' : 'MECHANISM'}, ${r.nodes} nodes, ${r.solves} solves`,
     ...r.log.map((l) => '    ' + l),
     `  drawing: ${r.parts.length} parts, ${svg.faces} faces, ${svg.dots} bolts, ${kb(svg.svg)} kB, gzip ${(gzipSync(svg.svg).length / 1024).toFixed(1)} kB`,

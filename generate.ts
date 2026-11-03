@@ -6,6 +6,8 @@
 // - box: four columns in a rectangle, beams and braces only in its four
 //   walls, nothing sticks out.
 // The solver checks it stands up, fixes it if not, and sizes the members.
+// A real test specimen (specimen.ts) skips all the random draws: its column
+// and beams are given, the solver only checks it.
 import { add, len, mul, norm, sub, type V } from './vec.ts';
 import { solve, type Elem, type FNode } from './solver.ts';
 import type { Catalog, Section } from './sections.ts';
@@ -14,6 +16,7 @@ import {
   type ConnType, type Geo, type P2, type Part, type Plate,
 } from './steel.ts';
 import { overlap } from './clash.ts';
+import { BEAM_CONNS, findSection, type Specimen } from './specimen.ts';
 
 export type Detail = 'members' | 'plates' | 'bolts';
 export type Params = {
@@ -26,6 +29,7 @@ export type Params = {
   secondaryP: number;
   seg: number;
   form: Form | 'mix'; // mix: the seed picks the form
+  specimen?: Specimen; // a real test: seed, form, arms, height, braceP and secondaryP are not used
 };
 export const DEFAULTS: Params = { seed: 1, arms: 8, height: 2500, load: 100, fy: 345, braceP: 0.3, secondaryP: 0.35, seg: 400, form: 'mix' };
 
@@ -70,7 +74,10 @@ export type Form = 'tree' | 'portal' | 'box';
 type Splice = { z: number; sec: Section; kind: 'bearing' | 'flange' };
 // base: the gussets on the base plates, none, on the flange faces, or on all four faces
 type Base = 'none' | 'flange' | 'all';
-export type Structure = { form: Form; H: number; col: Section; cols: Col[]; arms: Arm[]; secs: Secondary[]; splice?: Splice; base?: Base };
+// id: the specimen id. continuity: false leaves out the continuity plates.
+export type Structure = {
+  form: Form | 'specimen'; id?: string; H: number; col: Section; cols: Col[]; arms: Arm[]; secs: Secondary[]; splice?: Splice; base?: Base; continuity?: boolean;
+};
 const colId = (i: number) => (i ? `column${i + 1}` : 'column');
 const baseId = (i: number) => (i ? `base${i + 1}` : 'base');
 
@@ -311,6 +318,32 @@ function addTrussesAndRods(st: Structure, cat: Catalog, rng: () => number, log: 
     log.push(`${a.id}: tension rod, up to ${rod.zr} mm`);
   }
   return added;
+}
+
+// a real test specimen: one column and its beams, all given (specimen.ts)
+function specimen(spec: Specimen, cat: Catalog): Structure {
+  const H = spec.column.height;
+  const bad = (msg: string) => new Error(`${spec.id}: ${msg}`);
+  if (!(H > 0)) throw bad(`the column height must be above 0, not ${JSON.stringify(H)}`);
+  const col = findSection(spec.column.section, cat);
+  const arms: Arm[] = (spec.beams ?? []).map((b, i) => {
+    const id = `beam${i + 1}`;
+    const sec = findSection(b.section, cat);
+    if (![0, 90, 180, 270].includes(b.bearing)) throw bad(`${id}: bearing must be 0, 90, 180 or 270, not ${JSON.stringify(b.bearing)}`);
+    if (!BEAM_CONNS.includes(b.connection)) throw bad(`${id}: connection must be one of ${BEAM_CONNS.join(', ')}, not ${JSON.stringify(b.connection)}`);
+    const onWeb = b.bearing % 180 === 90;
+    // the column face the beam lands on, from the column axis
+    const face = onWeb ? (col.kind === 'I' ? col.tw / 2 : col.bf / 2) : col.d / 2;
+    if (!(b.length > face + 100)) throw bad(`${id}: length ${b.length} mm is too short, the column face is at ${face} mm from its axis`);
+    if (onWeb && col.kind === 'I' && sec.bf + 20 > col.d - 2 * col.tf) throw bad(`${id}: the beam (bf ${sec.bf} mm) does not fit between the column flanges`);
+    const z = (b.at ?? H / 2) + sec.d / 2; // top of steel
+    if (z > H || z - sec.d < 0) throw bad(`${id}: the beam is not inside the column height (0 to ${H} mm)`);
+    return { id, col: 0, z, bearing: b.bearing, L: b.length, conn: b.connection, sec, braces: [] };
+  });
+  for (const a of arms)
+    for (const o of arms)
+      if (a !== o && a.bearing === o.bearing && a.z - a.sec.d < o.z && o.z - o.sec.d < a.z) throw bad(`${a.id} and ${o.id} are on the same face at the same height`);
+  return { form: 'specimen', id: spec.id, H, col, cols: [{ x: [0, 0, 0] }], arms, secs: [], base: 'none', continuity: spec.continuity };
 }
 
 // ------------------------------------------------------------- analysis
@@ -728,7 +761,7 @@ function details(
       [a.col, a.conn, a.bearing, a.z, a.sec], [a.to, a.conn2, a.bearing + 180, a.z, a.sec],
       ...(a.truss ? [[a.col, a.truss.conn, a.bearing, a.z - a.truss.D, a.truss.chord], [a.to, a.truss.conn2, a.bearing + 180, a.z - a.truss.D, a.truss.chord]] : []),
     ] as [number | undefined, ConnType | undefined, number, number, Section][]);
-    for (const [ci2, conn, bearing, zt, sec] of beamEnds) {
+    for (const [ci2, conn, bearing, zt, sec] of st.continuity === false ? [] : beamEnds) {
       if (ci2 !== ci || !conn || !MOMENT.includes(conn) || bearing % 180 !== 0) continue;
       for (const z of [zt - sec.tf / 2, zt - sec.d + sec.tf / 2])
         if (levels.every((l) => Math.abs(l - z) > 30)) levels.push(z);
@@ -797,6 +830,7 @@ export type Result = {
 
 export function generate(p0: Partial<Params>, cat: Catalog, detail: Detail = 'bolts'): Result {
   const p = { ...DEFAULTS, ...p0 };
+  if (p.specimen) return buildSpecimen(p, p.specimen, cat, detail);
   const rng = mulberry32(p.seed * 7919 + 13);
   const t0 = performance.now();
   // a draw of its own, so a tree seed gives the same tree in mix and in tree
@@ -874,4 +908,26 @@ export function generate(p0: Partial<Params>, cat: Catalog, detail: Detail = 'bo
   const ps = parts(st, detail, p.seg);
   const t3 = performance.now();
   return { st, parts: ps, ok, log, ratio, solves, ms: { topology: t1 - t0, solve: t2 - t1, geometry: t3 - t2 }, nodes: m.nodes.length };
+}
+
+// A real specimen: no random draw, no fix and no sizing. The solver checks
+// that it stands up as built, and gives the max ratio under p.load (only for
+// the log, the test loads are not known here). No trusses, rods, splice or
+// base gussets.
+function buildSpecimen(p: Params, spec: Specimen, cat: Catalog, detail: Detail): Result {
+  const t0 = performance.now();
+  const st = specimen(spec, cat);
+  const t1 = performance.now();
+  const log = [...(spec.notes ?? [])];
+  const m = model(st, p);
+  const r = solve(m.nodes, m.elems);
+  let ratio = 0;
+  if (r.ok) {
+    ratio = size(st, m, r.forces, cat, p.fy, true);
+    log.push(`sections as given, max ratio ${ratio.toFixed(2)} under ${p.load} N/mm on the beams`);
+  } else log.push(`mechanism at node ${r.node} (${m.nodeOwner[r.node].join(', ')}) ${r.dofName}: it does not stand up as given`);
+  const t2 = performance.now();
+  const ps = parts(st, detail, p.seg);
+  const t3 = performance.now();
+  return { st, parts: ps, ok: r.ok, log, ratio, solves: 1, ms: { topology: t1 - t0, solve: t2 - t1, geometry: t3 - t2 }, nodes: m.nodes.length };
 }

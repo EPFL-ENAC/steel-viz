@@ -1,0 +1,22 @@
+{
+  "id": "Chi_and_Uang_2002_DC2",
+  "specimen_type": "Exterior - Beam Loaded - Subassembly",
+  "connection_type": "RBS",
+  "section_c": "W27x194",
+  "d_c": 713.74,
+  "b_cf": 355.6,
+  "t_cf": 34.036,
+  "t_cw": 19.05,
+  "h_c": 3810,
+  "section_b": "W36x150",
+  "d_b": 911.86,
+  "b_bf": 304.8,
+  "t_bf": 23.876,
+  "t_bw": 15.875,
+  "l_b": 3581.4,
+  "t_cp": 25.4,
+  "n_dp": 0,
+  "slab": false,
+  "reference": "Chi, B., and Uang, C.-M. (2002). “Cyclic response and design recommendations of reduced beam section moment connections with deep columns.” Journal of Structural Engineering, 128(4), 464–473. https://doi.org/10.1061/(ASCE)0733-9445(2002)128:4(464).",
+  "link": "https://doi.org/10.1061/(ASCE)0733-9445(2002)128:4(464)"
+}
