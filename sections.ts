@@ -1,4 +1,4 @@
-// Steel sections from the hub's own tables (frontend/src/assets).
+// Steel sections from the resslab-hub tables (copied in sections/, read by tables.ts).
 // We only read the dimensions and compute A, I, J, Wpl ourselves: the AISC
 // table's `a` and `iy` columns are not in mm, the EU one is fine, so the
 // safe path is the same formulas for both.

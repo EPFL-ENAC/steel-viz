@@ -2,12 +2,12 @@
 // esbuild bundles playground.entry.ts (our modules and three.js) into one
 // script, and the page script uses the globals it sets.
 import { readFileSync, writeFileSync } from 'node:fs';
+import { TABLE_FILES, readTable } from './tables.ts';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const assets = join(here, '../../frontend/src/assets');
 
 const bundle = await build({
   entryPoints: [join(here, 'playground.entry.ts')],
@@ -20,10 +20,10 @@ const bundle = await build({
 });
 const code = bundle.outputFiles[0].text;
 
-const csv = (p: string) => JSON.stringify(readFileSync(join(assets, p), 'utf8'));
+const csv = (fs: string[]) => fs.map((f) => JSON.stringify(readTable(f))).join(', ');
 const tables = `const TABLES = {
-  aisc: [${csv('connection/aisc-sections.csv')}, ${csv('hss/hss-aisc-sections.csv')}],
-  eu: [${csv('connection/european-sections.csv')}, ${csv('hss/hss-european-sections.csv')}],
+  aisc: [${csv(TABLE_FILES.aisc)}],
+  eu: [${csv(TABLE_FILES.eu)}],
 };`;
 
 const page = readFileSync(join(here, 'playground.template.html'), 'utf8').replace('/*__CODE__*/', () => `${tables}\n${code}`);

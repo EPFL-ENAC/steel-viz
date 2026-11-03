@@ -1,21 +1,14 @@
-// node tools/steel-generator/cli.ts --seed 3 --view iso --family aisc --out x.svg
+// node cli.ts --seed 3 --view iso --family aisc --out x.svg
 //   [--detail members|plates|bolts] [--arms 5] [--height 6000] [--load 20]
 //   [--form mix|tree|portal|box] [--animate] [--frames] [--painter] [--flat] [--size px]
-import { readFileSync, writeFileSync } from 'node:fs';
+import { writeFileSync } from 'node:fs';
 import { gzipSync } from 'node:zlib';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { loadCatalog, type Family } from './sections.ts';
 import { DEFAULTS, floating, generate, type Detail, type Params } from './generate.ts';
 import { render as painter, VIEWS } from './steel.ts';
 import { renderHLR } from './hlr.ts';
+import { readTables } from './tables.ts';
 
-const here = dirname(fileURLToPath(import.meta.url));
-const assets = join(here, '../../frontend/src/assets');
-export const tables = {
-  aisc: [readFileSync(join(assets, 'connection/aisc-sections.csv'), 'utf8'), readFileSync(join(assets, 'hss/hss-aisc-sections.csv'), 'utf8')],
-  eu: [readFileSync(join(assets, 'connection/european-sections.csv'), 'utf8'), readFileSync(join(assets, 'hss/hss-european-sections.csv'), 'utf8')],
-};
 
 const args = process.argv.slice(2);
 const opt = (k: string, d: string) => (args.includes(`--${k}`) ? args[args.indexOf(`--${k}`) + 1] : d);
@@ -28,7 +21,7 @@ const detail = opt('detail', 'bolts') as Detail;
 const render = args.includes('--painter') ? painter : renderHLR;
 
 const t0 = performance.now();
-const cat = loadCatalog(family, ...(tables[family] as [string, string]));
+const cat = loadCatalog(family, ...readTables(family));
 const t1 = performance.now();
 const r = generate(
   { seed: +opt('seed', '1'), form: opt('form', 'mix') as Params['form'], arms: +opt('arms', `${DEFAULTS.arms}`), height: +opt('height', `${DEFAULTS.height}`), load: +opt('load', `${DEFAULTS.load}`), fy: family === 'eu' ? 355 : 345 },

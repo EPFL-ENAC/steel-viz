@@ -1,6 +1,13 @@
-# Steel generator (spike)
+# steel-viz
 
-A test for the hub logo (#263). It builds a steel structure from a seed, in one of three forms:
+Steel structures drawn like a technical drawing, with a 3D view and a build animation. It started as a test for the RESSLab Hub logo (RESSLab-Team/resslab-hub#263).
+
+What RESSLab Hub uses it for:
+
+- Now: the logo. The hub takes an exported SVG, not this code.
+- Maybe later: the build animation as a loading animation, and a view of each experiment in the hub (built from its real sections, not from a seed).
+
+It builds a steel structure from a seed, in one of three forms:
 
 - Tree: one column on a base plate, with arms, braces and secondary beams.
 - Portal: two columns with beams between them, on one or two storeys, and a few arms out of the columns.
@@ -8,7 +15,7 @@ A test for the hub logo (#263). It builds a steel structure from a seed, in one 
 
 Each bay storey gets its own bracing: none (moment connections), knee braces at both ends, a chevron (two braces up to the middle of the beam) or one diagonal. `--form` picks the form (`mix` lets the seed pick it, a tree seed gives the same tree in both).
 
-A small frame solver checks that the structure stands up. If it does not, the generator adds a brace or changes a pinned connection to a moment connection. Then it sizes each member from the hub's own AISC or EU section tables (`frontend/src/assets/connection/` and `frontend/src/assets/hss/`).
+A small frame solver checks that the structure stands up. If it does not, the generator adds a brace or changes a pinned connection to a moment connection. Then it sizes each member from the AISC or EU section tables of RESSLab Hub. They are copied in `sections/` (from `frontend/src/assets/connection/` and `frontend/src/assets/hss/` in the hub). Copy them again when the hub changes them.
 
 Then come the small details, from a random draw of their own, so a seed keeps the same structure:
 
@@ -34,7 +41,7 @@ The output is an SVG line drawing with the hidden lines removed. The SVG can als
 Two renderers:
 
 - `hlr.ts` (the default): exact hidden lines, from [three-edge-projection](https://github.com/gkjohnson/three-edge-projection). It takes 50 to 150 ms for one structure.
-- `render` in `steel.ts` (`--painter`): the painter's trick, from `sculpture_render.py` on `feat/logo-aisc`. About 5 ms, but some lines are wrong. The playground uses it only while you drag the view in an SVG mode.
+- `render` in `steel.ts` (`--painter`): the painter's trick, ported from `sculpture_render.py` (resslab-hub, branch `feat/logo-aisc`). About 5 ms, but some lines are wrong. The playground uses it only while you drag the view in an SVG mode.
 
 The playground also has a 3D view (`webgl.ts`, the "3D" choice, on by default). It is for looking at the structure, not for export. It runs in WebGL with three.js, and builds the geometry once per structure, so you can turn it, move it and zoom with every bolt shown, at the frame rate of the screen. Faces are filled with the background and the GPU depth buffer hides the hidden lines. Edges are thin lines. A second pass gives the thick outlines with the same rule as `hlr.ts` (a jump in depth over 50 mm, or another part behind), read from a depth and part-id texture. That pass works per pixel, so it runs at about 3 samples per CSS px (2x on a 1x screen) and is averaged down, or the outlines would show stair steps. Bolt heads get thin lines only. The build animation plays in 3D too, on the same `timeline()`. The lines are close to the exact drawing but not the same (no gaps, no merged lines). "Copy SVG" always gives the exact drawing from `hlr.ts`, for the current view.
 
@@ -62,7 +69,6 @@ node pick.ts --count 150 --arms 4,5,6 --top 12 --sheet best.html  # best.html sh
 It needs Node 24 or newer. Node runs the `.ts` files directly. Install the deps once (three.js, three-mesh-bvh, three-edge-projection, esbuild for the playground):
 
 ```sh
-cd tools/steel-generator
 pnpm install                                          # once
 node --test                                           # solver and geometry tests
 node cli.ts --seed 5 --view iso --frames --out s5.svg # one structure, plus build frames
@@ -75,6 +81,7 @@ Files:
 
 - `vec.ts`: vector helpers.
 - `sections.ts`: section properties and the CSV tables, plus the round rods (not in the hub tables).
+- `sections/`, `tables.ts`: the CSV tables, and how Node reads them.
 - `solver.ts`: 3D frame solver (6 DOF per node, pinned ends, finds mechanisms).
 - `generate.ts`: topology, the fix loop, trusses and rods, and the sizing.
 - `steel.ts`: geometry (profiles, copes, plates, clevis, bolts), camera and the painter renderer.

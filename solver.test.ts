@@ -1,4 +1,4 @@
-// node --test tools/steel-generator/
+// node --test
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { E, solve, type Elem, type FNode } from './solver.ts';

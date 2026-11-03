@@ -1,16 +1,14 @@
-// node --test tools/steel-generator/
+// node --test
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import { loadCatalog } from './sections.ts';
 import { floating, generate, type Form } from './generate.ts';
 import { clashes } from './clash.ts';
+import { readTables } from './tables.ts';
 
-const A = new URL('../../frontend/src/assets/', import.meta.url);
-const read = (p: string) => readFileSync(new URL(p, A), 'utf8');
 const cats = {
-  aisc: loadCatalog('aisc', read('connection/aisc-sections.csv'), read('hss/hss-aisc-sections.csv')),
-  eu: loadCatalog('eu', read('connection/european-sections.csv'), read('hss/hss-european-sections.csv')),
+  aisc: loadCatalog('aisc', ...readTables('aisc')),
+  eu: loadCatalog('eu', ...readTables('eu')),
 };
 
 const forms: Form[] = ['tree', 'portal', 'box'];

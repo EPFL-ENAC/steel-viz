@@ -1,6 +1,15 @@
 {
+  "name": "@epfl-enac/steel-viz",
+  "description": "Steel structures as technical line drawings, a 3D view and a build animation",
   "type": "module",
   "private": true,
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "test": "node --test",
+    "playground": "node build-playground.ts"
+  },
   "dependencies": {
     "three": "0.187.0",
     "three-edge-projection": "github:gkjohnson/three-edge-projection#v0.0.11",

@@ -1,23 +1,16 @@
 // Scan many seeds and list the ones that read best as a logo (score.ts).
-// node tools/steel-generator/pick.ts --count 300 [--from 1] [--arms 4,5,6]
+// node pick.ts --count 300 [--from 1] [--arms 4,5,6]
 //   [--form mix|tree|portal|box] [--view iso] [--family aisc] [--top 12]
 //   [--sheet best.html] [--size 160]
 // --sheet writes a page with the best drawings, at --size px.
-import { readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { writeFileSync } from 'node:fs';
 import { loadCatalog, type Family } from './sections.ts';
 import { DEFAULTS, generate, type Params } from './generate.ts';
 import { VIEWS } from './steel.ts';
 import { renderHLR } from './hlr.ts';
 import { logoScore } from './score.ts';
+import { readTables } from './tables.ts';
 
-const here = dirname(fileURLToPath(import.meta.url));
-const assets = join(here, '../../frontend/src/assets');
-const files = {
-  aisc: ['connection/aisc-sections.csv', 'hss/hss-aisc-sections.csv'],
-  eu: ['connection/european-sections.csv', 'hss/hss-european-sections.csv'],
-};
 
 const args = process.argv.slice(2);
 const opt = (k: string, d: string) => (args.includes(`--${k}`) ? args[args.indexOf(`--${k}`) + 1] : d);
@@ -26,7 +19,7 @@ const view = opt('view', 'iso');
 const [az, el] = VIEWS[view] ?? view.split(',').map(Number);
 const [from, count, top] = [+opt('from', '1'), +opt('count', '200'), +opt('top', '12')];
 const armsList = opt('arms', `${DEFAULTS.arms}`).split(',').map(Number);
-const cat = loadCatalog(family, ...(files[family].map((f) => readFileSync(join(assets, f), 'utf8')) as [string, string]));
+const cat = loadCatalog(family, ...readTables(family));
 const form = opt('form', 'mix') as Params['form'];
 const params = (seed: number, arms: number) => ({ seed, arms, form, height: DEFAULTS.height, load: DEFAULTS.load, fy: family === 'eu' ? 355 : 345 });
 
