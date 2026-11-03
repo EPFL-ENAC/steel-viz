@@ -8,12 +8,12 @@
 // The solver checks it stands up, fixes it if not, and sizes the members.
 // A real test specimen (specimen.ts) skips all the random draws: its column
 // and beams are given, the solver only checks it.
-import { add, len, mul, norm, sub, type V } from './vec.ts';
+import { add, cross, len, mul, norm, sub, type V } from './vec.ts';
 import { solve, type Elem, type FNode } from './solver.ts';
 import type { Catalog, Section } from './sections.ts';
 import {
-  box3, boxOf, flat, geo, hardware, memberBoxes, memberFaces, resolve, splicePlates, stiffener, supportFace, BEARING_T, PINNED, SETBACK, SPLICE_HALF,
-  type ConnType, type Geo, type P2, type Part, type Plate,
+  box3, boxOf, flat, geo, hardware, memberBoxes, memberFaces, prism, profRound, resolve, splicePlates, stiffener, supportFace, BEARING_T, EDGE, PINNED, SETBACK, SPLICE_HALF,
+  type Box, type ConnType, type Geo, type P2, type Part, type Plate,
 } from './steel.ts';
 import { overlap } from './clash.ts';
 import { BEAM_CONNS, findSection, type Specimen } from './specimen.ts';
@@ -27,11 +27,14 @@ export type Params = {
   fy: number; // MPa
   braceP: number;
   secondaryP: number;
+  postP: number; // the chance of a post, on each beam that can take one
+  beamSpliceP: number; // the chance of a splice, on each long bay beam (less on a box)
+  studP: number; // the chance that the beams get shear studs, for the whole structure
   seg: number;
   form: Form | 'mix'; // mix: the seed picks the form
   specimen?: Specimen; // a real test: seed, form, arms, height, braceP and secondaryP are not used
 };
-export const DEFAULTS: Params = { seed: 1, arms: 8, height: 2500, load: 100, fy: 345, braceP: 0.3, secondaryP: 0.35, seg: 400, form: 'mix' };
+export const DEFAULTS: Params = { seed: 1, arms: 8, height: 2500, load: 100, fy: 345, braceP: 0.3, secondaryP: 0.35, postP: 0.3, beamSpliceP: 0.3, studP: 0.3, seg: 400, form: 'mix' };
 
 export function mulberry32(a: number) {
   return () => {
@@ -49,10 +52,15 @@ export function mulberry32(a: number) {
 // the depth of the arm.
 type Brace = { a: number; zb: number; sec: Section; end: 0 | 1 };
 // An arm starts on column `col`. A bay beam also ends on column `to`.
+// splice: a bolted splice in a bay beam, that far along it (geometry only).
 type Arm = {
   id: string; col: number; to?: number; z: number; bearing: number; L: number; conn: ConnType; conn2?: ConnType; sec: Section; braces: Brace[];
-  truss?: Truss; rod?: Rod;
+  truss?: Truss; rod?: Rod; post?: Post; splice?: number;
 };
+// A post on the top flange of a beam, `a` along it, `h` high from the top of
+// the beam to the top of its cap plate. Free at the top, where it brings a
+// point load into the beam.
+type Post = { a: number; h: number; sec: Section };
 // A Warren truss under an arm. The arm is its top chord. D: from the top of
 // the arm down to the top of the bottom chord. The bottom chord starts on
 // the column (a bay: runs to the other column) and ends at `end`, measured
@@ -66,6 +74,8 @@ type Rod = { a: number; zr: number; sec: Section };
 const chordId = (a: Arm) => `${a.id}-chord`;
 const webId = (a: Arm, k: number) => `${a.id}-web${k + 1}`;
 const rodId = (a: Arm) => `${a.id}-rod`;
+const postId = (a: Arm) => `${a.id}-post`;
+const farId = (a: Arm) => `${a.id}-far`;
 const drop = (a: Arm, b: Brace) => a.z - a.sec.d - b.zb;
 const braceId = (a: Arm, i: number) => `${a.id}-brace${i ? i + 1 : ''}`;
 type Secondary = { id: string; arm: number; a: number; side: 1 | -1; L: number; conn: ConnType; sec: Section };
@@ -78,6 +88,7 @@ type Base = 'none' | 'flange' | 'all';
 // id: the specimen id. continuity: false leaves out the continuity plates.
 export type Structure = {
   form: Form | 'specimen'; id?: string; H: number; col: Section; cols: Col[]; arms: Arm[]; secs: Secondary[]; splice?: Splice; base?: Base; continuity?: boolean;
+  studs?: boolean; // shear studs on the top flange of the beams
 };
 const colId = (i: number) => (i ? `column${i + 1}` : 'column');
 const baseId = (i: number) => (i ? `base${i + 1}` : 'base');
@@ -297,11 +308,9 @@ function trussFor(st: Structure, a: Arm, cat: Catalog, rng: () => number): Truss
   return { D, end, chord: mid(cat.beams), conn: conn(), conn2: a.to !== undefined ? conn() : undefined, webs, low, hMin: low ? h : H_MIN };
 }
 
-// a rod from the column down to an arm that sticks out, if the column above
-// has room for it: under the next arm on that face and under its braces
-function rodFor(st: Structure, a: Arm, cat: Catalog, rng: () => number): Rod | undefined {
-  if (a.to !== undefined || a.braces.length || a.truss || a.L < 900) return undefined;
-  const at = Math.min(r50(a.L * (0.65 + 0.2 * rng())), a.L - 150);
+// how high the room above an arm goes, on its face of the column: under the
+// next arm on that face, under its truss and its braces
+function roomAbove(st: Structure, a: Arm): number {
   let top = st.H - 250;
   for (const f of faces(st.arms)) {
     if (f.a === a || f.col !== a.col || f.bearing !== a.bearing || f.z <= a.z) continue;
@@ -310,6 +319,15 @@ function rodFor(st: Structure, a: Arm, cat: Catalog, rng: () => number): Rod | u
     const e = f.col === f.a.col && f.bearing === f.a.bearing ? 0 : 1;
     for (const b of f.a.braces) if (b.end === e) top = Math.min(top, b.zb - 300);
   }
+  return top;
+}
+
+// a rod from the column down to an arm that sticks out, if the column above
+// has room for it
+function rodFor(st: Structure, a: Arm, cat: Catalog, rng: () => number): Rod | undefined {
+  if (a.to !== undefined || a.braces.length || a.truss || a.L < 900) return undefined;
+  const at = Math.min(r50(a.L * (0.65 + 0.2 * rng())), a.L - 150);
+  const top = roomAbove(st, a);
   const zr = Math.min(a.z + r50(at * (0.7 + 0.5 * rng())), Math.floor(top / 50) * 50);
   if (zr - a.z < Math.max(400, 0.5 * at)) return undefined;
   return { a: at, zr, sec: cat.rods[Math.floor(cat.rods.length / 2)] };
@@ -338,6 +356,117 @@ function addTrussesAndRods(st: Structure, cat: Catalog, rng: () => number, log: 
     log.push(`${a.id}: tension rod, up to ${rod.zr} mm`);
   }
   return added;
+}
+
+// ------------------------------------------------------------- posts
+// A short column on the top flange of a beam, free at the top, where it
+// brings a point load into the beam. On an arm that sticks out (with room
+// above it on its face, and no rod or truss), or on a bay beam of the top
+// storey. At most POST_MAX in a structure.
+const POST_MAX = 2;
+const POST_LOAD = 800; // mm: the post carries the load of this much beam
+const POST_PLATES = 20 + 16; // base plate and cap plate, mm
+// the post fits on the beam: its flanges are not wider than the beam flange
+const postFits = (s: Section, beam: Section) => s.bf <= beam.bf;
+function addPosts(st: Structure, p: Params, cat: Catalog, rng: () => number, log: string[]): boolean {
+  if (st.form === 'specimen' || p.postP <= 0) return false;
+  const topZ = Math.max(...st.arms.filter((a) => a.to !== undefined).map((a) => a.z));
+  let n = 0;
+  for (const a of st.arms) {
+    if (n >= POST_MAX) break;
+    if (rng() >= p.postP) continue;
+    const h0 = r50(400 + 500 * rng());
+    const at = rng();
+    if (a.truss || a.rod) continue;
+    const bay = a.to !== undefined;
+    if (bay && a.z !== topZ) continue;
+    const h = bay ? h0 : Math.min(h0, Math.floor((roomAbove(st, a) - a.z) / 50) * 50);
+    if (h < 400 + POST_PLATES) continue;
+    const sec = cat.columns.find((s) => postFits(s, a.sec));
+    if (!sec) continue;
+    // a free spot along it, away from the end plates at the column, the
+    // secondaries and the braces
+    const end = colFace(st, a.bearing) + 350 + sec.d / 2 + 2 * EDGE;
+    const t0 = Math.max(end, bay ? 0.3 * a.L : 0.5 * a.L);
+    const t1 = Math.min(bay ? a.L - end : a.L - 150, bay ? 0.7 * a.L : a.L);
+    const busy = [
+      ...st.secs.filter((s) => st.arms[s.arm] === a).map((s) => s.a),
+      ...a.braces.map((b) => (b.end ? a.L - b.a : b.a)),
+    ];
+    const ok: number[] = [];
+    for (let t = Math.ceil(t0 / 50) * 50; t <= t1; t += 50) if (busy.every((x) => Math.abs(x - t) >= 300)) ok.push(t);
+    if (!ok.length) continue;
+    a.post = { a: ok[Math.floor(at * ok.length)], h, sec };
+    n++;
+    log.push(`${a.id}: post at ${a.post.a} mm, ${h} mm high`);
+  }
+  return n > 0;
+}
+
+// The sections of a structure, to go back to them: the references, not a
+// copy (sizeTop compares sections with ===).
+function snapshot(st: Structure) {
+  return {
+    col: st.col,
+    arms: st.arms.map((a) => ({
+      sec: a.sec, braces: a.braces.map((b) => b.sec), rod: a.rod?.sec, chord: a.truss?.chord, webs: a.truss?.webs.map((w) => w.sec),
+    })),
+    secs: st.secs.map((s) => s.sec),
+  };
+}
+function restore(st: Structure, k: ReturnType<typeof snapshot>) {
+  st.col = k.col;
+  st.arms.forEach((a, i) => {
+    const r = k.arms[i];
+    a.sec = r.sec;
+    a.braces.forEach((b, j) => (b.sec = r.braces[j]));
+    if (a.rod) a.rod.sec = r.rod!;
+    if (a.truss) {
+      a.truss.chord = r.chord!;
+      a.truss.webs.forEach((w, j) => (w.sec = r.webs![j]));
+    }
+  });
+  st.secs.forEach((s, i) => (s.sec = k.secs[i]));
+}
+
+// ------------------------------------------------------------- beam splice
+// A bolted splice in a long bay beam: plates on both flanges and on the web,
+// like the flange splice of a column. It is a full strength splice, so the
+// solver keeps the beam in one piece. Between 20 and 40 % of the span from
+// one end, where the moment is small in a beam fixed at both ends, and clear
+// of the end connections, the braces, the secondary beams and a post.
+const SPLICE_BEAM_MIN = 2000; // mm
+function addBeamSplices(st: Structure, p: Params, rng: () => number, log: string[]) {
+  if (st.form === 'specimen' || p.beamSpliceP <= 0) return;
+  const P = p.beamSpliceP * (st.form === 'box' ? 0.4 : 1);
+  st.arms.forEach((a, i) => {
+    const r = rng();
+    const pick = rng();
+    if (r >= P || a.to === undefined || a.truss || a.L < SPLICE_BEAM_MIN) return;
+    const end = colFace(st, a.bearing) + 350 + SPLICE_HALF;
+    const busy: [number, number][] = [
+      ...a.braces.map((b): [number, number] => {
+        // its gusset reaches up to about 340 mm along the beam
+        const x = b.end ? a.L - b.a : b.a;
+        return [x - 350, x + 350];
+      }),
+      ...st.secs.filter((s) => s.arm === i).map((s): [number, number] => [s.a - s.sec.bf / 2 - 150, s.a + s.sec.bf / 2 + 150]),
+    ];
+    if (a.post) {
+      const half = a.post.sec.d / 2 + 2 * EDGE + 50;
+      busy.push([a.post.a - half, a.post.a + half]);
+    }
+    const ok: number[] = [];
+    for (let t = Math.ceil(0.2 * a.L / 25) * 25; t <= a.L - 0.2 * a.L; t += 25) {
+      if (t > 0.4 * a.L && t < 0.6 * a.L) continue;
+      if (t < end || t > a.L - end) continue;
+      if (busy.some(([lo, hi]) => t + SPLICE_HALF > lo && t - SPLICE_HALF < hi)) continue;
+      ok.push(t);
+    }
+    if (!ok.length) return;
+    a.splice = ok[Math.floor(pick * ok.length)];
+    log.push(`${a.id}: beam splice at ${a.splice} mm`);
+  });
 }
 
 // a real test specimen: one column and its beams, all given (specimen.ts)
@@ -421,6 +550,7 @@ function model(st: Structure, p: Params): Model {
     for (const s of st.secs) if (s.arm === i) at.add(s.a);
     for (const wb of a.truss?.webs ?? []) at.add(wb.t);
     if (a.rod) at.add(a.rod.a);
+    if (a.post) at.add(a.post.a);
     const pts = [...at].sort((x, y) => x - y).map((t) => add(o, mul(h, t)));
     chain(a.id, pts, a.sec, PINNED.includes(a.conn), w(a.sec) + p.load, a.conn2 !== undefined && PINNED.includes(a.conn2));
     const tr = a.truss;
@@ -438,6 +568,15 @@ function model(st: Structure, p: Params): Model {
     if (a.rod) {
       const id = rodId(a);
       elems.push({ i: node(add(st.cols[a.col].x, [0, 0, a.rod.zr]), id), j: node(add(o, mul(h, a.rod.a)), id), p: a.rod.sec, pinI: true, pinJ: true, q: [0, 0, -w(a.rod.sec)] });
+      owner.push(id);
+    }
+    if (a.post) {
+      // fixed on the beam, free at the top, with a point load there
+      const id = postId(a);
+      const b0 = add(o, mul(h, a.post.a));
+      const top = node(add(b0, [0, 0, a.post.h]), id);
+      nodes[top].f = [0, 0, -p.load * POST_LOAD];
+      elems.push({ i: node(b0, id), j: top, p: a.post.sec, pinI: false, pinJ: false, q: [0, 0, -w(a.post.sec)] });
       owner.push(id);
     }
     a.braces.forEach((b, k) => {
@@ -530,6 +669,13 @@ function size(st: Structure, m: Model, res: { N: number; My: number; Mz: number 
       });
     }
     if (a.rod) a.rod.sec = choose(cat.rods, rodId(a), a.rod.sec);
+    const post = a.post;
+    if (post) {
+      // if no post fits on the beam any more, not a heavier one than now
+      const sec = a.sec;
+      const fits = cat.columns.some((s) => postFits(s, sec));
+      post.sec = choose(cat.columns, postId(a), post.sec, (s) => (fits ? postFits(s, sec) : s.A <= post.sec.A));
+    }
     a.braces.forEach((b, k) => {
       const L = Math.hypot(b.a, drop(a, b));
       b.sec = choose(cat.tubes, braceId(a, k), b.sec, (s) => L / s.rmin < 200);
@@ -636,6 +782,7 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
   // one member and its end connections, in build order: plates, member, bolts
   type End = { S: Geo; sId: string; conn: ConnType; at: 'from' | 'to' };
   // from: the direction the member (and its plates) come from
+  // it gives back how far its end plates reach along it, at each end
   const member = (g: Geo, ends: End[], from: V) => {
     const rs = ends.map((e) => resolve(g, e.S, e.at));
     g.copes = rs.flatMap((r) => (r.cope ? [r.cope] : []));
@@ -652,9 +799,36 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
     out.push({ id: g.id, step: step++, supports, kind: 'member', from, faces: memberFaces(g, seg, cuts), boxes: memberBoxes(g), dots: [] });
     const dots = hws.flatMap(({ hw }) => hw.dots);
     if (bolts && dots.length) out.push({ id: `${g.id}-bolts`, step: step++, supports: [g.id, ...supports], kind: 'bolts', faces: [], dots });
+    const reach = { from: 0, to: 0 };
+    for (const { e, hw } of hws) reach[e.at] = Math.max(0, ...hw.reach) + (e.conn === 'end_plate' ? 25 : 0);
+    return reach;
   };
 
   const armGeo = new Map<string, Geo>();
+  // each piece of beam, for the studs, with how far its end plates reach
+  const pieces: { a: Arm; g: Geo; ends: [number, number] }[] = [];
+  // a post on the top flange at T, on the beam piece P: base plate, post, cap, bolts
+  const post = (a: Arm, T: V, P: Geo) => {
+    const { h, sec } = a.post!;
+    const up: V = [0, 0, 1];
+    const u = P.u;
+    const across = Math.max(P.sec.bf, sec.bf);
+    const along = sec.d + 4 * EDGE;
+    const bid = `${postId(a)}-base`;
+    const bc = add(T, [0, 0, 10]);
+    if (plates) out.push({ id: bid, step: step++, supports: [P.id], kind: 'plate', from: up, faces: box3(bc, up, u, across, 20, along), boxes: [boxOf(bc, up, u, across, 20, along)], dots: [] });
+    // the web along the beam, so the flanges sit across it
+    const pg = geo(postId(a), sec, add(T, [0, 0, 20]), add(T, [0, 0, h - 16]), false);
+    pg.w = u;
+    pg.v = cross(u, pg.u);
+    out.push({ id: pg.id, step: step++, supports: [plates ? bid : P.id], kind: 'member', from: up, faces: memberFaces(pg, seg), boxes: memberBoxes(pg), dots: [] });
+    const cc = add(T, [0, 0, h - 8]);
+    if (plates) out.push({ id: `${postId(a)}-cap`, step: step++, supports: [pg.id], kind: 'plate', from: up, faces: box3(cc, up, u, sec.bf + 20, 16, sec.d + 20), boxes: [boxOf(cc, up, u, sec.bf + 20, 16, sec.d + 20)], dots: [] });
+    const gauge = Math.max(50, P.sec.bf - 2 * EDGE);
+    const v = cross(up, u);
+    const dots = [-1, 1].flatMap((su) => [-1, 1].map((sv) => ({ p: add(add(add(T, mul(u, su * (sec.d / 2 + EDGE))), mul(v, (sv * gauge) / 2)), [0, 0, 21]), n: up })));
+    if (bolts) out.push({ id: `${postId(a)}-bolts`, step: step++, supports: [pg.id, bid], kind: 'bolts', faces: [], dots });
+  };
   for (const a of st.arms) {
     const h = hdir(a.bearing);
     const o = start(st, a);
@@ -669,9 +843,26 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
       ends.push({ S: Sj, sId: Sj.id, conn: a.conn2!, at: 'to' });
     }
     const g = geo(a.id, a.sec, p0, p1, true);
-    armGeo.set(a.id, g);
     // an arm slides in along its axis, a bay beam is lowered between its columns
-    member(g, ends, a.to === undefined ? h : [0, 0, 1]);
+    if (a.splice === undefined) {
+      armGeo.set(a.id, g);
+      const r = member(g, ends, a.to === undefined ? h : [0, 0, 1]);
+      pieces.push({ a, g, ends: [r.from, r.to] });
+    } else {
+      // two pieces, each on its column, then the splice plates on both
+      const cut = add(o, mul(h, a.splice));
+      const g1 = geo(a.id, a.sec, p0, cut, true);
+      const g2 = geo(farId(a), a.sec, cut, p1, true);
+      armGeo.set(g1.id, g1);
+      armGeo.set(g2.id, g2);
+      pieces.push({ a, g: g1, ends: [member(g1, [ends[0]], [0, 0, 1]).from, 0] });
+      pieces.push({ a, g: g2, ends: [0, member(g2, [ends[1]], [0, 0, 1]).to] });
+      const sid = `${a.id}-splice`;
+      const k = splicePlates(g1, g2, 'flange');
+      if (plates) out.push({ id: sid, step: step++, supports: [g1.id, g2.id], kind: 'plate', from: [0, 0, 1], faces: k.faces, boxes: k.boxes, dots: [] });
+      if (bolts) out.push({ id: `${sid}-bolts`, step: step++, supports: [g2.id, sid], kind: 'bolts', faces: [], dots: k.dots });
+    }
+    if (a.post) post(a, add(o, mul(h, a.post.a)), pieceAt(armGeo, a, a.post.a));
     a.braces.forEach((b, k) => {
       const hb = b.end ? mul(h, -1) : h; // from its column, toward the arm
       const B = add(st.cols[b.end ? a.to! : a.col].x, [0, 0, b.zb]);
@@ -683,9 +874,10 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
       const t0 = (supportFace(Sb, hb) + SETBACK.gusset) / (un[0] * hb[0] + un[1] * hb[1]);
       const t1 = SETBACK.gusset / un[2];
       const bg = geo(braceId(a, k), b.sec, add(B, mul(un, t0)), sub(C, mul(un, t1)), false);
+      const P = pieceAt(armGeo, a, b.end ? a.L - b.a : b.a);
       member(bg, [
         { S: Sb, sId: Sb.id, conn: 'gusset', at: 'from' },
-        { S: g, sId: a.id, conn: 'gusset', at: 'to' },
+        { S: P, sId: P.id, conn: 'gusset', at: 'to' },
       ], a.to === undefined ? hb : [h[1], -h[0], 0]); // from outside, level; in a bay, from the side
     });
     const tr = a.truss;
@@ -734,11 +926,11 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
   }
   for (const s of st.secs) {
     const a = st.arms[s.arm];
-    const ag = armGeo.get(a.id)!;
+    const ag = pieceAt(armGeo, a, s.a);
     const side = mul(ag.v, s.side);
     const at = add(start(st, a), mul(hdir(a.bearing), s.a));
     const g = geo(s.id, s.sec, add(at, mul(side, supportFace(ag, side) + SETBACK[s.conn])), add(at, mul(side, s.L)), true);
-    member(g, [{ S: ag, sId: a.id, conn: s.conn, at: 'from' }], side);
+    member(g, [{ S: ag, sId: ag.id, conn: s.conn, at: 'from' }], side);
   }
   details(st, cols, armGeo, colAt, extra);
 
@@ -750,13 +942,80 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
     boxes.push(...part.boxes!);
     kept.push(part);
   }
+  // the studs last, so they make room for all the rest
+  const studded = new Map<string, Part>();
+  if (st.studs && plates) {
+    for (const { a, g, ends } of pieces) {
+      const sp = studs(st, a, g, ends, boxes);
+      if (sp) studded.set(g.id, sp);
+    }
+  }
   const res: Part[] = [];
   for (const q of out) {
     res.push(q);
     res.push(...kept.filter((k) => extras.find((e) => e.part === k)!.after === q.id));
+    const sp = studded.get(q.id);
+    if (sp) res.push(sp);
   }
   res.forEach((q, i) => (q.step = i));
   return res;
+}
+
+// the piece of a beam at t mm along it: the far piece after a beam splice
+const pieceAt = (armGeo: Map<string, Geo>, a: Arm, t: number): Geo =>
+  armGeo.get(a.splice !== undefined && t > a.splice ? farId(a) : a.id)!;
+
+// Shear studs on the top flange of a beam piece, in pairs about every
+// STUD_PITCH, in the free stretches: away from the end plates, a splice, a
+// post, a rod and the secondary beams. A stud that hits a part already there
+// is left out.
+const STUD_PITCH = 300;
+const STUD = { d: 19, h: 90, head: 32, ht: 10 };
+function studs(st: Structure, a: Arm, g: Geo, ends: [number, number], boxes: Box[]): Part | undefined {
+  const L = len(sub(g.p1, g.p0));
+  const s0 = start(st, a);
+  const h = hdir(a.bearing);
+  // along the arm, from its start, for this piece
+  const t0 = (g.p0[0] - s0[0]) * h[0] + (g.p0[1] - s0[1]) * h[1];
+  const busy: [number, number][] = [];
+  if (a.splice !== undefined) busy.push([a.splice - SPLICE_HALF - 50, a.splice + SPLICE_HALF + 50]);
+  if (a.post) {
+    const half = a.post.sec.d / 2 + 2 * EDGE + 50;
+    busy.push([a.post.a - half, a.post.a + half]);
+  }
+  if (a.rod) busy.push([a.rod.a - 150, a.rod.a + 150]);
+  for (const s of st.secs) if (st.arms[s.arm] === a) busy.push([s.a - s.sec.bf / 2 - 50, s.a + s.sec.bf / 2 + 50]);
+  // free stretches along the piece, in mm from g.p0
+  let free: [number, number][] = [[ends[0] + 50, L - ends[1] - 50]];
+  for (const [lo, hi] of busy) {
+    const [b0, b1] = [lo - t0, hi - t0];
+    free = free.flatMap(([f0, f1]): [number, number][] => (b1 <= f0 || b0 >= f1 ? [[f0, f1]] : [[f0, b0], [b1, f1]]));
+  }
+  const up = mul(g.w, -1);
+  const top = add(g.p0, mul(g.w, g.sh - g.sec.d / 2));
+  const vs = g.sec.bf < 120 ? [0] : [-1, 1].map((k) => k * Math.min(50, g.sec.bf / 2 - 25));
+  const faces: Part['faces'] = [];
+  const bs: Box[] = [];
+  for (const [f0, f1] of free) {
+    if (f1 - f0 < 0) continue;
+    const n = Math.floor((f1 - f0) / STUD_PITCH) + 1;
+    const step = n > 1 ? (f1 - f0) / (n - 1) : 0;
+    for (let i = 0; i < n; i++) {
+      const t = n > 1 ? f0 + i * step : (f0 + f1) / 2;
+      for (const v of vs) {
+        const b = add(add(top, mul(g.u, t)), mul(g.v, v));
+        const box = boxOf(add(b, mul(up, (STUD.h + STUD.ht) / 2)), g.u, up, STUD.head, STUD.head, STUD.h + STUD.ht);
+        if (boxes.some((q) => overlap(box, q))) continue;
+        const neck = add(b, mul(up, STUD.h));
+        faces.push(...prism(b, neck, profRound(STUD.d, 6), up, g.v, g.u, 1e9));
+        faces.push(...prism(neck, add(neck, mul(up, STUD.ht)), profRound(STUD.head, 6), up, g.v, g.u, 1e9));
+        bs.push(box);
+      }
+    }
+  }
+  if (!faces.length) return undefined;
+  boxes.push(...bs);
+  return { id: `${g.id}-studs`, step: 0, supports: [g.id], kind: 'plate', from: [0, 0, 1], faces, boxes: bs, dots: [] };
 }
 
 // The small plates that make a frame look built: a cap on each column, plates
@@ -811,8 +1070,10 @@ function details(
     const g = armGeo.get(a.id)!;
     const h = hdir(a.bearing);
     a.braces.forEach((b, k) => {
-      const o = add(add(start(st, a), mul(h, b.end ? a.L - b.a : b.a)), [0, 0, -a.sec.d / 2]);
-      for (const s of [-1, 1]) extra(`${a.id}-stiffener${k ? k + 1 : ''}${s < 0 ? 'a' : 'b'}`, a.id, [stiffener(a.sec, o, mul(g.v, s), Z, 10)], mul(g.v, s));
+      const t = b.end ? a.L - b.a : b.a;
+      const P = pieceAt(armGeo, a, t);
+      const o = add(add(start(st, a), mul(h, t)), [0, 0, -a.sec.d / 2]);
+      for (const s of [-1, 1]) extra(`${a.id}-stiffener${k ? k + 1 : ''}${s < 0 ? 'a' : 'b'}`, P.id, [stiffener(a.sec, o, mul(P.v, s), Z, 10)], mul(P.v, s));
     });
     // and at each node of a truss, in both chords
     const tr = a.truss;
@@ -906,6 +1167,27 @@ export function generate(p0: Partial<Params>, cat: Catalog, detail: Detail = 'bo
       }
     }
   }
+  // posts, from a draw of their own: they bring loads, so size again and
+  // check. If the structure does not stand up with them, leave them out.
+  if (ok) {
+    const keep = { ratio, secs: snapshot(st) };
+    const n = log.length;
+    if (addPosts(st, p, cat, mulberry32(p.seed * 49979687 + 17), log)) {
+      let good = true;
+      for (let k = 0; k < 4 && good; k++) {
+        const r = again();
+        if (r.ok) ratio = size(st, m, r.forces, cat, p.fy, k === 3);
+        else good = false;
+      }
+      if (!good) {
+        restore(st, keep.secs);
+        ratio = keep.ratio;
+        st.arms.forEach((a) => (a.post = undefined));
+        log.splice(n, log.length - n, 'posts: mechanism, left out');
+        m = model(st, p);
+      }
+    }
+  }
   // the details, from a draw of their own
   const det = mulberry32(p.seed * 15485863 + 3);
   const b = det();
@@ -923,6 +1205,12 @@ export function generate(p0: Partial<Params>, cat: Catalog, detail: Detail = 'bo
       ratio = size(st, m, r.forces, cat, p.fy, true);
       log.push(`splice at ${st.splice.z} mm (${st.splice.kind}), ${st.col.id} below, ${st.splice.sec.id} above`);
     } else st.splice = undefined;
+  }
+  // splices in the bay beams and shear studs: geometry only, each from a draw of its own
+  if (ok) addBeamSplices(st, p, mulberry32(p.seed * 32452843 + 11), log);
+  if (ok && p.studP > 0 && mulberry32(p.seed * 67867967 + 19)() < p.studP) {
+    st.studs = true;
+    log.push('shear studs on the beams');
   }
   log.push(`${sized} sizing passes, final max ratio ${ratio.toFixed(2)} (limit ${LIMIT})`);
   const t2 = performance.now();

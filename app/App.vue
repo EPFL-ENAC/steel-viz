@@ -40,13 +40,13 @@ const members = computed(() => {
   const st = built.value?.r.st;
   if (!st) return [];
   return [
-    ...st.arms.map((a) => [a.id, `${a.sec.id}, ${CONN[a.conn]}${a.braces.map((b) => ', brace ' + b.sec.id).join('')}`]),
+    ...st.arms.map((a) => [a.id, `${a.sec.id}, ${CONN[a.conn]}${a.braces.map((b) => ', brace ' + b.sec.id).join('')}${a.post ? ', post ' + a.post.sec.id : ''}${a.splice !== undefined ? ', splice' : ''}`]),
     ...st.secs.map((x) => [x.id, `${x.sec.id}, ${CONN[x.conn]}`]),
   ];
 });
 const column = computed(() => {
   const st = built.value?.r.st;
-  return st ? `${st.form}, ${st.cols.length > 1 ? st.cols.length + ' × ' : ''}${st.col.id}${st.splice ? ' / ' + st.splice.sec.id : ''}, ${(st.H / 1000).toFixed(2)} m` : '';
+  return st ? `${st.form}, ${st.cols.length > 1 ? st.cols.length + ' × ' : ''}${st.col.id}${st.splice ? ' / ' + st.splice.sec.id : ''}, ${(st.H / 1000).toFixed(2)} m${st.studs ? ', studs' : ''}` : '';
 });
 
 // ---- the view
