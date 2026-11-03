@@ -40,7 +40,7 @@ const members = computed(() => {
   const st = built.value?.r.st;
   if (!st) return [];
   return [
-    ...st.arms.map((a) => [a.id, `${a.sec.id}, ${CONN[a.conn]}${a.braces.map((b) => ', brace ' + b.sec.id).join('')}`]),
+    ...st.arms.map((a) => [a.id, `${a.sec.id}, ${CONN[a.conn]}${a.braces.map((b) => ', brace ' + b.sec.id).join('')}${a.post ? ', post ' + a.post.sec.id : ''}${a.splice !== undefined ? ', splice' : ''}`]),
     ...st.secs.map((x) => [x.id, `${x.sec.id}, ${CONN[x.conn]}`]),
   ];
 });

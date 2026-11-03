@@ -467,8 +467,12 @@ export function stiffener(sec: Section, o: V, side: V, depth: V, t: number): Pla
   return flat(o, side, depth, t, [[x0, -h + c], [x0 + c, -h], [x1, -h], [x1, h], [x0 + c, h], [x0, h - c]]);
 }
 
-// A column splice at height z, between the lower shaft lo and the upper
-// shaft hi (both vertical, their axes on one line).
+// A splice between two pieces of a member, lo and hi, their axes on one
+// line: a column splice (lo the lower shaft), or a beam splice (kind flange
+// only). lo.p1 is the cut. The plates use the frame of lo: w across the
+// flanges, v across the web, u along the member. A column keeps the world
+// axes: its frame is off by 1e-16 (norm), and the column splices of the
+// old seeds must stay the same to the last bit.
 // - bearing: a cap plate on lo, a base plate under hi, 4 bolts at the corners.
 // - flange: plates on the outer faces of both flanges and on both sides of
 //   the web, bolted to both shafts. When the shafts don't have the same
@@ -481,9 +485,9 @@ export function splicePlates(lo: Geo, hi: Geo, kind: 'bearing' | 'flange'): { fa
   const faces: Face[] = [];
   const boxes: Box[] = [];
   const dots: Dot[] = [];
-  const c = lo.p1;
-  const [x, y, z]: V[] = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
-  const at = (dx: number, dy: number, dz: number) => add(c, [dx, dy, dz]);
+  const c = add(lo.p1, mul(lo.w, lo.sh));
+  const [x, y, z]: V[] = Math.abs(lo.u[2]) > 0.99 ? [[1, 0, 0], [0, 1, 0], [0, 0, 1]] : [lo.v, lo.w, lo.u];
+  const at = (dx: number, dy: number, dz: number) => add(c, add(add(mul(x, dx), mul(y, dy)), mul(z, dz)));
   const plate = (centre: V, sx: number, sy: number, sz: number) => {
     faces.push(...box3(centre, y, z, sx, sy, sz));
     boxes.push(boxOf(centre, y, z, sx, sy, sz));

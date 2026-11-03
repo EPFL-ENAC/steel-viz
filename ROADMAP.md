@@ -5,7 +5,8 @@ What we plan to do next. A checked item is done.
 ## Generator
 
 - [ ] Channel, angle and WT profiles (C, L and T sections), with their own section tables.
-- [ ] Bolted beam splice, posts and studs.
+- [x] Bolted beam splice and posts.
+- [ ] Shear studs, with a slab or a deck on the beams. Without one they look like loose bolts.
 - [x] Trusses on trees. Today a tree never gets one: its arms are too short, too low, or have an arm below them on the same face. Allow a lower truss there.
 - [x] Fewer trusses on boxes. Boxes get one on 32 of 40 seeds. Try a lower `TRUSS_P.bay` in `generate.ts`.
 - [ ] Trusses on portal arms. They never get one either. The low truss of trees would fit on a few, but it changes portal 143, #2 of the top 12.
