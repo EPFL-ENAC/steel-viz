@@ -9,6 +9,10 @@ import aiscI from '../sections/aisc-sections.csv?raw';
 import aiscHss from '../sections/hss-aisc-sections.csv?raw';
 import euI from '../sections/european-sections.csv?raw';
 import euHss from '../sections/hss-european-sections.csv?raw';
+import aiscC from '../sections/channel-aisc-sections.csv?raw';
+import aiscL from '../sections/angle-aisc-sections.csv?raw';
+import euC from '../sections/channel-european-sections.csv?raw';
+import euL from '../sections/angle-european-sections.csv?raw';
 
 const DEFAULTS = {
   seed: 5,
@@ -66,7 +70,7 @@ export function setView(name: string) {
 
 export const params = () => ({ seed: s.seed || 1, form: s.form, arms: s.arms, height: s.height, load: s.load, fy: s.family === 'eu' ? 355 : 345 });
 
-const TABLES: Record<Family, [string, string]> = { aisc: [aiscI, aiscHss], eu: [euI, euHss] };
+const TABLES: Record<Family, [string, string, string, string]> = { aisc: [aiscI, aiscHss, aiscC, aiscL], eu: [euI, euHss, euC, euL] };
 const cats: Partial<Record<Family, Catalog>> = {};
 export const catalog = (fam: Family) => (cats[fam] ??= loadCatalog(fam, ...TABLES[fam]));
 

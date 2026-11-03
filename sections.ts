@@ -1,15 +1,19 @@
-// Steel sections from the resslab-hub tables (copied in sections/, read by tables.ts).
-// We only read the dimensions and compute A, I, J, Wpl ourselves: the AISC
-// table's `a` and `iy` columns are not in mm, the EU one is fine, so the
-// safe path is the same formulas for both.
+// Steel sections from the tables in sections/ (read by tables.ts, see
+// sections/README.md). We only read the dimensions and compute A, I, J, Wpl
+// ourselves: the AISC table's `a` and `iy` columns are not in mm, the EU one
+// is fine, so the safe path is the same formulas for both.
+
+// I: W, IPE, HE. RHS: square tube. ROD: round bar. C: channel. 2L: two equal
+// angles back to back, ANGLE_GAP apart. T: a tee, half an I.
+export type Kind = 'I' | 'RHS' | 'ROD' | 'C' | '2L' | 'T';
 
 export type Section = {
   id: string;
-  kind: 'I' | 'RHS' | 'ROD';
-  d: number; // depth
-  bf: number; // flange width (RHS: width)
-  tf: number; // flange thickness (RHS: wall)
-  tw: number; // web thickness (RHS: wall)
+  kind: Kind;
+  d: number; // depth (2L: the leg)
+  bf: number; // flange width (RHS: width, 2L: both legs and the gap)
+  tf: number; // flange thickness (RHS: wall, 2L: angle thickness)
+  tw: number; // web thickness (RHS: wall, 2L: angle thickness)
   A: number;
   Is: number; // strong axis inertia (bending in the depth direction)
   Iw: number; // weak axis inertia
@@ -19,11 +23,19 @@ export type Section = {
   rmin: number;
 };
 
+// The gap between the two angles of a 2L: the gusset plate goes in it.
+export const ANGLE_GAP = 12;
+
 // beams, columns, tubes, rods: what the random generator picks from.
+// channels, angles (double angles), tees: the shapes some braces,
+// secondaries and truss chords get (see shapeP in generate.ts).
 // all: every I section and tube of the table, with no filter (a real
 // specimen can use a W36 or a rectangular tube).
 export type Family = 'aisc' | 'eu';
-export type Catalog = { family: Family; beams: Section[]; columns: Section[]; tubes: Section[]; rods: Section[]; all: Section[] };
+export type Catalog = {
+  family: Family; beams: Section[]; columns: Section[]; tubes: Section[]; rods: Section[];
+  channels: Section[]; angles: Section[]; tees: Section[]; all: Section[];
+};
 
 export function iSection(id: string, d: number, bf: number, tf: number, tw: number): Section {
   const hw = d - 2 * tf;
@@ -54,6 +66,86 @@ export function rodSection(id: string, D: number): Section {
   return { id, kind: 'ROD', d: D, bf: D, tf: D / 2, tw: D / 2, A, Is: I, Iw: I, J: 2 * I, Ws: D ** 3 / 6, Ww: D ** 3 / 6, rmin: D / 4 };
 }
 
+// A rectangle of a section, [v0, v1, w0, w1], in the member frame: v across,
+// w down, the origin in the middle of the depth. The I and the T are centred
+// on v = 0, the C has its web on v = 0 and its flanges toward +v, the 2L has
+// its gap on v = 0 and the outstanding legs on top.
+export type Rect = [number, number, number, number];
+
+export function rects(s: Section): Rect[] {
+  const [h, w, tf, tw] = [s.d / 2, s.bf / 2, s.tf, s.tw];
+  switch (s.kind) {
+    case 'I':
+      return [[-w, w, -h, -h + tf], [-w, w, h - tf, h], [-tw / 2, tw / 2, -h + tf, h - tf]];
+    case 'C': {
+      const [l, r] = [-tw / 2, s.bf - tw / 2];
+      return [[l, r, -h, -h + tf], [l, r, h - tf, h], [l, l + tw, -h + tf, h - tf]];
+    }
+    case 'T':
+      return [[-w, w, -h, -h + tf], [-tw / 2, tw / 2, -h + tf, h]];
+    case '2L': {
+      const g = ANGLE_GAP / 2;
+      return [[-w, -g, -h, -h + tf], [g, w, -h, -h + tf], [-g - tw, -g, -h + tf, h], [g, g + tw, -h + tf, h]];
+    }
+    default:
+      return [[-w, w, -h, h]];
+  }
+}
+
+// The plastic modulus along one axis: find the line that cuts the area in
+// two, then sum the first moments of both halves about it. `span` gives the
+// extent of a rectangle along the axis and its width across.
+function plastic(rs: Rect[], span: (r: Rect) => [number, number, number]): number {
+  const parts = rs.map(span);
+  const A = parts.reduce((s, [a, b, t]) => s + (b - a) * t, 0);
+  const below = (p: number) => parts.reduce((s, [a, b, t]) => s + Math.min(Math.max(p - a, 0), b - a) * t, 0);
+  let [lo, hi] = [Math.min(...parts.map((x) => x[0])), Math.max(...parts.map((x) => x[1]))];
+  for (let k = 0; k < 100; k++) {
+    const m = (lo + hi) / 2;
+    if (below(m) < A / 2) lo = m;
+    else hi = m;
+  }
+  const p = (lo + hi) / 2;
+  return parts.reduce((s, [a, b, t]) => {
+    if (p <= a) return s + (t * ((b - p) ** 2 - (a - p) ** 2)) / 2;
+    if (p >= b) return s + (t * ((p - a) ** 2 - (p - b) ** 2)) / 2;
+    return s + (t * ((p - a) ** 2 + (b - p) ** 2)) / 2;
+  }, 0);
+}
+
+// A, I, J and Wpl of a section made of rectangles. Thin walled for J. The
+// shapes here are symmetric about v or w, so v and w are the principal axes.
+export function rectProps(rs: Rect[]) {
+  const box = rs.map(([v0, v1, w0, w1]) => ({ b: v1 - v0, h: w1 - w0, v: (v0 + v1) / 2, w: (w0 + w1) / 2 }));
+  const A = box.reduce((s, r) => s + r.b * r.h, 0);
+  const cv = box.reduce((s, r) => s + r.b * r.h * r.v, 0) / A;
+  const cw = box.reduce((s, r) => s + r.b * r.h * r.w, 0) / A;
+  const Is = box.reduce((s, r) => s + (r.b * r.h ** 3) / 12 + r.b * r.h * (r.w - cw) ** 2, 0);
+  const Iw = box.reduce((s, r) => s + (r.h * r.b ** 3) / 12 + r.b * r.h * (r.v - cv) ** 2, 0);
+  const J = box.reduce((s, r) => s + (Math.max(r.b, r.h) * Math.min(r.b, r.h) ** 3) / 3, 0);
+  const Ws = plastic(rs, ([v0, v1, w0, w1]) => [w0, w1, v1 - v0]);
+  const Ww = plastic(rs, ([v0, v1, w0, w1]) => [v0, v1, w1 - w0]);
+  return { A, Is, Iw, J, Ws, Ww, rmin: Math.sqrt(Math.min(Is, Iw) / A) };
+}
+
+function shaped(id: string, kind: Kind, d: number, bf: number, tf: number, tw: number): Section {
+  const s: Section = { id, kind, d, bf, tf, tw, A: 0, Is: 0, Iw: 0, J: 0, Ws: 0, Ww: 0, rmin: 0 };
+  return { ...s, ...rectProps(rects(s)) };
+}
+
+// a channel: C, MC, UPN, UPE (parallel flanges of the mean thickness)
+export const channelSection = (id: string, d: number, bf: number, tf: number, tw: number) => shaped(id, 'C', d, bf, tf, tw);
+
+// two equal angles (leg x leg x t) back to back: 2L4X4X1/2, 2L 100x100x10
+export const doubleAngle = (id: string, leg: number, t: number) => shaped(`2${id}`, '2L', leg, 2 * leg + ANGLE_GAP, t, t);
+
+// half an I: W16X50 gives WT8X25, IPE 300 gives 1/2 IPE 300
+export function teeOf(s: Section): Section {
+  const w = /^W([\d.]+)X([\d.]+)$/.exec(s.id);
+  const id = w ? `WT${+w[1] / 2}X${+w[2] / 2}` : `1/2 ${s.id}`;
+  return shaped(id, 'T', s.d / 2, s.bf, s.tf, s.tw);
+}
+
 // rod diameters: inches for AISC, mm for EU (the tables have no rods)
 const RODS: Record<Family, [string, number][]> = {
   aisc: [['3/4', 0.75], ['7/8', 0.875], ['1', 1], ['1-1/4', 1.25], ['1-1/2', 1.5], ['1-3/4', 1.75], ['2', 2]].map(([n, x]) => [`ROD ${n}"`, (x as number) * 25.4]),
@@ -73,8 +165,10 @@ export function parseCsv(text: string): Record<string, string>[] {
 
 const byArea = (a: Section, b: Section) => a.A - b.A;
 
-// i: the I-section table, hss: the tube table, both raw CSV text
-export function loadCatalog(family: Family, i: string, hss: string): Catalog {
+// i: the I-section table, hss: the tube table, channels and angles: the
+// shape tables, all raw CSV text. Without the shape tables (an older caller),
+// the channels, angles and tees lists are empty.
+export function loadCatalog(family: Family, i: string, hss: string, channels = '', angles = ''): Catalog {
   const allShapes = parseCsv(i)
     .filter((r) => (family === 'aisc' ? /^W\d/.test(r.id) : /^(IPE|HE) /.test(r.id)))
     .map((r) => iSection(r.id, +r.d, +r.bf, +r.tf, +r.tw))
@@ -88,6 +182,11 @@ export function loadCatalog(family: Family, i: string, hss: string): Catalog {
     columns: shapes.filter((s) => s.bf / s.d >= 0.8).sort(byArea),
     tubes: tubes.sort(byArea),
     rods: RODS[family].map(([id, D]) => rodSection(id, D)),
+    // C3, UPN 80 and up: a shear tab fits on the web
+    channels: (channels ? parseCsv(channels) : []).map((r) => channelSection(r.id, +r.d, +r.bf, +r.tf, +r.tw)).filter((s) => s.d >= 75).sort(byArea),
+    // equal angles, L3 to L8 and L 75 to L 200: one bolt line fits in the leg
+    angles: (angles ? parseCsv(angles) : []).filter((r) => r.d === r.b && +r.d >= 75 && +r.d <= 210).map((r) => doubleAngle(r.id, +r.d, +r.t)).sort(byArea),
+    tees: shapes.map(teeOf).sort(byArea),
     all: [...allShapes, ...allTubes],
   };
 }

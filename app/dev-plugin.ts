@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import type { Plugin } from 'vite';
 import type { Family } from '../sections.ts';
-import { TABLE_FILES } from '../tables.ts';
+import { SHAPE_FILES, TABLE_FILES } from '../tables.ts';
 
 const app = dirname(fileURLToPath(import.meta.url));
 const root = dirname(app);
@@ -39,7 +39,10 @@ async function bundleBase(sha: string) {
     mkdirSync(dir, { recursive: true });
     execSync(`git archive ${sha} | tar -x -C "${dir}"`, { cwd: root, stdio: ['ignore', 'ignore', 'pipe'] });
   }
-  const tables = (fam: Family) => JSON.stringify(TABLE_FILES[fam].map((f) => readFileSync(join(dir, 'sections', f), 'utf8')));
+  // the base may have no shape tables (before channels and angles): read the
+  // files it has, its loadCatalog() takes as many as it knows
+  const tables = (fam: Family) =>
+    JSON.stringify([...TABLE_FILES[fam], ...SHAPE_FILES[fam]].map((f) => join(dir, 'sections', f)).filter(existsSync).map((f) => readFileSync(f, 'utf8')));
   const r = await build({
     stdin: {
       contents: `import { loadCatalog } from './sections.ts';
