@@ -128,9 +128,9 @@ type Piece = { part: Part; group: Group; fill: Mesh; lines?: LineSegments2; base
 // onTurn: the user turned the view (done: the drag is over)
 export function createViewer(host: HTMLElement, onTurn: (az: number, el: number, done: boolean) => void): Viewer {
   const renderer = new WebGLRenderer({ antialias: true });
-  renderer.setPixelRatio(Math.min(2, devicePixelRatio));
+  // sized by hand in device pixels (see resize), so pixel ratio 1 here
   const canvas = renderer.domElement;
-  canvas.style.display = 'block';
+  Object.assign(canvas.style, { display: 'block', width: '100%', height: '100%' });
   host.append(canvas);
 
   const scene = new Scene();
@@ -144,7 +144,11 @@ export function createViewer(host: HTMLElement, onTurn: (az: number, el: number,
   let fitted = true; // no zoom or pan by hand: a new size fits the structure again
   let [w, h] = [1, 1];
 
-  const fillMat = new MeshBasicMaterial({ side: DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 2 });
+  // faces sit back a little so the lines on their own edges win. The push grows with
+  // the slope of the face times the pixel size: with 1 instead of 0.5, a face
+  // zoomed out moved back more than a flange is thick and hidden web edges
+  // showed through as dots
+  const fillMat = new MeshBasicMaterial({ side: DoubleSide, polygonOffset: true, polygonOffsetFactor: 0.5, polygonOffsetUnits: 2 });
   const rt = new WebGLRenderTarget(1, 1, { depthTexture: new DepthTexture(1, 1) });
   const outline = new ShaderMaterial({
     ...OUTLINE,
@@ -230,11 +234,18 @@ export function createViewer(host: HTMLElement, onTurn: (az: number, el: number,
   };
 
   // ---- size
-  const resize = () => {
+  // the canvas gets the exact device pixel size of its box. With a screen
+  // scale like 1.25, w * 1.25 is not a whole number, three.js rounds it
+  // down and the browser stretches the canvas a little: lines go soft and
+  // uneven.
+  const resize = (entries?: ResizeObserverEntry[]) => {
     const b = host.getBoundingClientRect();
     [w, h] = [Math.max(1, b.width), Math.max(1, b.height)];
-    renderer.setSize(w, h);
-    const pr = renderer.getPixelRatio();
+    const dpr = Math.min(2, devicePixelRatio);
+    const dev = entries?.[0]?.devicePixelContentBoxSize?.[0];
+    const [dw, dh] = dev && dpr === devicePixelRatio ? [dev.inlineSize, dev.blockSize] : [Math.round(w * dpr), Math.round(h * dpr)];
+    renderer.setSize(Math.max(1, dw), Math.max(1, dh), false);
+    const pr = Math.max(1, dw) / w;
     // about 3 samples per CSS px each way: 2x on a 1x screen, 1.5x on a 2x one
     const ss = Math.min(2, Math.max(1, 3 / pr));
     const [rw, rh] = [Math.round(w * pr * ss), Math.round(h * pr * ss)];
@@ -248,7 +259,7 @@ export function createViewer(host: HTMLElement, onTurn: (az: number, el: number,
     else place();
     redraw();
   };
-  new ResizeObserver(resize).observe(host);
+  new ResizeObserver((e) => resize(e)).observe(host);
 
   // ---- the build animation: same timeline as the SVG
   let anim: { t0: number; slots: ReturnType<typeof timeline>; dirs: V[]; end: number } | null = null;
