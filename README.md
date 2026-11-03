@@ -7,6 +7,8 @@ What RESSLab Hub uses it for:
 - Now: the logo. The hub takes an exported SVG, not this code.
 - Maybe later: the build animation as a loading animation, and a view of each experiment in the hub (built from its real sections, not from a seed).
 
+What comes next is in [ROADMAP.md](ROADMAP.md).
+
 It builds a steel structure from a seed, in one of three forms:
 
 - Tree: one column on a base plate, with arms, braces and secondary beams.
