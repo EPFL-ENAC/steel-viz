@@ -57,9 +57,10 @@ type Arm = {
 // the arm down to the top of the bottom chord. The bottom chord starts on
 // the column (a bay: runs to the other column) and ends at `end`, measured
 // along the arm. Each web diagonal goes from `b` on the bottom chord to `t`
-// on the top chord, both measured along the arm.
+// on the top chord, both measured along the arm. `low`: a low truss (see
+// LOW). `hMin`: the clear height the top chord must keep when it is sized.
 type Web = { b: number; t: number; sec: Section };
-type Truss = { D: number; end: number; chord: Section; conn: ConnType; conn2?: ConnType; webs: Web[] };
+type Truss = { D: number; end: number; chord: Section; conn: ConnType; conn2?: ConnType; webs: Web[]; low: boolean; hMin: number };
 // A tension rod: from the column at height zr down to the top of the arm, `a` along it.
 type Rod = { a: number; zr: number; sec: Section };
 const chordId = (a: Arm) => `${a.id}-chord`;
@@ -227,7 +228,13 @@ function addBrace(a: Arm, arms: Arm[], cat: Catalog, end: 0 | 1 = 0, reach = 0.5
 const H_MIN = 700; // mm, the clear height between the two chords
 const NODE_GAP = 50; // two diagonals that meet at a node land this far on each side of it
 const TUBE_MIN = 400; // mm, a diagonal between its two gussets: room for both knife plates
-const TRUSS_P = { bay: 0.35, arm: 0.3 };
+// the chance of a truss: a bay beam of a portal, a bay beam of a box (a box
+// has 4 to 8 of them), an arm that sticks out
+const TRUSS_P = { bay: 0.35, box: 0.1, arm: 0.3 };
+// A low truss, for the arms of a tree: they are short, and close to the arm
+// below on the same face. It takes the room under the arm, down to the floor
+// or to the arm below, and its diagonals use the small gusset.
+const LOW = { min: 450, max: 650, floor: 500, gap: 450, chord: 250, tube: 250 };
 const ROD_P = 0.4;
 // how far the face of the column is from its axis, for a beam on that bearing
 const colFace = (st: Structure, bearing: number) => (bearing % 180 === 0 ? st.col.d / 2 : st.col.tw / 2);
@@ -236,13 +243,24 @@ const colFace = (st: Structure, bearing: number) => (bearing % 180 === 0 ? st.co
 const endFaces = (a: Arm): [number, number][] => [[a.col, a.bearing], ...(a.to === undefined ? [] : [[a.to, (a.bearing + 180) % 360] as [number, number]])];
 
 function trussFor(st: Structure, a: Arm, cat: Catalog, rng: () => number): Truss | undefined {
-  const h = r50(H_MIN + 200 * rng());
+  const low = st.form === 'tree';
+  // always the first draw, so a seed where no truss fits keeps its rods
+  let h = low ? r50(LOW.min + (LOW.max - LOW.min) * rng()) : r50(H_MIN + 200 * rng());
+  const ends = endFaces(a);
+  const onFaces = faces(st.arms).filter((f) => f.a !== a && ends.some(([c, b]) => f.col === c && f.bearing === b) && f.z < a.z);
+  if (low) {
+    // the room under the arm: above the floor, and above the arms below it on its face
+    const below = onFaces.map((f) => f.z + LOW.gap);
+    h = Math.min(h, Math.floor((a.z - a.sec.d - Math.max(LOW.floor, ...below)) / 50) * 50);
+    if (h < LOW.min) return undefined;
+  }
   const D = a.sec.d + h;
   const zc = a.z - D;
-  if (zc < 700) return undefined;
-  // nothing else on the column faces it lands on, from the arm down to under the chord
-  const ends = endFaces(a);
-  if (faces(st.arms).some((f) => f.a !== a && ends.some(([c, b]) => f.col === c && f.bearing === b) && f.z > zc - 900 && f.z < a.z)) return undefined;
+  if (!low) {
+    if (zc < 700) return undefined;
+    // nothing else on the column faces it lands on, from the arm down to under the chord
+    if (onFaces.some((f) => f.z > zc - 900)) return undefined;
+  }
   // the nodes of the zigzag, along the arm, and which ones are on the top chord
   let xs: number[];
   let top: (k: number) => boolean;
@@ -265,17 +283,18 @@ function trussFor(st: Structure, a: Arm, cat: Catalog, rng: () => number): Truss
     top = (k) => (n - k) % 2 === 0;
   }
   const n = xs.length - 1;
+  const web: ConnType = low ? 'gusset_small' : 'gusset';
   const webs: Web[] = [];
   for (let k = 0; k < n; k++) {
     const x0 = xs[k] + (k > 0 ? NODE_GAP : 0);
     const x1 = xs[k + 1] - (k + 1 < n ? NODE_GAP : 0);
     const [b, t] = top(k) ? [x1, x0] : [x0, x1];
-    if ((Math.hypot(t - b, h) * (h - 2 * SETBACK.gusset)) / h < TUBE_MIN) return undefined;
+    if ((Math.hypot(t - b, h) * (h - 2 * SETBACK[web])) / h < (low ? LOW.tube : TUBE_MIN)) return undefined;
     webs.push({ b: r50(b), t: r50(t), sec: mid(cat.tubes) });
   }
   const end = a.to !== undefined ? a.L : Math.max(...webs.map((w) => w.b)) + 300;
   const conn = () => pick(rng, { shear_tab: 0.6, end_plate: 0.4 }) as ConnType;
-  return { D, end, chord: mid(cat.beams), conn: conn(), conn2: a.to !== undefined ? conn() : undefined, webs };
+  return { D, end, chord: mid(cat.beams), conn: conn(), conn2: a.to !== undefined ? conn() : undefined, webs, low, hMin: low ? h : H_MIN };
 }
 
 // a rod from the column down to an arm that sticks out, if the column above
@@ -301,7 +320,8 @@ function addTrussesAndRods(st: Structure, cat: Catalog, rng: () => number, log: 
   let added = false;
   for (const a of st.arms) {
     const r = rng();
-    if (r >= (a.to !== undefined ? TRUSS_P.bay : TRUSS_P.arm) || (a.to === undefined && a.L < 1400)) continue;
+    const P = a.to === undefined ? TRUSS_P.arm : st.form === 'box' ? TRUSS_P.box : TRUSS_P.bay;
+    if (r >= P || (a.to === undefined && a.L < 1400)) continue;
     const tr = trussFor(st, a, cat, rng);
     if (!tr) continue;
     a.truss = tr;
@@ -500,10 +520,10 @@ function size(st: Structure, m: Model, res: { N: number; My: number; Mz: number 
   };
   for (const a of st.arms) {
     // a top chord keeps the clear height of its truss
-    a.sec = choose(cat.beams, a.id, a.sec, (s) => s.d >= 200 && (!a.truss || a.truss.D - s.d >= H_MIN));
+    a.sec = choose(cat.beams, a.id, a.sec, (s) => s.d >= 200 && (!a.truss || a.truss.D - s.d >= a.truss.hMin));
     const tr = a.truss;
     if (tr) {
-      tr.chord = choose(cat.beams, chordId(a), tr.chord, (s) => s.d >= 150 && s.d <= Math.max(a.sec.d, 360));
+      tr.chord = choose(cat.beams, chordId(a), tr.chord, (s) => s.d >= 150 && s.d <= (tr.low ? LOW.chord : Math.max(a.sec.d, 360)));
       tr.webs.forEach((wb, k) => {
         const L = Math.hypot(wb.t - wb.b, tr.D - a.sec.d);
         wb.sec = choose(cat.tubes, webId(a, k), wb.sec, (s) => L / s.rmin < 200);
@@ -684,15 +704,16 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
       const cg = geo(chordId(a), tr.chord, add(oc, mul(h, supportFace(Sc, h) + SETBACK[tr.conn])), c1, true);
       armGeo.set(cg.id, cg);
       member(cg, cEnds, a.to === undefined ? h : [0, 0, 1]);
+      const web: ConnType = tr.low ? 'gusset_small' : 'gusset';
       tr.webs.forEach((wb, k) => {
         const B = add(oc, mul(h, wb.b));
         const C = add(add(o, mul(h, wb.t)), [0, 0, -a.sec.d]);
         const un = norm(sub(C, B));
-        const t = SETBACK.gusset / un[2];
+        const t = SETBACK[web] / un[2];
         const wg = geo(webId(a, k), wb.sec, add(B, mul(un, t)), sub(C, mul(un, t)), false);
         member(wg, [
-          { S: cg, sId: cg.id, conn: 'gusset', at: 'from' },
-          { S: g, sId: a.id, conn: 'gusset', at: 'to' },
+          { S: cg, sId: cg.id, conn: web, at: 'from' },
+          { S: g, sId: a.id, conn: web, at: 'to' },
         ], [h[1], -h[0], 0]);
       });
     }
