@@ -10,9 +10,10 @@ import { add, len, mul, sub, type V } from './vec.ts';
 import { solve, type Elem, type FNode } from './solver.ts';
 import type { Catalog, Section } from './sections.ts';
 import {
-  box3, boxOf, geo, hardware, memberBoxes, memberFaces, resolve, supportFace, PINNED, SETBACK,
-  type ConnType, type Geo, type Part,
+  box3, boxOf, flat, geo, hardware, memberBoxes, memberFaces, resolve, splicePlates, stiffener, supportFace, BEARING_T, PINNED, SETBACK, SPLICE_HALF,
+  type ConnType, type Geo, type P2, type Part, type Plate,
 } from './steel.ts';
+import { overlap } from './clash.ts';
 
 export type Detail = 'members' | 'plates' | 'bolts';
 export type Params = {
@@ -50,7 +51,11 @@ const braceId = (a: Arm, i: number) => `${a.id}-brace${i ? i + 1 : ''}`;
 type Secondary = { id: string; arm: number; a: number; side: 1 | -1; L: number; conn: ConnType; sec: Section };
 type Col = { x: V };
 export type Form = 'tree' | 'portal' | 'box';
-export type Structure = { form: Form; H: number; col: Section; cols: Col[]; arms: Arm[]; secs: Secondary[] };
+// A column splice: above z every column is the lighter section `sec`.
+type Splice = { z: number; sec: Section; kind: 'bearing' | 'flange' };
+// base: the gussets on the base plates, none, on the flange faces, or on all four faces
+type Base = 'none' | 'flange' | 'all';
+export type Structure = { form: Form; H: number; col: Section; cols: Col[]; arms: Arm[]; secs: Secondary[]; splice?: Splice; base?: Base };
 const colId = (i: number) => (i ? `column${i + 1}` : 'column');
 const baseId = (i: number) => (i ? `base${i + 1}` : 'base');
 
@@ -219,15 +224,23 @@ function model(st: Structure, p: Params): Model {
       owner.push(who);
     }
   };
-  // each column, cut at every level something lands on
+  // each column, cut at every level something lands on, and at the splice
+  const sp = st.splice;
   st.cols.forEach((c, ci) => {
     const zs = new Set([0, st.H]);
+    if (sp) zs.add(sp.z);
     for (const a of st.arms) {
       if (a.col === ci || a.to === ci) zs.add(a.z);
       for (const b of a.braces) if ((b.end ? a.to : a.col) === ci) zs.add(b.zb);
     }
     node(c.x, 'column', true);
-    chain('column', [...zs].sort((x, y) => x - y).map((z) => add(c.x, [0, 0, z])), st.col, false, w(st.col));
+    const z = [...zs].sort((x, y) => x - y);
+    for (let k = 0; k + 1 < z.length; k++) {
+      const top = sp !== undefined && z[k] >= sp.z;
+      const [who, s] = top ? ['column-top', sp.sec] : ['column', st.col];
+      elems.push({ i: node(add(c.x, [0, 0, z[k]]), who), j: node(add(c.x, [0, 0, z[k + 1]]), who), p: s, pinI: false, pinJ: false, q: [0, 0, -w(s)] });
+      owner.push(who);
+    }
   });
   st.arms.forEach((a, i) => {
     const h = hdir(a.bearing);
@@ -287,14 +300,22 @@ function fix(st: Structure, m: Model, nodeIdx: number, cat: Catalog, rng: () => 
 
 // ------------------------------------------------------------- sizing
 const LIMIT = 0.6;
-
-function size(st: Structure, m: Model, res: { N: number; My: number; Mz: number }[], cat: Catalog, fy: number, check = false): number {
-  const worst = new Map<string, { N: number; My: number; Mz: number }>();
+type Forces = { N: number; My: number; Mz: number };
+const ratioOf = (s: Section, f: Forces, fy: number) => f.N / (s.A * fy) + f.My / (s.Ws * fy) + f.Mz / (s.Ww * fy);
+function worstOf(m: Model, res: Forces[]) {
+  const worst = new Map<string, Forces>();
   m.owner.forEach((who, i) => {
     const w = worst.get(who) ?? { N: 0, My: 0, Mz: 0 };
     worst.set(who, { N: Math.max(w.N, res[i].N), My: Math.max(w.My, res[i].My), Mz: Math.max(w.Mz, res[i].Mz) });
   });
-  const ratio = (s: Section, f: { N: number; My: number; Mz: number }) => f.N / (s.A * fy) + f.My / (s.Ws * fy) + f.Mz / (s.Ww * fy);
+  return worst;
+}
+// beams that frame into the column web must fit between its flanges
+const webClear = (arms: Arm[]) => Math.max(0, ...arms.filter((a) => a.bearing % 180 === 90).map((a) => a.sec.bf + 40));
+
+function size(st: Structure, m: Model, res: { N: number; My: number; Mz: number }[], cat: Catalog, fy: number, check = false): number {
+  const worst = worstOf(m, res);
+  const ratio = (s: Section, f: Forces) => ratioOf(s, f, fy);
   let maxRatio = 0;
   // the lightest section that works; in check mode, the current one is kept
   const choose = (list: Section[], who: string, cur: Section, ok: (s: Section) => boolean = () => true) => {
@@ -314,11 +335,54 @@ function size(st: Structure, m: Model, res: { N: number; My: number; Mz: number 
     const arm = st.arms[s.arm];
     s.sec = choose(cat.beams, s.id, s.sec, (x) => x.d <= arm.sec.d - 2 * arm.sec.tf);
   }
-  // beams that frame into the column web must fit between its flanges
-  const webArms = st.arms.filter((a) => a.bearing % 180 === 90).map((a) => a.sec.bf + 40);
-  const needClear = Math.max(0, ...webArms);
+  const needClear = webClear(st.arms);
   st.col = choose(cat.columns, 'column', st.col, (c) => c.d - 2 * c.tf >= needClear && c.d >= 250);
+  // the upper shaft is sized by sizeTop, here it is only checked
+  const top = worst.get('column-top');
+  if (st.splice && top) maxRatio = Math.max(maxRatio, ratio(st.splice.sec, top));
   return maxRatio;
+}
+
+// ------------------------------------------------------------- details
+// Details that don't change the topology. They come from their own random
+// draws, so a seed keeps its structure and only gets the details on top.
+
+// A column splice, on about 6 structures in 10: one level for all the
+// columns, between 30 and 70 % of the height, well clear of anything that
+// lands on a column there.
+const SPLICE_P = 0.6;
+const SPLICE_GAP = 50; // mm, free height kept above and below the splice plates
+function pickSplice(st: Structure, rng: () => number): Splice | undefined {
+  if (rng() >= SPLICE_P || st.H < 2000) return undefined;
+  const kind = rng() < 0.5 ? 'bearing' : 'flange';
+  // the height the plates take, around the cut
+  const [below, above] = kind === 'bearing' ? [0, BEARING_T] : [SPLICE_HALF, SPLICE_HALF];
+  const busy: [number, number][] = [[0, 400]];
+  for (const a of st.arms) {
+    // an extended end plate reaches 90 mm past the flanges, flange plates 16
+    const ext = [a.conn, a.conn2].includes('end_plate') ? 90 : 16;
+    busy.push([a.z - a.sec.d - ext, a.z + ext]);
+    for (const b of a.braces) busy.push([b.zb - 300, b.zb + 300]);
+  }
+  const ok: number[] = [];
+  for (let z = r50(0.3 * st.H); z <= 0.7 * st.H; z += 50)
+    if (busy.every(([lo, hi]) => z + above + SPLICE_GAP <= lo || z - below - SPLICE_GAP >= hi)) ok.push(z);
+  if (!ok.length) return undefined;
+  return { z: ok[Math.floor(rng() * ok.length)], sec: st.col, kind };
+}
+
+// the upper shaft: the lightest section, not heavier than the lower one,
+// that takes the forces above the splice and leaves room for the beams that
+// frame into its web
+function sizeTop(st: Structure, m: Model, res: Forces[], cat: Catalog, fy: number) {
+  const sp = st.splice!;
+  const f = worstOf(m, res).get('column-top')!;
+  const need = webClear(st.arms.filter((a) => a.z - a.sec.d > sp.z));
+  sp.sec = cat.columns.find((s) => s.A <= st.col.A && s.d >= 200 && s.d - 2 * s.tf >= need && ratioOf(s, f, fy) < LIMIT) ?? st.col;
+  // the same section above and below: no reason to splice
+  if (sp.sec === st.col) st.splice = undefined;
+  // a flange splice between two very different depths needs thick fills: bear instead
+  else if (Math.abs(st.col.d - sp.sec.d) / 2 > 25) sp.kind = 'bearing';
 }
 
 // ------------------------------------------------------------- geometry
@@ -328,8 +392,16 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
   const plates = detail !== 'members';
   const bolts = detail === 'bolts';
   const tb = 40;
+  const sp = st.splice;
+  // the details added at the end: each goes right after the part it stands on
+  const extras: { after: string; part: Part }[] = [];
+  const extra = (id: string, on: string, ps: Plate[], from: V) => {
+    if (plates && ps.length) extras.push({ after: on, part: { id, step: 0, supports: [on], kind: 'plate', from, faces: ps.flatMap((q) => q.faces), boxes: ps.map((q) => q.box), dots: [] } });
+  };
+  // each column: its lower shaft and, above a splice, its upper shaft
   const cols = st.cols.map((c, ci) => {
-    const g = geo(colId(ci), st.col, c.x, add(c.x, [0, 0, st.H]), false);
+    const at = (z: number) => add(c.x, [0, 0, z]);
+    const lo = geo(colId(ci), st.col, c.x, at(sp ? sp.z : st.H), false);
     const centre = add(c.x, [0, 0, -tb / 2]);
     out.push({
       id: baseId(ci), step: step++, supports: [], kind: 'base', from: [0, 0, -1],
@@ -337,9 +409,19 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
       boxes: [boxOf(centre, [0, 1, 0], [0, 0, 1], st.col.bf + 150, st.col.d + 150, tb)],
       dots: bolts ? [-1, 1].flatMap((sx) => [-1, 1].map((sy) => ({ p: add(c.x, [sx * (st.col.bf / 2 + 40), sy * (st.col.d / 2 + 40), 1]), n: [0, 0, 1] as V }))) : [],
     });
-    out.push({ id: colId(ci), step: step++, supports: [baseId(ci)], kind: 'column', from: [0, 0, 1], faces: memberFaces(g, seg), boxes: memberBoxes(g), dots: [], accent: false });
-    return g;
+    out.push({ id: lo.id, step: step++, supports: [baseId(ci)], kind: 'column', from: [0, 0, 1], faces: memberFaces(lo, seg), boxes: memberBoxes(lo), dots: [] });
+    if (!sp) return { lo, hi: lo };
+    const hi = geo(`${colId(ci)}-top`, sp.sec, at(sp.z + (sp.kind === 'bearing' ? BEARING_T : 0)), at(st.H), false);
+    const sid = `${colId(ci)}-splice`;
+    const k = splicePlates(lo, hi, sp.kind);
+    // without the plates, the upper shaft stands on the lower one
+    if (plates) out.push({ id: sid, step: step++, supports: [lo.id], kind: 'plate', from: [0, 0, 1], faces: k.faces, boxes: k.boxes, dots: [] });
+    out.push({ id: hi.id, step: step++, supports: [plates ? sid : lo.id], kind: 'column', from: [0, 0, 1], faces: memberFaces(hi, seg), boxes: memberBoxes(hi), dots: [] });
+    if (bolts) out.push({ id: `${sid}-bolts`, step: step++, supports: [hi.id, sid], kind: 'bolts', faces: [], dots: k.dots });
+    return { lo, hi };
   });
+  // the shaft of column ci at height z
+  const colAt = (ci: number, z: number) => (sp && z > sp.z ? cols[ci].hi : cols[ci].lo);
 
   // one member and its end connections, in build order: plates, member, bolts
   type End = { S: Geo; sId: string; conn: ConnType; at: 'from' | 'to' };
@@ -366,14 +448,15 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
   for (const a of st.arms) {
     const h = hdir(a.bearing);
     const o = start(st, a);
-    const S = cols[a.col];
+    const zm = a.z - a.sec.d / 2;
+    const S = colAt(a.col, zm);
     const p0 = add(o, mul(h, supportFace(S, h) + SETBACK[a.conn]));
-    const ends: End[] = [{ S, sId: colId(a.col), conn: a.conn, at: 'from' }];
+    const ends: End[] = [{ S, sId: S.id, conn: a.conn, at: 'from' }];
     let p1 = add(o, mul(h, a.L));
     if (a.to !== undefined) {
-      const Sj = cols[a.to];
+      const Sj = colAt(a.to, zm);
       p1 = add(p1, mul(h, -(supportFace(Sj, mul(h, -1)) + SETBACK[a.conn2!])));
-      ends.push({ S: Sj, sId: colId(a.to), conn: a.conn2!, at: 'to' });
+      ends.push({ S: Sj, sId: Sj.id, conn: a.conn2!, at: 'to' });
     }
     const g = geo(a.id, a.sec, p0, p1, true);
     armGeo.set(a.id, g);
@@ -386,12 +469,12 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
       const u = sub(C, B);
       const L = Math.hypot(...u);
       const un = mul(u, 1 / L);
-      const Sb = cols[b.end ? a.to! : a.col];
+      const Sb = colAt(b.end ? a.to! : a.col, b.zb);
       const t0 = (supportFace(Sb, hb) + SETBACK.gusset) / (un[0] * hb[0] + un[1] * hb[1]);
       const t1 = SETBACK.gusset / un[2];
       const bg = geo(braceId(a, k), b.sec, add(B, mul(un, t0)), sub(C, mul(un, t1)), false);
       member(bg, [
-        { S: Sb, sId: colId(b.end ? a.to! : a.col), conn: 'gusset', at: 'from' },
+        { S: Sb, sId: Sb.id, conn: 'gusset', at: 'from' },
         { S: g, sId: a.id, conn: 'gusset', at: 'to' },
       ], a.to === undefined ? hb : [h[1], -h[0], 0]); // from outside, level; in a bay, from the side
     });
@@ -404,8 +487,79 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
     const g = geo(s.id, s.sec, add(at, mul(side, supportFace(ag, side) + SETBACK[s.conn])), add(at, mul(side, s.L)), true);
     member(g, [{ S: ag, sId: a.id, conn: s.conn, at: 'from' }], side);
   }
-  return out;
+  details(st, cols, armGeo, colAt, extra);
+
+  // keep the details that fit: one that goes through a part already there is left out
+  const kept: Part[] = [];
+  const boxes = out.flatMap((q) => q.boxes ?? []);
+  for (const { part } of extras) {
+    if (part.boxes!.some((a) => boxes.some((b) => overlap(a, b)))) continue;
+    boxes.push(...part.boxes!);
+    kept.push(part);
+  }
+  const res: Part[] = [];
+  for (const q of out) {
+    res.push(q);
+    res.push(...kept.filter((k) => extras.find((e) => e.part === k)!.after === q.id));
+  }
+  res.forEach((q, i) => (q.step = i));
+  return res;
 }
+
+// The small plates that make a frame look built: a cap on each column, plates
+// across the column where a moment beam pulls on its flanges, stiffeners in a
+// beam where a brace pushes up, gussets at the column feet.
+const MOMENT: ConnType[] = ['end_plate', 'flange_plates', 'welded'];
+function details(
+  st: Structure, cols: { lo: Geo; hi: Geo }[], armGeo: Map<string, Geo>, colAt: (ci: number, z: number) => Geo,
+  extra: (id: string, on: string, ps: Plate[], from: V) => void,
+) {
+  const [X, Y, Z]: V[] = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+  const down: V = [0, 0, -1];
+  st.cols.forEach((c, ci) => {
+    const { lo, hi } = cols[ci];
+    const id = colId(ci);
+    // cap plate
+    const cap = add(hi.p1, [0, 0, 10]);
+    extra(`${id}-cap`, hi.id, [flat(cap, X, Y, 20, rect(hi.sec.bf + 30, hi.sec.d + 30))], down);
+    // continuity plates, at the flange levels of each moment beam on a flange face
+    const levels: number[] = [];
+    for (const a of st.arms)
+      for (const [ci2, conn, bearing] of [[a.col, a.conn, a.bearing], [a.to, a.conn2, a.bearing + 180]] as const) {
+        if (ci2 !== ci || !conn || !MOMENT.includes(conn) || bearing % 180 !== 0) continue;
+        for (const z of [a.z - a.sec.tf / 2, a.z - a.sec.d + a.sec.tf / 2])
+          if (levels.every((l) => Math.abs(l - z) > 30)) levels.push(z);
+      }
+    levels.sort((p, q) => p - q).forEach((z, k) => {
+      const S = colAt(ci, z);
+      const o = add(c.x, [0, 0, z]);
+      const t = Math.max(10, Math.round(S.sec.tf));
+      // one part per side of the web: a beam that frames into the web there leaves no room
+      for (const s of [-1, 1]) extra(`${id}-stiffener${k + 1}${s < 0 ? 'w' : 'e'}`, S.id, [stiffener(S.sec, o, mul(X, s), Y, t)], mul(X, s));
+    });
+    // gussets at the foot: on the two flange faces, or on all four faces
+    if (st.base && st.base !== 'none') {
+      const { d, bf, tw } = lo.sec;
+      const ps: Plate[] = [-1, 1].map((s) => flat(add(c.x, [0, s * d / 2, 0]), mul(Y, s), Z, 12, [[0, 0], [70, 0], [70, 30], [0, 180]]));
+      if (st.base === 'all') {
+        const L = bf / 2 - tw / 2 + 70;
+        for (const s of [-1, 1])
+          ps.push(flat(add(c.x, [s * tw / 2, 0, 0]), mul(X, s), Z, 12, [[0, 0], [L, 0], [L, 30], [L - 70, 180], [0, 180]]));
+      }
+      extra(`${id}-gussets`, lo.id, ps, down);
+    }
+  });
+  // bearing stiffeners in a beam, over the point where a brace pushes on it
+  for (const a of st.arms) {
+    const g = armGeo.get(a.id)!;
+    const h = hdir(a.bearing);
+    a.braces.forEach((b, k) => {
+      const o = add(add(start(st, a), mul(h, b.end ? a.L - b.a : b.a)), [0, 0, -a.sec.d / 2]);
+      for (const s of [-1, 1]) extra(`${a.id}-stiffener${k ? k + 1 : ''}${s < 0 ? 'a' : 'b'}`, a.id, [stiffener(a.sec, o, mul(g.v, s), Z, 10)], mul(g.v, s));
+    });
+  }
+}
+const rect = (w: number, h: number): P2[] => [[-w / 2, -h / 2], [w / 2, -h / 2], [w / 2, h / 2], [-w / 2, h / 2]];
 
 // every part comes after the parts it stands on
 export function floating(ps: Part[]): string[] {
@@ -456,6 +610,25 @@ export function generate(p0: Partial<Params>, cat: Catalog, detail: Detail = 'bo
     ratio = size(st, m, r.forces, cat, p.fy, sized === 3);
     if (sized === 3) break;
     sized++;
+  }
+  // the details, from a draw of their own
+  const det = mulberry32(p.seed * 15485863 + 3);
+  const b = det();
+  st.base = b < 0.5 ? 'none' : b < 0.8 ? 'flange' : 'all';
+  st.splice = ok ? pickSplice(st, det) : undefined;
+  // solve with the cut, size the upper shaft, then check it (sizeTop can drop the splice)
+  const again = () => (solves++, solve((m = model(st, p)).nodes, m.elems));
+  if (st.splice) {
+    const r = again();
+    if (r.ok) sizeTop(st, m, r.forces, cat, p.fy);
+    else st.splice = undefined;
+  }
+  if (st.splice) {
+    const r = again();
+    if (r.ok) {
+      ratio = size(st, m, r.forces, cat, p.fy, true);
+      log.push(`splice at ${st.splice.z} mm (${st.splice.kind}), ${st.col.id} below, ${st.splice.sec.id} above`);
+    } else st.splice = undefined;
   }
   log.push(`${sized} sizing passes, final max ratio ${ratio.toFixed(2)} (limit ${LIMIT})`);
   const t2 = performance.now();

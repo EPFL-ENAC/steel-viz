@@ -12,7 +12,7 @@ import type { Section } from './sections.ts';
 export const PITCH = 75; // bolt pitch
 export const EDGE = 38; // bolt edge distance
 
-type P2 = [number, number];
+export type P2 = [number, number];
 export type Face = { pts: V[]; edges: [number, number][] };
 // a bolt: on the side of `axis` that looks at the camera, or on a face with normal `n`
 export type Dot = { p: V; axis?: V; half?: number; n?: V };
@@ -425,6 +425,90 @@ function slab(poly: V[], n: V, t: number): Face[] {
     faces.push({ pts: [poly[i], poly[k], top[k], top[i]], edges: [[1, 2]] });
   }
   return faces;
+}
+
+// A flat plate of thickness t, centred on the plane through o that holds
+// the unit axes ax and ay (at right angles). `pts` is its outline in that
+// plane, in any winding. Also its box, for the clash check.
+export type Plate = { faces: Face[]; box: Box };
+export function flat(o: V, ax: V, ay: V, t: number, pts: P2[]): Plate {
+  const n = cross(ax, ay);
+  let s = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const [a, b] = [pts[i], pts[(i + 1) % pts.length]];
+    s += a[0] * b[1] - b[0] * a[1];
+  }
+  // slab wants its first face looking along -n
+  const ring = s > 0 ? [...pts].reverse() : pts;
+  const poly = ring.map(([x, y]) => add(add(add(o, mul(ax, x)), mul(ay, y)), mul(n, -t / 2)));
+  const xs = pts.map((q) => q[0]);
+  const ys = pts.map((q) => q[1]);
+  const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+  const c = add(add(o, mul(ax, (x0 + x1) / 2)), mul(ay, (y0 + y1) / 2));
+  return { faces: slab(poly, n, t), box: { c, ax: [ax, ay, n], h: [(x1 - x0) / 2, (y1 - y0) / 2, t / 2] } };
+}
+
+// A stiffener in an I section: a plate between the two flanges, on one side
+// of the web, with its two inner corners clipped (the weld at the root of
+// the web runs through there). o: on the web axis, half way between the
+// flanges. side: from the web toward the flange tips. depth: across, from
+// one flange to the other.
+export function stiffener(sec: Section, o: V, side: V, depth: V, t: number): Plate {
+  const [x0, x1, h, c] = [sec.tw / 2, sec.bf / 2 - 5, sec.d / 2 - sec.tf, 15];
+  return flat(o, side, depth, t, [[x0, -h + c], [x0 + c, -h], [x1, -h], [x1, h], [x0 + c, h], [x0, h - c]]);
+}
+
+// A column splice at height z, between the lower shaft lo and the upper
+// shaft hi (both vertical, their axes on one line).
+// - bearing: a cap plate on lo, a base plate under hi, 4 bolts at the corners.
+// - flange: plates on the outer faces of both flanges and on both sides of
+//   the web, bolted to both shafts. When the shafts don't have the same
+//   depth, a fill plate makes up the difference on the thinner one.
+// BEARING_T: the height the bearing plates add between the two shafts.
+export const BEARING_T = 40;
+// half the height of the flange splice plates: two bolt rows on each shaft
+export const SPLICE_HALF = 2 * EDGE + PITCH + 5;
+export function splicePlates(lo: Geo, hi: Geo, kind: 'bearing' | 'flange'): { faces: Face[]; boxes: Box[]; dots: Dot[] } {
+  const faces: Face[] = [];
+  const boxes: Box[] = [];
+  const dots: Dot[] = [];
+  const c = lo.p1;
+  const [x, y, z]: V[] = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+  const at = (dx: number, dy: number, dz: number) => add(c, [dx, dy, dz]);
+  const plate = (centre: V, sx: number, sy: number, sz: number) => {
+    faces.push(...box3(centre, y, z, sx, sy, sz));
+    boxes.push(boxOf(centre, y, z, sx, sy, sz));
+  };
+  const [L, H] = [lo.sec, hi.sec];
+  if (kind === 'bearing') {
+    const t = BEARING_T / 2;
+    const [hx, hy] = [Math.max(L.bf, H.bf) / 2 + 60, Math.max(L.d, H.d) / 2 + 60];
+    plate(at(0, 0, t / 2), 2 * hx, 2 * hy, t);
+    plate(at(0, 0, 1.5 * t), 2 * hx, 2 * hy, t);
+    for (const sx of [-1, 1]) for (const sy of [-1, 1]) dots.push({ p: at(sx * (hx - 35), sy * (hy - 35), 2 * t), n: z });
+    return { faces, boxes, dots };
+  }
+  const t = 16;
+  const len = 2 * SPLICE_HALF;
+  const rows = [-1, 1].flatMap((s) => [s * (5 + EDGE), s * (5 + EDGE + PITCH)]);
+  const bw = Math.min(L.bf, H.bf);
+  const gauge = Math.min(140, bw - 2 * EDGE);
+  const outer = Math.max(L.d, H.d) / 2;
+  for (const s of [-1, 1]) {
+    plate(at(0, s * (outer + t / 2), 0), bw, t, len);
+    for (const [sec, dz] of [[L, -len / 4], [H, len / 4]] as const) {
+      const fill = outer - sec.d / 2;
+      if (fill > 1) plate(at(0, s * (sec.d / 2 + fill / 2), dz), bw, fill, len / 2);
+    }
+    for (const dz of rows) for (const gx of [-gauge / 2, gauge / 2]) dots.push({ p: at(gx, s * (outer + t), dz), n: mul(y, s) });
+  }
+  const tw = Math.max(L.tw, H.tw);
+  const hw = Math.min(L.d - 2 * L.tf, H.d - 2 * H.tf) - 30;
+  for (const s of [-1, 1]) plate(at(s * (tw / 2 + 5), 0, 0), 10, hw, len);
+  const { n, pitch } = boltLine(hw, 3);
+  for (const dz of rows)
+    for (const [dy] of grid(n, 1, pitch, 0)) dots.push({ p: at(0, dy, dz), axis: x, half: tw / 2 + 10 });
+  return { faces, boxes, dots };
 }
 
 export type ConnType = 'shear_tab' | 'end_plate' | 'flange_plates' | 'welded' | 'gusset';

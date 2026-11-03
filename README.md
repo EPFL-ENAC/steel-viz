@@ -10,6 +10,16 @@ Each bay storey gets its own bracing: none (moment connections), knee braces at 
 
 A small frame solver checks that the structure stands up. If it does not, the generator adds a brace or changes a pinned connection to a moment connection. Then it sizes each member from the hub's own AISC or EU section tables (`frontend/src/assets/connection/` and `frontend/src/assets/hss/`).
 
+Then come the small details, from a random draw of their own, so a seed keeps the same structure:
+
+- Column splice (on about a third of the structures): above a free level between 30 and 70 % of the height, the columns change to a lighter section, sized from the forces up there. A bearing splice is a cap plate and a base plate bolted at the corners. A flange splice has bolted plates on both flanges and on the web, with fill plates when the two sections don't have the same depth.
+- A cap plate on top of each column.
+- Continuity plates: plates across the column, at the flange levels of each moment beam that lands on a column flange.
+- Stiffeners in a beam, over the point where a brace pushes on it.
+- Gussets at the column foot: none, on the two flange faces, or on all four faces.
+
+A detail plate that would go through another part is left out. For example, a continuity plate on the side of the web where another beam frames in.
+
 Parts must not go through each other. A secondary beam is coped (its flanges cut back) where it meets the flanges of its arm, and its plate fits between those flanges. A brace stays above the arms under it on the same face of its column, and is long enough that its two gussets don't touch. `clash.ts` checks this with boxes, and `geometry.test.ts` runs it on every form, 240 structures.
 
 The output is an SVG line drawing with the hidden lines removed. The SVG can also build itself step by step, as an animation.

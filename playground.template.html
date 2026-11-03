@@ -310,7 +310,7 @@ function showStats() {
     ...r.st.secs.map((s) => li(s.id, `${s.sec.id}, ${label[s.conn]}`)),
   );
   $('log').replaceChildren(...r.log.map((t) => Object.assign(document.createElement('li'), { textContent: t })));
-  $('tb-col').textContent = `${r.st.form}, ${r.st.cols.length > 1 ? r.st.cols.length + ' × ' : ''}${r.st.col.id}, ${(r.st.H / 1000).toFixed(2)} m`;
+  $('tb-col').textContent = `${r.st.form}, ${r.st.cols.length > 1 ? r.st.cols.length + ' × ' : ''}${r.st.col.id}${r.st.splice ? ' / ' + r.st.splice.sec.id : ''}, ${(r.st.H / 1000).toFixed(2)} m`;
   $('tb-solve').textContent = `${r.nodes} nodes, ${r.solves} solves`;
 }
 
