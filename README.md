@@ -19,6 +19,13 @@ Each bay storey gets its own bracing: none (moment connections), knee braces at 
 
 A small frame solver checks that the structure stands up. If it does not, the generator adds a brace or changes a pinned connection to a moment connection. Then it sizes each member from the AISC or EU section tables of RESSLab Hub. They are copied in `sections/` (from `frontend/src/assets/connection/` and `frontend/src/assets/hss/` in the hub). Copy them again when the hub changes them.
 
+The sizing works in two steps, with public formulas from EC3 (Eurocode 3) and AISC 360-22:
+
+1. The whole structure: the solver finds the elastic critical load factor `alphaCr`. It is how many times the load the structure takes before it buckles as a whole (a buckling analysis with the geometric stiffness, in `solver.ts`). The moments are then multiplied by `1 / (1 - 1/alphaCr)`, for the sway effects (EC3 5.2.2). This rule needs `alphaCr >= 3`. If it is lower, the member with the most strain energy in the buckling mode gets a heavier section, and the solver runs again.
+2. Each member, in `checks.ts`: flexural buckling (AISC E3), lateral torsional buckling of I sections (F2), weak axis bending (F6), and the two together with the axial force (H1-1). The buckling length is the member length, because step 1 already has the sway. The ratio must stay under 0.6. There are no AISC phi factors, the 0.6 is the margin.
+
+Not checked: shear, local buckling of thin plates (E7, F3), torsional buckling (E4), and notional loads (the small side loads for the frame imperfections). Cb is 1, which is on the safe side for cantilevers. The same AISC formulas size the EU sections too. A few trees with a cantilever truss stay under `alphaCr` 3 (2 of the 240 seeds of the tests): the bottom chord sways out of the truss plane, and nothing braces it sideways. The log says it.
+
 Then come the small details, from a random draw of their own, so a seed keeps the same structure:
 
 - Column splice (on about a third of the structures): above a free level between 30 and 70 % of the height, the columns change to a lighter section, sized from the forces up there. A bearing splice is a cap plate and a base plate bolted at the corners. A flange splice has bolted plates on both flanges and on the web, with fill plates when the two sections don't have the same depth.
@@ -45,7 +52,7 @@ Parts must not go through each other. A secondary beam is coped (its flanges cut
 
 It can also draw a real test of RESSLab Hub instead of a seed: a specimen. For now it draws a beam-to-column subassembly (the test of one connection): one column on a base plate, with one or two beams. That's what the `connection` table of the hub describes, 99 of its 100 tests.
 
-The sections are the real ones, so there is no fix loop and no sizing. The solver runs once, and the log gives the max ratio under `--load`, only as information. The cap plate and the continuity plates are drawn. Splices, foot gussets, trusses, rods and posts are not.
+The sections are the real ones, so there is no fix loop and no sizing. The solver runs once, and the log gives `alphaCr` and the max ratio under `--load`, only as information. The cap plate and the continuity plates are drawn. Splices, foot gussets, trusses, rods and posts are not.
 
 `specimen.ts` reads two kinds of JSON file. The first one is a record of the hub `connection` table, as the hub API gives it (numbers, `null`) or as a row of `connections.csv` (strings, `NA`). A file with a `specimen_type` is a hub record. The two files in `specimens/` are hub records (resslab-hub-data is public domain). The second one is our own `Specimen`, for a test that is not in the hub:
 
@@ -128,7 +135,7 @@ It needs Node 24 or newer. Node runs the `.ts` files directly. Install the deps 
 
 ```sh
 pnpm install                                          # once
-node --test                                           # solver and geometry tests
+node --test                                           # solver, member checks and geometry tests
 pnpm run type-check                                   # checks the types (Node only strips them)
 node cli.ts --seed 5 --view iso --frames --out s5.svg # one structure, plus build frames
 pnpm dev                                              # the playground, with live reload
@@ -142,7 +149,8 @@ Files:
 - `vec.ts`: vector helpers.
 - `sections.ts`: section properties and the CSV tables, plus the round rods (not in the hub tables).
 - `sections/`, `tables.ts`: the CSV tables, and how Node reads them.
-- `solver.ts`: 3D frame solver (6 DOF per node, pinned ends, finds mechanisms).
+- `solver.ts`: 3D frame solver (6 DOF per node, pinned ends, finds mechanisms), and the buckling analysis (`alphaCr`).
+- `checks.ts`: the member checks (AISC 360-22 E3, F2, F6, H1-1).
 - `generate.ts`: topology, the fix loop, trusses and rods, posts and beam splices, and the sizing. Also the specimen path (`buildSpecimen`).
 - `specimen.ts`, `specimens/`: a real test as input (the `Specimen` type, the section lookup, the hub record reader), and two hub records as examples and test data.
 - `steel.ts`: geometry (profiles, copes, plates, clevis, bolts), camera and the painter renderer.

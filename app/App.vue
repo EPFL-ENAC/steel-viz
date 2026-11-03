@@ -34,7 +34,7 @@ const replay = ref(0);
 const status = computed(() => {
   const r = built.value?.r;
   if (!r) return { ok: false, text: '' };
-  return { ok: r.ok && !floating(r.parts).length, text: r.ok ? `Stable, max ratio ${r.ratio.toFixed(2)}` : 'Mechanism left' };
+  return { ok: r.ok && !floating(r.parts).length, text: r.ok ? `Stable, max ratio ${r.ratio.toFixed(2)}, αcr ${r.alpha === Infinity ? '∞' : r.alpha.toFixed(1)}` : 'Mechanism left' };
 });
 const members = computed(() => {
   const st = built.value?.r.st;

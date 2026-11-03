@@ -1,5 +1,7 @@
 // A small 3D frame solver: direct stiffness method, dense Gauss elimination.
 // Units: N, mm, MPa. 6 DOF per node: ux uy uz rx ry rz (global).
+// alphaCr() gives the elastic critical load factor of the whole structure
+// (linear buckling with the geometric stiffness, EC3 5.2.1).
 //
 // Local frame of an element: x along it (u), z along the section depth (w),
 // y = w x u (v). Same rule as the renderer: a vertical member has its depth
@@ -21,10 +23,15 @@ export type Elem = {
   pinJ?: boolean;
   q?: V; // uniform load along the element, global, N/mm
 };
-export type ElemForces = { N: number; My: number; Mz: number };
+// N: max axial force, tension or compression. Nc: max compression (>= 0).
+export type ElemForces = { N: number; Nc: number; My: number; Mz: number };
+// the factored stiffness of the free DOFs, kept for alphaCr()
+type System = { free: number[]; Kff: M; lu: Factored; prep: Prepared[] };
 export type Solved =
-  | { ok: true; d: Float64Array; forces: ElemForces[] }
+  | { ok: true; d: Float64Array; forces: ElemForces[]; axial: Float64Array; sys: System } // axial: mean axial force, tension > 0
   | { ok: false; node: number; dof: number; dofName: string };
+
+type M = number[][];
 
 export const DOF_NAMES = ['ux', 'uy', 'uz', 'rx', 'ry', 'rz'];
 
@@ -41,7 +48,6 @@ export function localFrame(a: V, b: V): { u: V; v: V; w: V; L: number } {
   return { u, v: cross(w, u), w, L };
 }
 
-type M = number[][];
 const zeros = (r: number, c: number): M => Array.from({ length: r }, () => new Array(c).fill(0));
 
 function localK(p: Props, L: number): M {
@@ -134,6 +140,68 @@ const toLocal = (R: V[], g: number[]): number[] => {
   return l;
 };
 
+// LU with partial pivoting, in place. A pivot under tol * (largest value of
+// its column) means the structure is a mechanism: the result names the column.
+type Factored = { a: M; piv: number[] };
+function factor(a: M, tol: number): Factored | { bad: number } {
+  const m = a.length;
+  const scale = a.map((_, c) => Math.max(...a.map((row) => Math.abs(row[c]))));
+  const piv: number[] = [];
+  for (let c = 0; c < m; c++) {
+    let p = c;
+    for (let r = c + 1; r < m; r++) if (Math.abs(a[r][c]) > Math.abs(a[p][c])) p = r;
+    if (!(Math.abs(a[p][c]) > tol * scale[c])) return { bad: c };
+    [a[c], a[p]] = [a[p], a[c]];
+    piv.push(p);
+    const rowc = a[c];
+    for (let r = c + 1; r < m; r++) {
+      const rowr = a[r];
+      const f = rowr[c] / rowc[c];
+      rowr[c] = f;
+      if (!f) continue;
+      for (let j = c + 1; j < m; j++) rowr[j] -= f * rowc[j];
+    }
+  }
+  return { a, piv };
+}
+
+function backsub({ a, piv }: Factored, b: ArrayLike<number>): Float64Array {
+  const m = a.length;
+  const x = Float64Array.from(b);
+  // the rows were swapped whole (with their multipliers): all swaps first, then L
+  piv.forEach((p, c) => p !== c && ([x[c], x[p]] = [x[p], x[c]]));
+  for (let r = 1; r < m; r++) {
+    const row = a[r];
+    let s = x[r];
+    for (let j = 0; j < r; j++) s -= row[j] * x[j];
+    x[r] = s;
+  }
+  for (let r = m - 1; r >= 0; r--) {
+    let s = x[r];
+    const row = a[r];
+    for (let j = r + 1; j < m; j++) s -= row[j] * x[j];
+    x[r] = s / row[r];
+  }
+  return x;
+}
+
+// global block of an element matrix: kg = T^T k T, added into K at idx
+function assemble(K: M, k: M, R: V[], idx: number[]) {
+  for (let a = 0; a < 4; a++)
+    for (let b = 0; b < 4; b++)
+      for (let r = 0; r < 3; r++)
+        for (let c = 0; c < 3; c++) {
+          let s = 0;
+          for (let x = 0; x < 3; x++) {
+            const kx = k[3 * a + x];
+            for (let y = 0; y < 3; y++) s += R[x][r] * kx[3 * b + y] * R[y][c];
+          }
+          if (s) K[idx[3 * a + r]][idx[3 * b + c]] += s;
+        }
+}
+
+const dofs = (e: Elem) => [...[0, 1, 2, 3, 4, 5].map((x) => e.i * 6 + x), ...[0, 1, 2, 3, 4, 5].map((x) => e.j * 6 + x)];
+
 export function solve(nodes: FNode[], elems: Elem[], pivotTol = 1e-9): Solved {
   const n = nodes.length * 6;
   const K = zeros(n, n);
@@ -141,16 +209,8 @@ export function solve(nodes: FNode[], elems: Elem[], pivotTol = 1e-9): Solved {
   const prep = elems.map((e) => prepare(nodes, e));
   elems.forEach((e, ei) => {
     const { k, f0, R } = prep[ei];
-    const idx = [...[0, 1, 2, 3, 4, 5].map((x) => e.i * 6 + x), ...[0, 1, 2, 3, 4, 5].map((x) => e.j * 6 + x)];
-    // kg = T^T k T, assembled block by block
-    for (let a = 0; a < 4; a++)
-      for (let b = 0; b < 4; b++)
-        for (let r = 0; r < 3; r++)
-          for (let c = 0; c < 3; c++) {
-            let s = 0;
-            for (let x = 0; x < 3; x++) for (let y = 0; y < 3; y++) s += R[x][r] * k[3 * a + x][3 * b + y] * R[y][c];
-            K[idx[3 * a + r]][idx[3 * b + c]] += s;
-          }
+    const idx = dofs(e);
+    assemble(K, k, R, idx);
     for (let a = 0; a < 4; a++)
       for (let r = 0; r < 3; r++) {
         let s = 0;
@@ -167,34 +227,17 @@ export function solve(nodes: FNode[], elems: Elem[], pivotTol = 1e-9): Solved {
       if (!fx) free.push(i * 6 + x);
     }
   });
-  const m = free.length;
-  const A = free.map((r) => [...free.map((c) => K[r][c]), F[r]]);
-  const scale = free.map((_, c) => Math.max(...free.map((_, r) => Math.abs(A[r][c]))));
-  for (let c = 0; c < m; c++) {
-    let p = c;
-    for (let r = c + 1; r < m; r++) if (Math.abs(A[r][c]) > Math.abs(A[p][c])) p = r;
-    if (!(Math.abs(A[p][c]) > pivotTol * scale[c])) {
-      const g = free[c];
-      return { ok: false, node: Math.floor(g / 6), dof: g % 6, dofName: DOF_NAMES[g % 6] };
-    }
-    [A[c], A[p]] = [A[p], A[c]];
-    const rowc = A[c];
-    for (let r = c + 1; r < m; r++) {
-      const f = A[r][c] / rowc[c];
-      if (!f) continue;
-      const rowr = A[r];
-      for (let j = c; j <= m; j++) rowr[j] -= f * rowc[j];
-    }
+  const Kff = free.map((r) => free.map((c) => K[r][c]));
+  const lu = factor(Kff.map((row) => [...row]), pivotTol);
+  if ('bad' in lu) {
+    const g = free[lu.bad];
+    return { ok: false, node: Math.floor(g / 6), dof: g % 6, dofName: DOF_NAMES[g % 6] };
   }
-  const x = new Array(m).fill(0);
-  for (let r = m - 1; r >= 0; r--) {
-    let s = A[r][m];
-    for (let j = r + 1; j < m; j++) s -= A[r][j] * x[j];
-    x[r] = s / A[r][r];
-  }
+  const x = backsub(lu, free.map((g) => F[g]));
   const d = new Float64Array(n);
   free.forEach((g, i) => (d[g] = x[i]));
 
+  const axial = new Float64Array(elems.length);
   const forces = elems.map((e, ei) => {
     const { R, rel, kFull, f0Full, ql, L } = prep[ei];
     const dg = [...d.slice(e.i * 6, e.i * 6 + 6), ...d.slice(e.j * 6, e.j * 6 + 6)];
@@ -215,7 +258,120 @@ export function solve(nodes: FNode[], elems: Elem[], pivotTol = 1e-9): Solved {
       Mz = Math.max(Mz, Math.abs(-f[5] + x * f[1] + (ql[1] * x * x) / 2));
       My = Math.max(My, Math.abs(f[4] + x * f[2] + (ql[2] * x * x) / 2));
     }
-    return { N: Math.max(Math.abs(f[0]), Math.abs(f[6])), My, Mz };
+    // f[6] > 0 (f[0] < 0) pulls the element: tension
+    axial[ei] = (f[6] - f[0]) / 2;
+    return { N: Math.max(Math.abs(f[0]), Math.abs(f[6])), Nc: Math.max(0, f[0], -f[6]), My, Mz };
   });
-  return { ok: true, d, forces };
+  return { ok: true, d, forces, axial, sys: { free, Kff, lu, prep } };
+}
+
+// Geometric stiffness of an element under the axial force N (tension > 0),
+// local coordinates. A fixed-fixed element gets the consistent matrix of a
+// cubic beam (no torsion term), on (uy, rz) and on (uz, ry) with the same
+// signs as localK. An element with a release gets the string part only (N/L
+// on the transverse moves of its ends): its own buckling between its ends is
+// the member check (checks.ts), not the global one.
+export function localKg(N: number, L: number, released: boolean): M {
+  const k = zeros(12, 12);
+  const put = (ids: number[], m: number[][], f: number) => ids.forEach((a, r) => ids.forEach((b, c) => (k[a][b] += f * m[r][c])));
+  if (released) {
+    const s = [[1, -1], [-1, 1]];
+    put([1, 7], s, N / L);
+    put([2, 8], s, N / L);
+    return k;
+  }
+  const c = (sg: number) => [
+    [36, sg * 3 * L, -36, sg * 3 * L],
+    [sg * 3 * L, 4 * L * L, -sg * 3 * L, -L * L],
+    [-36, -sg * 3 * L, 36, -sg * 3 * L],
+    [sg * 3 * L, -L * L, -sg * 3 * L, 4 * L * L],
+  ];
+  put([1, 5, 7, 11], c(1), N / (30 * L));
+  put([2, 4, 8, 10], c(-1), N / (30 * L));
+  return k;
+}
+
+// Elastic critical load factor: the smallest a > 0 with (K + a Kg) x = 0,
+// Kg from the axial forces of the solve. a < 1 means the loads are above
+// the buckling load. Inverse iteration on K^-1 G (G = -Kg) gives mu = 1/a, the
+// largest eigenvalue in size. If it is negative (a mode only tension could
+// drive), shift by |mu| and run again to get the largest positive one.
+// Infinity: nothing is in compression.
+// energy: the strain energy of each element in the buckling mode (x.K.x).
+// Raising the stiffness of the elements with the most energy raises alphaCr
+// the most: generate.ts uses it to pick the member to make heavier.
+export type Buckling = { alpha: number; energy: Float64Array };
+
+export const alphaCr = (nodes: FNode[], elems: Elem[], r: Extract<Solved, { ok: true }>): number => buckling(nodes, elems, r).alpha;
+
+export function buckling(nodes: FNode[], elems: Elem[], r: Extract<Solved, { ok: true }>): Buckling {
+  const { free, Kff, lu, prep } = r.sys;
+  if (!elems.some((_, i) => r.axial[i] < 0)) return { alpha: Infinity, energy: new Float64Array(elems.length) };
+  // G on the free DOFs, sparse: one entry per element block term (repeats add up)
+  const at = new Int32Array(nodes.length * 6).fill(-1);
+  free.forEach((d, i) => (at[d] = i));
+  const gi: number[] = [];
+  const gj: number[] = [];
+  const gv: number[] = [];
+  const local = Array.from({ length: 12 }, (_, i) => i);
+  elems.forEach((e, ei) => {
+    if (!r.axial[ei]) return;
+    const ke = zeros(12, 12);
+    assemble(ke, localKg(-r.axial[ei], prep[ei].L, prep[ei].rel.length > 0), prep[ei].R, local);
+    const idx = dofs(e).map((d) => at[d]);
+    for (let a = 0; a < 12; a++)
+      for (let b = 0; b < 12; b++)
+        if (idx[a] >= 0 && idx[b] >= 0 && ke[a][b]) gi.push(idx[a]), gj.push(idx[b]), gv.push(ke[a][b]);
+  });
+  const m = free.length;
+  const Gx = (x: Float64Array) => {
+    const y = new Float64Array(m);
+    for (let k = 0; k < gv.length; k++) y[gi[k]] += gv[k] * x[gj[k]];
+    return y;
+  };
+  const dotv = (a: Float64Array, b: Float64Array) => {
+    let t = 0;
+    for (let i = 0; i < m; i++) t += a[i] * b[i];
+    return t;
+  };
+  // Inverse iteration y = (K^-1 G + shift) x. Kx is carried along
+  // (K y = G x + shift K x), so a step costs one back substitution and one
+  // sparse product. mu: the Rayleigh quotient of the pencil, x.Gx / x.Kx.
+  const run = (shift: number) => {
+    let x: Float64Array = Float64Array.from({ length: m }, (_, i) => 1 + 0.5 * Math.sin(i * 12.9898));
+    let kx = Float64Array.from(Kff, (row) => row.reduce((t, v, j) => t + v * x[j], 0));
+    let gx = Gx(x);
+    let mu = 0;
+    for (let it = 0; it < 400; it++) {
+      const y = backsub(lu, gx);
+      const ky = Float64Array.from(gx);
+      if (shift) for (let i = 0; i < m; i++) (y[i] += shift * x[i]), (ky[i] += shift * kx[i]);
+      const n = Math.sqrt(dotv(y, y)) || 1;
+      for (let i = 0; i < m; i++) (y[i] /= n), (ky[i] /= n);
+      x = y;
+      kx = ky;
+      gx = Gx(x);
+      const next = dotv(x, gx) / dotv(x, kx);
+      if (it > 3 && Math.abs(next - mu) <= 1e-6 * Math.abs(next)) return { mu: next, x };
+      mu = next;
+    }
+    return { mu, x };
+  };
+  let res = run(0);
+  if (res.mu < 0) res = run(-res.mu);
+  const { mu, x } = res;
+  // element energy in local coordinates: ul = R ue on each 3-block
+  const energy = new Float64Array(elems.length);
+  elems.forEach((e, ei) => {
+    const { k, R } = prep[ei];
+    const ue = dofs(e).map((d) => (at[d] >= 0 ? x[at[d]] : 0));
+    const ul = ue.map((_, i) => {
+      const b = i - (i % 3);
+      return R[i % 3][0] * ue[b] + R[i % 3][1] * ue[b + 1] + R[i % 3][2] * ue[b + 2];
+    });
+    let t = 0;
+    for (let a = 0; a < 12; a++) for (let b = 0; b < 12; b++) t += ul[a] * k[a][b] * ul[b];
+    energy[ei] = t;
+  });
+  return { alpha: mu > 0 ? 1 / mu : Infinity, energy };
 }

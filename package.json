@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "description": "Steel structures as technical line drawings, a 3D view and a build animation",
   "type": "module",
+  "license": "MIT",
   "private": true,
   "packageManager": "pnpm@12.11.2",
   "engines": {
