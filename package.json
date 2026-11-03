@@ -3,11 +3,13 @@
   "description": "Steel structures as technical line drawings, a 3D view and a build animation",
   "type": "module",
   "private": true,
+  "packageManager": "pnpm@12.11.2",
   "engines": {
     "node": ">=24"
   },
   "scripts": {
     "test": "node --test",
+    "type-check": "tsc",
     "playground": "node build-playground.ts"
   },
   "dependencies": {
@@ -16,6 +18,9 @@
     "three-mesh-bvh": "0.9.17"
   },
   "devDependencies": {
-    "esbuild": "0.25.12"
+    "@types/node": "24.19.2",
+    "@types/three": "0.187.0",
+    "esbuild": "0.25.12",
+    "typescript": "7.0.2"
   }
 }

@@ -13,6 +13,7 @@ Node 24 or newer runs the `.ts` files directly. Imports keep the `.ts` extension
 ```sh
 pnpm install              # once
 node --test               # solver tests, and no clash and no floating part on 240 structures (about 4 s)
+pnpm run type-check       # tsc, strict, no emit (about 0.2 s)
 node --test solver.test.ts                         # one file
 node --test --test-name-pattern "clash|support"    # some tests by name
 node build-playground.ts  # playground.html, one page with sliders (build output, never commit it)
@@ -22,7 +23,7 @@ node pick.ts --count 150 --top 12 --sheet best.html
 
 Run `node --test` after every change to `generate.ts`, `steel.ts` or `clash.ts`. `cli.ts` prints the solver log, the part count and `FLOATING` if a part comes before the part it stands on. It's the fastest way to look at one seed.
 
-Nothing checks the types: Node only strips them, and there is no `tsconfig.json`, no linter and no CI yet. Use only TypeScript that Node can strip (no `enum`, no `namespace`, no constructor parameter properties).
+Node only strips the types. `pnpm run type-check` checks them (`tsc` with `tsconfig.json`, no emit). CI runs `node --test`, then the type check, on every push and pull request. `erasableSyntaxOnly` refuses TypeScript that Node can't strip (no `enum`, no `namespace`, no constructor parameter properties). There is no linter.
 
 ## How it fits together
 
@@ -34,7 +35,7 @@ Nothing checks the types: Node only strips them, and there is no `tsconfig.json`
 
 Seeds must stay stable. `generate()` uses a separate `mulberry32` random stream for each stage (form, topology, trusses and rods, details). When you add a new random feature, give it its own stream. If it takes draws from the main `rng`, every seed after it changes, and the seeds picked for the logo change too.
 
-Units are mm everywhere. `hlr.ts` converts to metres before it calls three-edge-projection (see the README). Import `three-edge-projection/src/ProjectionGenerator.js`, not the package root.
+Units are mm everywhere. `hlr.ts` converts to metres before it calls three-edge-projection (see the README). Import `three-edge-projection/src/ProjectionGenerator.js`, not the package root. The library ships no types: `three-edge-projection.d.ts` types the part `hlr.ts` uses. If `hlr.ts` uses more of it, add it there.
 
 ## Rules
 
