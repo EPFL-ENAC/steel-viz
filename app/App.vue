@@ -31,6 +31,12 @@ watch(() => [s.seed, s.form, s.arms, s.height, s.load, s.family], () => build(tr
 watch(() => s.detail, () => build(false));
 
 const replay = ref(0);
+// play the build again when the build time slider stops
+let again = 0;
+watch(() => s.duration, () => {
+  clearTimeout(again);
+  again = window.setTimeout(() => replay.value++, 300);
+});
 const status = computed(() => {
   const r = built.value?.r;
   if (!r) return { ok: false, text: '' };
@@ -117,6 +123,7 @@ async function copy() {
         <Seg v-model="s.size" label="SVG size" :options="[[0, 'Full size'], [256, '256 px'], [96, '96 px'], [48, '48 px']]" />
         <Slider id="az" v-model="az" label="Azimuth" :min="0" :max="359" :step="1" :out="`${s.az}°`" />
         <Slider id="el" v-model="el" label="Elevation" :min="0" :max="90" :step="1" :out="`${s.el}°`" />
+        <Slider id="duration" v-model="s.duration" label="Build time" :min="0" :max="20" :step="0.5" :out="s.duration ? `${s.duration} s` : 'none'" />
       </fieldset>
 
       <div class="actions">

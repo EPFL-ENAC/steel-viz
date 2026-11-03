@@ -6,7 +6,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { renderHLR } from '../hlr.ts';
-import { render, type RenderOpts } from '../steel.ts';
+import { buildEnd, render, timeline, type RenderOpts } from '../steel.ts';
 import { createViewer } from '../webgl.ts';
 import { dev, params, s, stats, turnTo, type Built } from './state.ts';
 
@@ -35,10 +35,18 @@ const hint = computed(() => ({
 const css = (k: string, d: string) => getComputedStyle(document.documentElement).getPropertyValue(k).trim() || d;
 const paint = () => viewer?.setColors({ bg: css('--bg', '#ffffff'), fg: css('--fg', '#212121'), accent: css('--primary', '#e30713') });
 
+// the speed that makes the build last s.duration seconds
+function speed() {
+  const parts = props.built?.r.parts;
+  const end = parts ? buildEnd(timeline(parts)) : 0;
+  return s.duration > 0 && end > 0 ? end / (s.duration * 1000) : 1;
+}
+
 // fast: the painter's trick, while the angle moves
 function draw(animate = false, fast = false) {
   const b = props.built;
   if (!b) return;
+  animate &&= s.duration > 0; // 0 s: no animation
   const t0 = performance.now();
   const m = mode.value;
   if (viewer && (m === '3d' || m === 'both')) {
@@ -48,7 +56,7 @@ function draw(animate = false, fast = false) {
     }
     viewer.setWeights(s.weights === 'two');
     if (!fromViewer || fromViewer[0] !== s.az || fromViewer[1] !== s.el) viewer.view(s.az, s.el);
-    if (animate) viewer.build();
+    if (animate) viewer.build(speed());
   }
   if (m === '3d') {
     lastSvg = ''; // made on copy
@@ -57,7 +65,7 @@ function draw(animate = false, fast = false) {
     stats.ms = `${b.ms.toFixed(0)} ms build, ${(performance.now() - t0).toFixed(0)} ms to load`;
     return;
   }
-  const opts: RenderOpts = { az: s.az, el: s.el, animate, stepMs: 70, weights: s.weights === 'two', size: s.size || undefined };
+  const opts: RenderOpts = { az: s.az, el: s.el, animate, speed: speed(), stepMs: 70, weights: s.weights === 'two', size: s.size || undefined };
   const out = (fast ? render : renderHLR)(b.r.parts, opts);
   lastSvg = out.svg;
   svgEl.value!.innerHTML = out.svg; // not v-html: the same string must play the build again

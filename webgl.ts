@@ -18,7 +18,7 @@ import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js';
 import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeometry.js';
 import { add, cross, dot, mul, norm, type V } from './vec.ts';
-import { BOLT_MS, camera, timeline, type Part } from './steel.ts';
+import { BOLT_MS, buildEnd, camera, timeline, type Part } from './steel.ts';
 import { triangles } from './hlr.ts';
 
 const HEAD = 13; // bolt head height, mm, as in hlr.ts
@@ -31,7 +31,7 @@ export type Colors = { bg: string; fg: string; accent: string };
 export type Viewer = {
   show(parts: Part[]): void; // a new structure
   view(az: number, el: number): void;
-  build(): void; // play the build animation
+  build(speed?: number): void; // play the build animation (speed 2: twice as fast)
   setWeights(two: boolean): void;
   setColors(c: Colors): void;
   reset(): void; // zoom and pan back to the whole structure
@@ -262,7 +262,7 @@ export function createViewer(host: HTMLElement, onTurn: (az: number, el: number,
   new ResizeObserver((e) => resize(e)).observe(host);
 
   // ---- the build animation: same timeline as the SVG
-  let anim: { t0: number; slots: ReturnType<typeof timeline>; dirs: V[]; end: number } | null = null;
+  let anim: { t0: number; slots: ReturnType<typeof timeline>; dirs: V[]; end: number; bolt: number } | null = null;
   const ease = (t: number) => 1 - (1 - t) ** 3;
   const animate = (now: number): boolean => {
     if (!anim) return false;
@@ -272,7 +272,7 @@ export function createViewer(host: HTMLElement, onTurn: (az: number, el: number,
       p.group.visible = t >= sl.start;
       if (p.part.kind === 'bolts') {
         // one bolt after the other
-        const n = Math.min(p.part.dots.length, Math.max(0, Math.floor((t - sl.start) / BOLT_MS) + 1)) * p.per;
+        const n = Math.min(p.part.dots.length, Math.max(0, Math.floor((t - sl.start) / anim!.bolt) + 1)) * p.per;
         p.fill.geometry.setDrawRange(0, (p.base[0] + n * HEAD_TRI) / 3);
         if (p.lines) (p.lines.geometry as LineSegmentsGeometry).instanceCount = (p.base[1] + n * HEAD_SEG) / 6;
         return;
@@ -357,9 +357,9 @@ export function createViewer(host: HTMLElement, onTurn: (az: number, el: number,
     reset();
   };
 
-  const build = () => {
+  const build = (speed = 1) => {
     stopAnim();
-    const slots = timeline(pieces.map((p) => p.part));
+    const slots = timeline(pieces.map((p) => p.part), speed);
     const { r, up } = camera(az, el);
     // the direction each part comes from, in the screen plane, as in hlr.ts
     const dirs = pieces.map((p) => {
@@ -370,8 +370,8 @@ export function createViewer(host: HTMLElement, onTurn: (az: number, el: number,
       else [ux, uy] = [ux / l, uy / l];
       return add(mul(r, ux), mul(up, uy));
     });
-    const end = Math.max(0, ...[...slots.values()].map((s) => s.land)) + 100;
-    anim = { t0: performance.now(), slots, dirs, end };
+    const end = buildEnd(slots) + 100;
+    anim = { t0: performance.now(), slots, dirs, end, bolt: BOLT_MS / speed };
     redraw();
   };
 

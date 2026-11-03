@@ -24,6 +24,7 @@ const DEFAULTS = {
   weights: 'two',
   viewer: '3d', // 3d, svg, both, or diff (vs main, dev server only)
   size: 0, // px, 0 for full size
+  duration: 6, // s, the length of the build animation, 0 for none
   theme: '', // '' follows the system
 };
 export type Settings = typeof DEFAULTS;
@@ -33,7 +34,7 @@ function fromHash(): Settings {
   for (const [k, v] of new URLSearchParams(location.hash.slice(1))) {
     if (!(k in s)) continue;
     const d = (DEFAULTS as any)[k];
-    (s as any)[k] = typeof d === 'number' ? Number(v) || d : v;
+    (s as any)[k] = typeof d === 'number' ? (v !== '' && Number.isFinite(Number(v)) ? Number(v) : d) : v;
   }
   return s;
 }
