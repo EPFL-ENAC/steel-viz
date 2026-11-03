@@ -8,10 +8,15 @@ base_branch = "main"
 # The single source for the push guard, the completion and the deny rules.
 protected_branches = ["main"]
 
+# One port per worktree for the playground (Vite dev server).
+[[ports.family]]
+name = "playground"
+main = 5180
+
 [deps]
 
 [[deps.step]]
-if_missing = "node_modules"
+# no if_missing: a worktree made before a new dependency gets it too (fast when up to date)
 cwd = "."
 run = "pnpm install --frozen-lockfile"
 
@@ -21,6 +26,13 @@ run = "pnpm install --frozen-lockfile"
 [[panes.pane]]
 name = "agent"
 role = "agent"
+
+# The playground of this worktree, live on each save. `wtx open playground`.
+[[panes.pane]]
+name = "playground"
+role = "server"
+cmd = "pnpm dev"
+log = true
 
 [[panes.pane]]
 name = "shell"
@@ -47,7 +59,7 @@ build_effort = "xhigh"
 
 # Added to the baseline wtx ships. A repo can tighten, never loosen.
 [permissions]
-allow = ["Bash(node --test*)", "Bash(pnpm run test)", "Bash(pnpm run type-check)", "Bash(node build-playground.ts)", "Bash(node cli.ts *)", "Bash(node pick.ts *)"]
+allow = ["Bash(node --test*)", "Bash(pnpm run test)", "Bash(pnpm run type-check)", "Bash(pnpm build)", "Bash(node cli.ts *)", "Bash(node pick.ts *)", "Bash(wtx open playground*)"]
 
 # Run by `wtx land --local`.
 [checks]
