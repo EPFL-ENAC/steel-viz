@@ -73,6 +73,7 @@ It needs Node 24 or newer. Node runs the `.ts` files directly. Install the deps 
 ```sh
 pnpm install                                          # once
 node --test                                           # solver and geometry tests
+pnpm run type-check                                   # checks the types (Node only strips them)
 node cli.ts --seed 5 --view iso --frames --out s5.svg # one structure, plus build frames
 node build-playground.ts                              # writes playground.html, one page with sliders
 ```
@@ -91,6 +92,7 @@ Files:
 - `score.ts`, `pick.ts`: the logo score, and the scan over many seeds.
 - `hlr.ts`: the exact hidden-line renderer, with bolt heads as real hex solids.
 - `webgl.ts`: the 3D view of the playground.
+- `three-edge-projection.d.ts`: types for the part of three-edge-projection that `hlr.ts` uses (the library ships none).
 - `cli.ts`, `build-playground.ts`, `playground.entry.ts`, `playground.template.html`: command line and playground page. `build-playground.ts` bundles `playground.entry.ts` with esbuild.
 
 `playground.html` and the SVGs are build output, they stay out of git.

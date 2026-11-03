@@ -1,6 +1,6 @@
 # Roadmap
 
-What we plan to do next. Nothing here is started.
+What we plan to do next. A checked item is done.
 
 ## Generator
 
@@ -20,6 +20,6 @@ Today the hub only takes an exported SVG for its logo (RESSLab-Team/resslab-hub#
 
 ## Repo
 
-- [ ] TypeScript as a dev dependency, a `tsconfig.json` and a `type-check` script.
+- [x] TypeScript as a dev dependency, a `tsconfig.json` and a `type-check` script.
 - [ ] A LICENSE.
-- [ ] A GitHub Actions CI that runs `node --test` (and the type check).
+- [x] A GitHub Actions CI that runs `node --test` (and the type check).
