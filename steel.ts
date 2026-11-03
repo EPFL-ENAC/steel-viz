@@ -7,7 +7,7 @@
 // segments so the depth sort stays honest). It is wrong in some places.
 // hlr.ts draws the exact hidden lines, and is the default.
 import { add, cross, dot, len, mul, norm, sub, type V } from './vec.ts';
-import type { Section } from './sections.ts';
+import { ANGLE_GAP, rects, type Section } from './sections.ts';
 
 export const PITCH = 75; // bolt pitch
 export const EDGE = 38; // bolt edge distance
@@ -111,6 +111,37 @@ export const profRound = (D: number): P2[][] => [
   ccw([...Array(16).keys()].map((i): P2 => [(D / 2) * Math.cos((i * Math.PI) / 8), (D / 2) * Math.sin((i * Math.PI) / 8)])),
 ];
 
+// a channel: the web on v = 0, the flanges toward +v
+export function profC(d: number, bf: number, tw: number, tf: number): P2[][] {
+  const [h, l, r, x, t] = [d / 2, -tw / 2, bf - tw / 2, tw / 2, tf];
+  return [ccw([[l, -h], [r, -h], [r, -h + t], [x, -h + t], [x, h - t], [r, h - t], [r, h], [l, h]])];
+}
+
+// a tee: the flange on top, the stem down
+export function profT(d: number, bf: number, tw: number, tf: number): P2[][] {
+  const [h, w, x, t] = [d / 2, bf / 2, tw / 2, tf];
+  return [ccw([[-w, -h], [w, -h], [w, -h + t], [x, -h + t], [x, h], [-x, h], [-x, -h + t], [-w, -h + t]])];
+}
+
+// two angles back to back, ANGLE_GAP apart: the legs along the gap go down,
+// the outstanding legs are on top
+export function prof2L(d: number, bf: number, t: number): P2[][] {
+  const [h, w, g] = [d / 2, bf / 2, ANGLE_GAP / 2];
+  const right: P2[] = [[g, -h], [w, -h], [w, -h + t], [g + t, -h + t], [g + t, h], [g, h]];
+  return [ccw(right), ccw(right.map(([a, b]): P2 => [-a, b]))];
+}
+
+export function profile(s: Section): P2[][] {
+  switch (s.kind) {
+    case 'I': return profI(s.d, s.bf, s.tw, s.tf);
+    case 'C': return profC(s.d, s.bf, s.tw, s.tf);
+    case 'T': return profT(s.d, s.bf, s.tw, s.tf);
+    case '2L': return prof2L(s.d, s.bf, s.tf);
+    case 'ROD': return profRound(s.d);
+    default: return profRect(s.d, s.bf);
+  }
+}
+
 // ---------------------------------------------------------------- frames
 // u along the member, w along its depth, v = w x u
 export function frame(p0: V, p1: V): { u: V; v: V; w: V } {
@@ -193,35 +224,60 @@ export type Cope = { at: 'from' | 'to'; len: number; top: number; bot: number };
 
 export function geo(id: string, sec: Section, p0: V, p1: V, tos: boolean): Geo {
   const { u, v, w } = frame(p0, p1);
-  const polys = sec.kind === 'I' ? profI(sec.d, sec.bf, sec.tw, sec.tf) : sec.kind === 'ROD' ? profRound(sec.d) : profRect(sec.d, sec.bf);
-  return { id, sec, p0, p1, u, v, w, sh: tos ? sec.d / 2 : 0, polys, d: sec.d, tw: sec.kind === 'I' ? sec.tw : sec.bf, copes: [] };
+  const web = sec.kind === 'I' || sec.kind === 'C' || sec.kind === 'T';
+  return { id, sec, p0, p1, u, v, w, sh: tos ? sec.d / 2 : 0, polys: profile(sec), d: sec.d, tw: web ? sec.tw : sec.bf, copes: [] };
 }
 
-// The outline of an I cut to the depths [top, d - bot] (0 = no cut), with
-// extra corners on the web sides at `splits` (depths from the top). With the
-// same corners, the coped end and the full section share their edges, so the
-// faces of the two parts join without a seam. `piece` gives instead what a
-// cope takes away: the top (or bottom) `depth` mm.
-function outlineI(s: Section, top: number, bot: number, splits: number[]): P2[] {
-  const [h, w, x, t] = [s.d / 2, s.bf / 2, s.tw / 2, s.tf];
-  const [b0, b1] = [top ? -h + top : -h + t, bot ? h - bot : h - t];
-  const mids = splits.map((dd) => dd - h).filter((b) => b > b0 + 0.01 && b < b1 - 0.01).sort((a, b) => a - b);
-  const pts: P2[] = top ? [[-x, b0], [x, b0]] : [[-w, -h], [w, -h], [w, -h + t], [x, -h + t]];
-  for (const b of mids) pts.push([x, b]);
-  pts.push(...((bot ? [[x, b1], [-x, b1]] : [[x, h - t], [w, h - t], [w, h], [-w, h], [-w, h - t], [-x, h - t]]) as P2[]));
-  for (const b of [...mids].reverse()) pts.push([-x, b]);
-  if (!top) pts.push([-x, -h + t], [-w, -h + t]);
-  return pts;
+// The flanges of a section in its profile, each one [left, right, thickness],
+// and the two sides of its web. An I has both flanges, a C too (toward +v
+// from its web), a T only the top one. Other kinds have none.
+type Flanged = { top: [number, number, number]; bot?: [number, number, number]; web: [number, number] };
+function flanged(s: Section): Flanged | undefined {
+  const [w, x] = [s.bf / 2, s.tw / 2];
+  if (s.kind === 'I') return { top: [-w, w, s.tf], bot: [-w, w, s.tf], web: [-x, x] };
+  if (s.kind === 'C') return { top: [-x, s.bf - x, s.tf], bot: [-x, s.bf - x, s.tf], web: [-x, x] };
+  if (s.kind === 'T') return { top: [-w, w, s.tf], web: [-x, x] };
+  return undefined;
 }
-function pieceI(s: Section, side: 'top' | 'bot', depth: number, splits: number[]): P2[] {
-  const [h, w, x, t] = [s.d / 2, s.bf / 2, s.tw / 2, s.tf];
-  const [b0, b1] = side === 'top' ? [-h + t, -h + depth] : [h - depth, h - t];
+
+// remove a point equal to the one before it (also the last against the first)
+function dedupe(pts: P2[]): P2[] {
+  const out = pts.filter((q, i) => {
+    const o = pts[(i + pts.length - 1) % pts.length];
+    return Math.abs(q[0] - o[0]) > 1e-9 || Math.abs(q[1] - o[1]) > 1e-9;
+  });
+  return out.length ? out : pts.slice(0, 1);
+}
+
+// The outline of a flanged section cut to the depths [top, d - bot] (0 = no
+// cut), with extra corners on the web sides at `splits` (depths from the
+// top). With the same corners, the coped end and the full section share
+// their edges, so the faces of the two parts join without a seam. `piece`
+// gives instead what a cope takes away: the top (or bottom) `depth` mm.
+function outline(s: Section, f: Flanged, top: number, bot: number, splits: number[]): P2[] {
+  const h = s.d / 2;
+  const [[tl, tr, tt], [bl, br, tb], [wl, wr]] = [f.top, f.bot ?? [0, 0, 0], f.web];
+  const [b0, b1] = [top ? -h + top : -h + tt, bot ? h - bot : h - tb];
   const mids = splits.map((dd) => dd - h).filter((b) => b > b0 + 0.01 && b < b1 - 0.01).sort((a, b) => a - b);
-  const right = mids.map((b): P2 => [x, b]);
-  const left = [...mids].reverse().map((b): P2 => [-x, b]);
-  return side === 'top'
-    ? [[-w, -h], [w, -h], [w, b0], [x, b0], ...right, [x, b1], [-x, b1], ...left, [-x, b0], [-w, b0]]
-    : [[x, b0], ...right, [x, b1], [w, b1], [w, h], [-w, h], [-w, b1], [-x, b1], ...left, [-x, b0]];
+  const pts: P2[] = top ? [[wl, b0], [wr, b0]] : [[tl, -h], [tr, -h], [tr, -h + tt], [wr, -h + tt]];
+  for (const b of mids) pts.push([wr, b]);
+  if (bot) pts.push([wr, b1], [wl, b1]);
+  else if (f.bot) pts.push([wr, h - tb], [br, h - tb], [br, h], [bl, h], [bl, h - tb], [wl, h - tb]);
+  else pts.push([wr, h], [wl, h]);
+  for (const b of [...mids].reverse()) pts.push([wl, b]);
+  if (!top) pts.push([wl, -h + tt], [tl, -h + tt]);
+  return dedupe(pts);
+}
+function piece(s: Section, f: Flanged, side: 'top' | 'bot', depth: number, splits: number[]): P2[] {
+  const h = s.d / 2;
+  const [[tl, tr, tt], [bl, br, tb], [wl, wr]] = [f.top, f.bot ?? [0, 0, 0], f.web];
+  const [b0, b1] = side === 'top' ? [-h + tt, -h + depth] : [h - depth, h - tb];
+  const mids = splits.map((dd) => dd - h).filter((b) => b > b0 + 0.01 && b < b1 - 0.01).sort((a, b) => a - b);
+  const right = mids.map((b): P2 => [wr, b]);
+  const left = [...mids].reverse().map((b): P2 => [wl, b]);
+  return dedupe(side === 'top'
+    ? [[tl, -h], [tr, -h], [tr, b0], [wr, b0], ...right, [wr, b1], [wl, b1], ...left, [wl, b0], [tl, b0]]
+    : [[wr, b0], ...right, [wr, b1], [br, b1], [br, h], [bl, h], [bl, b1], [wl, b1], ...left, [wl, b0]]);
 }
 
 export function memberFaces(g: Geo, seg: number, cuts: number[] = []): Face[] {
@@ -229,17 +285,18 @@ export function memberFaces(g: Geo, seg: number, cuts: number[] = []): Face[] {
   if (g.sec.kind === 'ROD')
     return prism(g.p0, g.p1, g.polys, g.u, g.v, g.w, seg, g.sh, cuts).map((f) =>
       f.pts.length === 4 ? { ...f, edges: f.edges.filter(([i, j]) => !((i === 1 && j === 2) || (i === 3 && j === 0))) } : f);
-  if (!g.copes.length || g.sec.kind !== 'I') return prism(g.p0, g.p1, g.polys, g.u, g.v, g.w, seg, g.sh, cuts);
+  const f = flanged(g.sec);
+  if (!g.copes.length || !f) return prism(g.p0, g.p1, g.polys, g.u, g.v, g.w, seg, g.sh, cuts);
   const L = len(sub(g.p1, g.p0));
   const splits = g.copes.flatMap((c) => [c.top, c.bot ? g.d - c.bot : 0]).filter((x) => x > 0);
-  // same winding as profI
-  const raw = outlineI(g.sec, 0, 0, splits);
+  // same winding as the profile
+  const raw = outline(g.sec, f, 0, 0, splits);
   const turn = (p: P2[]) => (ccw(raw) === raw ? p : [...p].reverse());
   const full = turn(raw);
   const coped = g.copes.map((c) => ({
     c,
-    poly: turn(outlineI(g.sec, c.top, c.bot, splits)),
-    pieces: [...(c.top ? [turn(pieceI(g.sec, 'top', c.top, splits))] : []), ...(c.bot ? [turn(pieceI(g.sec, 'bot', c.bot, splits))] : [])],
+    poly: turn(outline(g.sec, f, c.top, c.bot, splits)),
+    pieces: [...(c.top ? [turn(piece(g.sec, f, 'top', c.top, splits))] : []), ...(c.bot ? [turn(piece(g.sec, f, 'bot', c.bot, splits))] : [])],
     span: c.at === 'from' ? [0, c.len] : [L - c.len, L],
   }));
   const marks = [0, ...cuts, ...coped.map((k) => (k.c.at === 'from' ? k.c.len : L - k.c.len))]
@@ -262,10 +319,18 @@ export function memberFaces(g: Geo, seg: number, cuts: number[] = []): Face[] {
   segs.forEach((sg, k) => {
     const { t0, t1, poly } = sg;
     const m = poly.length;
+    // no long edge at a corner that is not one (the split points on a flat
+    // side): the painter and webgl draw the edges they are given
+    const straight = poly.map((q, i) => {
+      const [a, b] = [poly[(i + m - 1) % m], poly[(i + 1) % m]];
+      return Math.abs((q[0] - a[0]) * (b[1] - a[1]) - (q[1] - a[1]) * (b[0] - a[0])) < 1e-6;
+    });
     for (let i = 0; i < m; i++) {
       const j = (i + 1) % m;
       const key = `${poly[i]}|${poly[j]}`;
-      const edges: [number, number][] = [[1, 2], [3, 0]];
+      const edges: [number, number][] = [];
+      if (!straight[j]) edges.push([1, 2]);
+      if (!straight[i]) edges.push([3, 0]);
       if (k === 0 || !segs[k - 1].keys.has(key)) edges.push([0, 1]);
       if (k === segs.length - 1 || !segs[k + 1].keys.has(key)) edges.push([2, 3]);
       faces.push({ pts: [P(poly[i], t0), P(poly[j], t0), P(poly[j], t1), P(poly[i], t1)], edges });
@@ -284,13 +349,10 @@ export function memberFaces(g: Geo, seg: number, cuts: number[] = []): Face[] {
   return faces;
 }
 
-// the member as boxes: flanges and web of an I, one box for a tube
+// the member as boxes: the rectangles of its section (flanges and web of an
+// I, the legs of the angles), one box for a tube
 export function memberBoxes(g: Geo): Box[] {
-  const { d, bf } = g.sec;
-  const [h, w] = [d / 2, bf / 2];
-  const rects: [number, number, number, number][] = g.sec.kind === 'I'
-    ? [[-w, w, -h, -h + g.sec.tf], [-w, w, h - g.sec.tf, h], [-g.tw / 2, g.tw / 2, -h + g.sec.tf, h - g.sec.tf]]
-    : [[-w, w, -h, h]];
+  const h = g.sec.d / 2;
   const L = len(sub(g.p1, g.p0));
   // pieces along the member: the coped ends keep only what the cope leaves
   const from = g.copes.find((c) => c.at === 'from');
@@ -298,7 +360,7 @@ export function memberBoxes(g: Geo): Box[] {
   const spans: [number, number, Cope | undefined][] = [[from?.len ?? 0, L - (to?.len ?? 0), undefined]];
   if (from) spans.push([0, from.len, from]);
   if (to) spans.push([L - to.len, L, to]);
-  return spans.flatMap(([t0, t1, c]) => rects.flatMap(([a0, a1, b0, b1]) => {
+  return spans.flatMap(([t0, t1, c]) => rects(g.sec).flatMap(([a0, a1, b0, b1]) => {
     if (c) [b0, b1] = [Math.max(b0, -h + c.top), Math.min(b1, h - c.bot)];
     if (b1 - b0 < 0.5 || t1 - t0 < 0.5) return [];
     return [{
@@ -353,7 +415,7 @@ export function resolve(g: Geo, S: Geo, at: 'from' | 'to'): Resolved {
 
 // cut the flanges of g back where the flanges of S would go through them
 function copeFor(g: Geo, S: Geo, r: Resolved): Cope | undefined {
-  if (g.sec.kind !== 'I' || !r.room) return undefined;
+  if ((g.sec.kind !== 'I' && g.sec.kind !== 'C') || !r.room) return undefined;
   const [lo, hi] = r.room;
   const tfS = S.sec.tf;
   const top = lo > 0 && lo - tfS < g.d ? Math.max(lo, g.sec.tf) + 10 : 0;
@@ -364,9 +426,10 @@ function copeFor(g: Geo, S: Geo, r: Resolved): Cope | undefined {
 }
 
 // the depths (from the top of g) where a plate on its web can sit: between
-// its flanges, under a cope, and between the flanges of the support
+// its flanges, under a cope, and between the flanges of the support. A tee
+// has no bottom flange.
 function webWindow(g: Geo, r: Resolved): [number, number] {
-  let [lo, hi] = [g.sec.tf + 10, g.d - g.sec.tf - 10];
+  let [lo, hi] = [g.sec.tf + 10, g.d - (g.sec.kind === 'T' ? 0 : g.sec.tf) - 10];
   if (r.cope) [lo, hi] = [Math.max(lo, r.cope.top + 10), Math.min(hi, g.d - r.cope.bot - 10)];
   if (r.room) [lo, hi] = [Math.max(lo, r.room[0] + 10), Math.min(hi, r.room[1] - 10)];
   return [lo, hi];
@@ -527,12 +590,15 @@ export function splicePlates(lo: Geo, hi: Geo, kind: 'bearing' | 'flange'): { fa
   return { faces, boxes, dots };
 }
 
-export type ConnType = 'shear_tab' | 'end_plate' | 'flange_plates' | 'welded' | 'gusset' | 'gusset_small' | 'clevis';
-export const PINNED: ConnType[] = ['shear_tab', 'gusset', 'gusset_small', 'clevis'];
+export type ConnType = 'shear_tab' | 'end_plate' | 'flange_plates' | 'welded' | 'gusset' | 'gusset_small' | 'gusset_lap' | 'clevis';
+export const PINNED: ConnType[] = ['shear_tab', 'gusset', 'gusset_small', 'gusset_lap', 'clevis'];
 // the gap a member leaves at its end, for each connection type. For a
 // gusset it leaves room for the 2 x 2 bolt group, whatever the brace angle.
 // The small gusset (the diagonals of a low truss) has one row of 2 bolts.
-export const SETBACK: Record<ConnType, number> = { shear_tab: 13, flange_plates: 13, end_plate: 25, welded: 0, gusset: 195, gusset_small: 130, clevis: 110 };
+// The lapped gusset (a double angle) has its bolts in the angles: the gap is
+// only a clearance, measured from the corner of the angles nearest the face
+// (see the braces in parts(), generate.ts).
+export const SETBACK: Record<ConnType, number> = { shear_tab: 13, flange_plates: 13, end_plate: 25, welded: 0, gusset: 195, gusset_small: 130, gusset_lap: 40, clevis: 110 };
 
 // the solid of one connection and its bolt dots
 // `reach`: how far the plates go along the member, in mm from its end.
@@ -551,6 +617,11 @@ export function hardware(g: Geo, typ: ConnType, r: Resolved): { faces: Face[]; d
   } else if (typ === 'end_plate') {
     const t = 25;
     const gauge = Math.max(PITCH, g.sec.bf + 30 - 2 * EDGE);
+    // the plate and its bolts are centred on the section box: 0 for an I or
+    // a tube, half the flange from the web for a channel
+    const rs = rects(g.sec);
+    const cv = (Math.min(...rs.map((x) => x[0])) + Math.max(...rs.map((x) => x[1]))) / 2;
+    const q = add(p, mul(g.v, cv));
     const wp = gauge + 2 * EDGE;
     const th = Math.max(gap, t);
     let ws: number[];
@@ -558,18 +629,18 @@ export function hardware(g: Geo, typ: ConnType, r: Resolved): { faces: Face[]; d
       // on the web of a beam there is no room above or below: a flush plate
       // between the flanges of the support, bolts on the web of g only
       const [p0, p1] = [Math.max(r.room[0] + 8, -40), Math.min(r.room[1] - 8, g.d + 40)];
-      plate(add(add(p, mul(inward, -th / 2)), mul(g.w, wAt(g, (p0 + p1) / 2))), g.w, inward, wp, p1 - p0, th);
+      plate(add(add(q, mul(inward, -th / 2)), mul(g.w, wAt(g, (p0 + p1) / 2))), g.w, inward, wp, p1 - p0, th);
       const [lo, hi] = webWindow(g, r);
       const { n, pitch } = boltLine(hi - lo - 40 + 2 * EDGE, 4);
       ws = grid(n, 1, pitch, 0).map(([x]) => wAt(g, (lo + hi) / 2 + x));
     } else {
       // extended: bolts above, between and below the flanges
-      plate(add(add(p, mul(inward, -th / 2)), mul(g.w, g.sh)), g.w, inward, wp, g.d + 180, th);
+      plate(add(add(q, mul(inward, -th / 2)), mul(g.w, g.sh)), g.w, inward, wp, g.d + 180, th);
       ws = [-45, g.sec.tf + 45, g.d - g.sec.tf - 45, g.d + 45].map((x) => wAt(g, x));
     }
     for (const dw of ws)
       for (const s of [-1, 1])
-        dots.push({ p: add(add(add(p, mul(inward, 1)), mul(g.v, (s * gauge) / 2)), mul(g.w, dw)), n: inward });
+        dots.push({ p: add(add(add(q, mul(inward, 1)), mul(g.v, (s * gauge) / 2)), mul(g.w, dw)), n: inward });
   } else if (typ === 'flange_plates') {
     const t = 16;
     // bolts in pairs across the flange; a narrow flange gets a wider plate
@@ -628,6 +699,35 @@ export function hardware(g: Geo, typ: ConnType, r: Resolved): { faces: Face[]; d
     const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
     const zc = dot(sub(poly[0], r.fp), nrm);
     boxes.push(boxOf(add(add(add(r.fp, mul(r.direc, (x0 + x1) / 2)), mul(across, (y0 + y1) / 2)), mul(nrm, zc)), across, r.direc, t, y1 - y0, x1 - x0));
+  } else if (typ === 'gusset_lap') {
+    // A double angle on a gusset plate. The plate is welded to the support
+    // face and goes into the gap between the two angles. One line of 2 bolts
+    // along the brace, through both angles and the plate, in the middle of
+    // the free part of the legs.
+    const t = ANGLE_GAP;
+    const nrm = g.v;
+    // the plate is in the plane of the legs: its foot goes to the face along
+    // the direction to the face, seen in that plane
+    const flat = sub(r.direc, mul(nrm, dot(r.direc, nrm)));
+    const dir = len(flat) > 0.3 ? norm(flat) : r.direc;
+    const across = norm(cross(nrm, dir));
+    const far = EDGE + PITCH;
+    reach.push(far + EDGE);
+    const at = (u: number, dw: number, n = 0) => add(add(add(p, mul(inward, u)), mul(g.w, dw)), mul(nrm, n));
+    const wb = wAt(g, (g.sec.tf + g.d) / 2);
+    for (const u of [EDGE, far]) dots.push({ p: at(u, wb), axis: nrm, half: t / 2 + g.sec.tw });
+    // the bolt area, a bit wider than the angles, joined to its foot on the face
+    const [w0, w1] = [wAt(g, -15), wAt(g, g.d + 15)];
+    const area = [at(0, w0, -t / 2), at(far + EDGE, w0, -t / 2), at(far + EDGE, w1, -t / 2), at(0, w1, -t / 2)];
+    const k = dot(dir, r.direc);
+    const foot = area.map((q) => sub(q, mul(dir, dot(sub(q, r.fp), r.direc) / k)));
+    const poly = hull2([...area, ...foot], across, dir);
+    faces.push(...slab(poly, nrm, t));
+    const xs = poly.map((q) => dot(sub(q, r.fp), dir));
+    const ys = poly.map((q) => dot(sub(q, r.fp), across));
+    const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+    const zc = dot(sub(p, r.fp), nrm);
+    boxes.push(boxOf(add(add(add(r.fp, mul(dir, (x0 + x1) / 2)), mul(across, (y0 + y1) / 2)), mul(nrm, zc)), across, dir, t, y1 - y0, x1 - x0));
   } else if (typ === 'clevis') {
     // A rod end. A tab plate is welded to the support face. The rod ends in
     // a clevis: a short block, then a fork of two plates on both sides of

@@ -31,11 +31,15 @@ export type Params = {
   secondaryP: number;
   postP: number; // the chance of a post, on each beam that can take one
   beamSpliceP: number; // the chance of a splice, on each long bay beam (less on a box)
+  // the chance that a member gets a channel, angle or tee section: the braces
+  // of an arm (double angles), a secondary beam (a channel), a truss bottom
+  // chord (a tee). 0: only I, tubes and rods, as before these shapes.
+  shapeP: number;
   seg: number;
   form: Form | 'mix'; // mix: the seed picks the form
   specimen?: Specimen; // a real test: seed, form, arms, height, braceP and secondaryP are not used
 };
-export const DEFAULTS: Params = { seed: 1, arms: 8, height: 2500, load: 100, fy: 345, braceP: 0.3, secondaryP: 0.35, postP: 0.3, beamSpliceP: 0.3, seg: 400, form: 'mix' };
+export const DEFAULTS: Params = { seed: 1, arms: 8, height: 2500, load: 100, fy: 345, braceP: 0.3, secondaryP: 0.35, postP: 0.3, beamSpliceP: 0.3, shapeP: 0.35, seg: 400, form: 'mix' };
 
 export function mulberry32(a: number) {
   return () => {
@@ -46,6 +50,21 @@ export function mulberry32(a: number) {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
+
+// A string to a 32 bit number (FNV-1a), to seed a draw from a member id
+function fnv1a(s: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 0x01000193);
+  return h >>> 0;
+}
+
+// Does this member get its other shape (see shapeP)? One draw for each key
+// (a member id), from a stream of its own: it takes nothing from the other
+// streams and doesn't depend on the order, so the rest of the seed stays.
+const shaped = (p: Params, key: string) => p.shapeP > 0 && mulberry32(p.seed * 7368787 + fnv1a(key))() < p.shapeP;
+// the shape list, or the old one when the catalog has none (an old caller
+// that gives only the I and tube tables)
+const orOld = (xs: Section[], old: Section[]) => (xs.length ? xs : old);
 
 // a: where the brace meets the arm, measured from the column it starts on
 // (the column at the `end` of the arm: 0 its start, 1 its far end). zb:
@@ -693,7 +712,7 @@ function sectionOf(st: Structure, who: string): Section | undefined {
 // bracing: the usual case is the bottom chord of a cantilever truss, which
 // sways out of the truss plane.
 const SHARE_MIN = 0.1;
-function stiffen(st: Structure, m: Model, stab: Stability, cat: Catalog, fy: number, log: string[]): boolean {
+function stiffen(st: Structure, m: Model, stab: Stability, cat: Catalog, p: Params, log: string[]): boolean {
   const total = [...stab.energy.values()].reduce((a, e) => a + Math.max(e, 0), 0);
   const order = [...stab.energy].filter(([, e]) => e >= SHARE_MIN * total).sort((a, b) => b[1] - a[1]);
   for (const [who] of order) {
@@ -703,7 +722,7 @@ function stiffen(st: Structure, m: Model, stab: Stability, cat: Catalog, fy: num
     const old = minA[who];
     // alphaCr grows about like the stiffness: aim for 3 in one step, 1.2 to 2 times the area
     minA[who] = cur.A * Math.min(2, Math.max(1.2, ALPHA_MIN / stab.alpha));
-    size(st, m, stab.forces, cat, fy);
+    size(st, m, stab.forces, cat, p);
     const next = sectionOf(st, who);
     if (next && next.A > cur.A) {
       log.push(`alphaCr ${stab.alpha.toFixed(1)} below ${ALPHA_MIN}: ${who} ${cur.id} -> ${next.id}`);
@@ -723,7 +742,7 @@ const webClear = (arms: Arm[], z = -Infinity) => Math.max(0, ...arms.filter((a) 
   ...(a.truss && a.z - a.truss.D - a.truss.chord.d > z ? [a.truss.chord.bf + 40] : []),
 ]));
 
-function size(st: Structure, m: Model, res: Forces[], cat: Catalog, fy: number, check = false): number {
+function size(st: Structure, m: Model, res: Forces[], cat: Catalog, p: Params, check = false): number {
   const worst = worstOf(m, res);
   let maxRatio = 0;
   // the lightest section that works; in check mode, the current one is kept
@@ -731,7 +750,7 @@ function size(st: Structure, m: Model, res: Forces[], cat: Catalog, fy: number, 
     const f = worst.get(who)!;
     const ok = (s: Section) => rule(s) && s.A >= (st.minA?.[who] ?? 0);
     const L = m.len.get(who)!;
-    const ratio = (s: Section) => ratioOf(s, f, fy, L);
+    const ratio = (s: Section) => ratioOf(s, f, p.fy, L);
     // none works: the heaviest one that keeps the rule (the minimum area can't break it)
     const s = check ? cur : (list.find((s) => ok(s) && ratio(s) < LIMIT) ?? list.findLast(ok) ?? list.findLast(rule) ?? list[list.length - 1]);
     maxRatio = Math.max(maxRatio, ratio(s));
@@ -742,7 +761,8 @@ function size(st: Structure, m: Model, res: Forces[], cat: Catalog, fy: number, 
     a.sec = choose(cat.beams, a.id, a.sec, (s) => s.d >= 200 && (!a.truss || a.truss.D - s.d >= a.truss.hMin));
     const tr = a.truss;
     if (tr) {
-      tr.chord = choose(cat.beams, chordId(a), tr.chord, (s) => s.d >= 150 && s.d <= (tr.low ? LOW.chord : Math.max(a.sec.d, 360)));
+      const chords = shaped(p, chordId(a)) ? orOld(cat.tees, cat.beams) : cat.beams;
+      tr.chord = choose(chords, chordId(a), tr.chord, (s) => s.d >= 150 && s.d <= (tr.low ? LOW.chord : Math.max(a.sec.d, 360)));
       tr.webs.forEach((wb, k) => {
         const L = Math.hypot(wb.t - wb.b, tr.D - a.sec.d);
         wb.sec = choose(cat.tubes, webId(a, k), wb.sec, (s) => L / s.rmin < 200);
@@ -756,21 +776,23 @@ function size(st: Structure, m: Model, res: Forces[], cat: Catalog, fy: number, 
       const fits = cat.columns.some((s) => postFits(s, sec));
       post.sec = choose(cat.columns, postId(a), post.sec, (s) => (fits ? postFits(s, sec) : s.A <= post.sec.A));
     }
+    // all the braces of an arm get the same kind: one draw for the arm
+    const braces = shaped(p, `${a.id}-braces`) ? orOld(cat.angles, cat.tubes) : cat.tubes;
     a.braces.forEach((b, k) => {
       const L = Math.hypot(b.a, drop(a, b));
-      b.sec = choose(cat.tubes, braceId(a, k), b.sec, (s) => L / s.rmin < 200);
+      b.sec = choose(braces, braceId(a, k), b.sec, (s) => L / s.rmin < 200);
     });
   }
   for (const s of st.secs) {
     const arm = st.arms[s.arm];
-    s.sec = choose(cat.beams, s.id, s.sec, (x) => x.d <= arm.sec.d - 2 * arm.sec.tf);
+    s.sec = choose(shaped(p, s.id) ? orOld(cat.channels, cat.beams) : cat.beams, s.id, s.sec, (x) => x.d <= arm.sec.d - 2 * arm.sec.tf);
   }
   const needClear = webClear(st.arms);
   const colL = m.len.get('column')!;
   st.col = choose(cat.columns, 'column', st.col, (c) => c.d - 2 * c.tf >= needClear && c.d >= 250 && colL / c.rmin < 200);
   // the upper shaft is sized by sizeTop, here it is only checked
   const top = worst.get('column-top');
-  if (st.splice && top) maxRatio = Math.max(maxRatio, ratioOf(st.splice.sec, top, fy, m.len.get('column-top')!));
+  if (st.splice && top) maxRatio = Math.max(maxRatio, ratioOf(st.splice.sec, top, p.fy, m.len.get('column-top')!));
   return maxRatio;
 }
 
@@ -783,7 +805,28 @@ function size(st: Structure, m: Model, res: Forces[], cat: Catalog, fy: number, 
 // lands on a column there.
 const SPLICE_P = 0.6;
 const SPLICE_GAP = 50; // mm, free height kept above and below the splice plates
-function pickSplice(st: Structure, rng: () => number): Splice | undefined {
+// A brace of an arm: its geo, from its column to the arm, and its connection
+// at both ends. S is the column shaft at the foot of the brace. parts() builds
+// the brace from it, pickSplice() looks at its plate on the column.
+function braceGeo(st: Structure, a: Arm, b: Brace, k: number, S: Geo) {
+  const h = hdir(a.bearing);
+  const hb = b.end ? mul(h, -1) : h; // from its column, toward the arm
+  const B = add(st.cols[b.end ? a.to! : a.col].x, [0, 0, b.zb]);
+  const C = add(add(start(st, a), mul(h, b.end ? a.L - b.a : b.a)), [0, 0, -a.sec.d]);
+  const u = sub(C, B);
+  const un = mul(u, 1 / Math.hypot(...u));
+  // a double angle has no knife plate: its gap is from the corner of the
+  // angles nearest the face, half its depth times the slope off the face
+  const conn: ConnType = b.sec.kind === '2L' ? 'gusset_lap' : 'gusset';
+  const [cos, sin] = [un[0] * hb[0] + un[1] * hb[1], un[2]];
+  const lap = conn === 'gusset_lap' ? b.sec.d / 2 : 0;
+  const t0 = (supportFace(S, hb) + SETBACK[conn] + lap * sin) / cos;
+  const t1 = (SETBACK[conn] + lap * cos) / sin;
+  return { g: geo(braceId(a, k), b.sec, add(B, mul(un, t0)), sub(C, mul(un, t1)), false), conn, hb };
+}
+
+// The splice and the other heights that were free, nearest first
+function pickSplice(st: Structure, rng: () => number): { sp: Splice; alts: number[] } | undefined {
   if (rng() >= SPLICE_P || st.H < 2000) return undefined;
   const kind = rng() < 0.5 ? 'bearing' : 'flange';
   // the height the plates take, around the cut
@@ -805,7 +848,28 @@ function pickSplice(st: Structure, rng: () => number): Splice | undefined {
   for (let z = r50(0.3 * st.H); z <= 0.7 * st.H; z += 50)
     if (busy.every(([lo, hi]) => z + above + SPLICE_GAP <= lo || z - below - SPLICE_GAP >= hi)) ok.push(z);
   if (!ok.length) return undefined;
-  return { z: ok[Math.floor(rng() * ok.length)], sec: st.col, kind };
+  const z = ok[Math.floor(rng() * ok.length)];
+  return { sp: { z, sec: st.col, kind }, alts: ok.filter((x) => x !== z).sort((x, y) => Math.abs(x - z) - Math.abs(y - z) || x - y) };
+}
+
+// Do the splice plates go through a brace or its gusset? pickSplice() keeps
+// 300 mm free around a brace foot, but a steep brace puts its gusset higher,
+// and a double angle is wide.
+// The shafts are the ones parts() builds: the lower one up to the splice,
+// the upper one above it.
+function spliceHits(st: Structure, sp: Splice): boolean {
+  return st.cols.some((c, ci) => {
+    const at = (h: number) => add(c.x, [0, 0, h]);
+    const lo = geo(colId(ci), st.col, c.x, at(sp.z), false);
+    const hi = geo(`${colId(ci)}-top`, sp.sec, at(sp.z + (sp.kind === 'bearing' ? BEARING_T : 0)), at(st.H), false);
+    const braces = st.arms.flatMap((a) => a.braces.flatMap((b, k) => {
+      if ((b.end ? a.to! : a.col) !== ci) return [];
+      const S = b.zb > sp.z ? hi : lo;
+      const { g, conn } = braceGeo(st, a, b, k, S);
+      return [...hardware(g, conn, resolve(g, S, 'from')).boxes, ...memberBoxes(g)];
+    }));
+    return braces.length > 0 && splicePlates(lo, hi, sp.kind).boxes.some((p) => braces.some((q) => overlap(p, q)));
+  });
 }
 
 // the upper shaft: the lightest section, not heavier than the lower one,
@@ -940,20 +1004,12 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
     }
     if (a.post) post(a, add(o, mul(h, a.post.a)), pieceAt(armGeo, a, a.post.a));
     a.braces.forEach((b, k) => {
-      const hb = b.end ? mul(h, -1) : h; // from its column, toward the arm
-      const B = add(st.cols[b.end ? a.to! : a.col].x, [0, 0, b.zb]);
-      const C = add(add(o, mul(h, b.end ? a.L - b.a : b.a)), [0, 0, -a.sec.d]);
-      const u = sub(C, B);
-      const L = Math.hypot(...u);
-      const un = mul(u, 1 / L);
       const Sb = colAt(b.end ? a.to! : a.col, b.zb);
-      const t0 = (supportFace(Sb, hb) + SETBACK.gusset) / (un[0] * hb[0] + un[1] * hb[1]);
-      const t1 = SETBACK.gusset / un[2];
-      const bg = geo(braceId(a, k), b.sec, add(B, mul(un, t0)), sub(C, mul(un, t1)), false);
+      const { g: bg, conn, hb } = braceGeo(st, a, b, k, Sb);
       const P = pieceAt(armGeo, a, b.end ? a.L - b.a : b.a);
       member(bg, [
-        { S: Sb, sId: Sb.id, conn: 'gusset', at: 'from' },
-        { S: P, sId: P.id, conn: 'gusset', at: 'to' },
+        { S: Sb, sId: Sb.id, conn, at: 'from' },
+        { S: P, sId: P.id, conn, at: 'to' },
       ], a.to === undefined ? hb : [h[1], -h[0], 0]); // from outside, level; in a bay, from the side
     });
     const tr = a.truss;
@@ -1056,7 +1112,7 @@ function details(
     ] as [number | undefined, ConnType | undefined, number, number, Section][]);
     for (const [ci2, conn, bearing, zt, sec] of st.continuity === false ? [] : beamEnds) {
       if (ci2 !== ci || !conn || !MOMENT.includes(conn) || bearing % 180 !== 0) continue;
-      for (const z of [zt - sec.tf / 2, zt - sec.d + sec.tf / 2])
+      for (const z of sec.kind === 'T' ? [zt - sec.tf / 2] : [zt - sec.tf / 2, zt - sec.d + sec.tf / 2])
         if (levels.every((l) => Math.abs(l - z) > 30)) levels.push(z);
     }
     levels.sort((p, q) => p - q).forEach((z, k) => {
@@ -1098,7 +1154,8 @@ function details(
         for (const s of [-1, 1]) {
           const sd = s < 0 ? 'a' : 'b';
           extra(`${webId(a, k)}-stiffener-t${sd}`, a.id, [stiffener(a.sec, ot, mul(g.v, s), Z, 10)], mul(g.v, s));
-          extra(`${webId(a, k)}-stiffener-b${sd}`, cg.id, [stiffener(tr.chord, ob, mul(cg.v, s), Z, 10)], mul(cg.v, s));
+          // a tee has no bottom flange to hold a stiffener
+          if (tr.chord.kind === 'I') extra(`${webId(a, k)}-stiffener-b${sd}`, cg.id, [stiffener(tr.chord, ob, mul(cg.v, s), Z, 10)], mul(cg.v, s));
         }
       });
     }
@@ -1158,9 +1215,9 @@ export function generate(p0: Partial<Params>, cat: Catalog, detail: Detail = 'bo
     const stab = stability(m, r);
     ({ alpha, amp } = stab);
     // too soft for the sway rule: a heavier member, not counted as a sizing pass
-    if (alpha < ALPHA_MIN && stiffen(st, m, stab, cat, p.fy, log)) continue;
+    if (alpha < ALPHA_MIN && stiffen(st, m, stab, cat, p, log)) continue;
     // three sizing passes, then one more solve to check the final sections
-    ratio = size(st, m, stab.forces, cat, p.fy, sized === 3);
+    ratio = size(st, m, stab.forces, cat, p, sized === 3);
     if (sized === 3) break;
     sized++;
   }
@@ -1173,7 +1230,7 @@ export function generate(p0: Partial<Params>, cat: Catalog, detail: Detail = 'bo
       if (!r.ok) return undefined;
       const stab = stability(m, r);
       ({ alpha, amp } = stab);
-      if (k === 8 || alpha >= ALPHA_MIN || !stiffen(st, m, stab, cat, p.fy, log)) return stab.forces;
+      if (k === 8 || alpha >= ALPHA_MIN || !stiffen(st, m, stab, cat, p, log)) return stab.forces;
     }
   };
   // trusses and rods, from a draw of their own: size them, then check. If
@@ -1185,7 +1242,7 @@ export function generate(p0: Partial<Params>, cat: Catalog, detail: Detail = 'bo
       let good = true;
       for (let k = 0; k < 4 && good; k++) {
         const f = again();
-        if (f) ratio = size(st, m, f, cat, p.fy, k === 3);
+        if (f) ratio = size(st, m, f, cat, p, k === 3);
         else good = false;
       }
       if (!good) {
@@ -1207,7 +1264,7 @@ export function generate(p0: Partial<Params>, cat: Catalog, detail: Detail = 'bo
       let good = true;
       for (let k = 0; k < 4 && good; k++) {
         const f = again();
-        if (f) ratio = size(st, m, f, cat, p.fy, k === 3);
+        if (f) ratio = size(st, m, f, cat, p, k === 3);
         else good = false;
       }
       if (!good) {
@@ -1223,18 +1280,33 @@ export function generate(p0: Partial<Params>, cat: Catalog, detail: Detail = 'bo
   const det = mulberry32(p.seed * 15485863 + 3);
   const b = det();
   st.base = b < 0.5 ? 'none' : b < 0.8 ? 'flange' : 'all';
-  st.splice = ok ? pickSplice(st, det) : undefined;
-  // solve with the cut, size the upper shaft, then check it (sizeTop can drop the splice)
-  if (st.splice) {
+  const pick = ok ? pickSplice(st, det) : undefined;
+  st.splice = pick && { ...pick.sp }; // a copy: sizeTop changes it
+  if (pick && st.splice) {
     const before = { ratio, alpha, amp };
-    const f = again();
-    if (f) sizeTop(st, m, f, cat, p.fy);
-    else st.splice = undefined;
+    // solve with the cut, size the upper shaft (sizeTop can drop the splice)
+    const cut = () => {
+      if (!st.splice) return;
+      const f = again();
+      if (f) sizeTop(st, m, f, cat, p.fy);
+      else st.splice = undefined;
+    };
+    cut();
+    // if the plates go through a brace, move to the nearest free height and
+    // size again. No new draw: a seed whose splice was clear keeps it.
+    if (st.splice && spliceHits(st, st.splice)) {
+      const sp = st.splice;
+      const z = pick.alts.find((x) => !spliceHits(st, { ...sp, z: x }));
+      st.splice = z === undefined ? undefined : { ...pick.sp, z };
+      cut();
+      if (st.splice && spliceHits(st, st.splice)) st.splice = undefined;
+    }
+    // then check it
     if (st.splice) {
       const f = again();
       // a lighter upper shaft must not make the structure too soft
       if (f && alpha >= Math.min(ALPHA_MIN, before.alpha)) {
-        ratio = size(st, m, f, cat, p.fy, true);
+        ratio = size(st, m, f, cat, p, true);
         log.push(`splice at ${st.splice.z} mm (${st.splice.kind}), ${st.col.id} below, ${st.splice.sec.id} above`);
       } else st.splice = undefined;
     }
@@ -1269,7 +1341,7 @@ function buildSpecimen(p: Params, spec: Specimen, cat: Catalog, detail: Detail):
   if (r.ok) {
     const stab = stability(m, r);
     alpha = stab.alpha;
-    ratio = size(st, m, stab.forces, cat, p.fy, true);
+    ratio = size(st, m, stab.forces, cat, p, true);
     log.push(alphaLog(stab.alpha, stab.amp));
     log.push(`sections as given, max ratio ${ratio.toFixed(2)} under ${p.load} N/mm on the beams`);
   } else log.push(`mechanism at node ${r.node} (${m.nodeOwner[r.node].join(', ')}) ${r.dofName}: it does not stand up as given`);
