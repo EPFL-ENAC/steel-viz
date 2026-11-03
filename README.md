@@ -18,6 +18,13 @@ Then come the small details, from a random draw of their own, so a seed keeps th
 - Stiffeners in a beam, over the point where a brace pushes on it.
 - Gussets at the column foot: none, on the two flange faces, or on all four faces.
 
+Trusses and tension rods also come from a draw of their own, after the fix loop:
+
+- Truss: a beam gets a bottom chord 700 to 900 mm under it, with tube diagonals in a zigzag between the two. In a bay, both ends of the zigzag are on the bottom chord. On an arm, it ends at the tip on the top chord. The truss takes the place of the braces of that beam. It needs a free column face under the beam, so most trusses end up in portals and boxes.
+- Tension rod: a round bar from the column down to the top of an arm that sticks out, with a clevis (a fork and a pin) at each end. Only on an arm with no braces, and only when the column has room above it, under the next arm and its braces.
+
+The solver checks the structure again with them and sizes the chords, the diagonals and the rods. If the structure does not stand up anymore, they are left out.
+
 A detail plate that would go through another part is left out. For example, a continuity plate on the side of the web where another beam frames in.
 
 Parts must not go through each other. A secondary beam is coped (its flanges cut back) where it meets the flanges of its arm, and its plate fits between those flanges. A brace stays above the arms under it on the same face of its column, and is long enough that its two gussets don't touch. `clash.ts` checks this with boxes, and `geometry.test.ts` runs it on every form, 240 structures.
@@ -67,10 +74,10 @@ three-edge-projection is not on npm, it comes from GitHub (tag `v0.0.11`). Impor
 Files:
 
 - `vec.ts`: vector helpers.
-- `sections.ts`: section properties and the CSV tables.
+- `sections.ts`: section properties and the CSV tables, plus the round rods (not in the hub tables).
 - `solver.ts`: 3D frame solver (6 DOF per node, pinned ends, finds mechanisms).
-- `generate.ts`: topology, the fix loop and the sizing.
-- `steel.ts`: geometry (profiles, copes, plates, bolts), camera and the painter renderer.
+- `generate.ts`: topology, the fix loop, trusses and rods, and the sizing.
+- `steel.ts`: geometry (profiles, copes, plates, clevis, bolts), camera and the painter renderer.
 - `clash.ts`: do two parts go through each other (each part as a few boxes).
 - `score.ts`, `pick.ts`: the logo score, and the scan over many seeds.
 - `hlr.ts`: the exact hidden-line renderer, with bolt heads as real hex solids.

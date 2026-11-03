@@ -103,6 +103,11 @@ export const profRect = (h: number, b: number): P2[][] => [
   ccw([[-b / 2, -h / 2], [b / 2, -h / 2], [b / 2, h / 2], [-b / 2, h / 2]]),
 ];
 
+// a round bar, as 16 sides: few enough to stay light, enough to read as round
+export const profRound = (D: number): P2[][] => [
+  ccw([...Array(16).keys()].map((i): P2 => [(D / 2) * Math.cos((i * Math.PI) / 8), (D / 2) * Math.sin((i * Math.PI) / 8)])),
+];
+
 // ---------------------------------------------------------------- frames
 // u along the member, w along its depth, v = w x u
 export function frame(p0: V, p1: V): { u: V; v: V; w: V } {
@@ -185,7 +190,7 @@ export type Cope = { at: 'from' | 'to'; len: number; top: number; bot: number };
 
 export function geo(id: string, sec: Section, p0: V, p1: V, tos: boolean): Geo {
   const { u, v, w } = frame(p0, p1);
-  const polys = sec.kind === 'I' ? profI(sec.d, sec.bf, sec.tw, sec.tf) : profRect(sec.d, sec.bf);
+  const polys = sec.kind === 'I' ? profI(sec.d, sec.bf, sec.tw, sec.tf) : sec.kind === 'ROD' ? profRound(sec.d) : profRect(sec.d, sec.bf);
   return { id, sec, p0, p1, u, v, w, sh: tos ? sec.d / 2 : 0, polys, d: sec.d, tw: sec.kind === 'I' ? sec.tw : sec.bf, copes: [] };
 }
 
@@ -217,6 +222,10 @@ function pieceI(s: Section, side: 'top' | 'bot', depth: number, splits: number[]
 }
 
 export function memberFaces(g: Geo, seg: number, cuts: number[] = []): Face[] {
+  // a round bar has no edges along it, only its outline (the renderers find it)
+  if (g.sec.kind === 'ROD')
+    return prism(g.p0, g.p1, g.polys, g.u, g.v, g.w, seg, g.sh, cuts).map((f) =>
+      f.pts.length === 4 ? { ...f, edges: f.edges.filter(([i, j]) => !((i === 1 && j === 2) || (i === 3 && j === 0))) } : f);
   if (!g.copes.length || g.sec.kind !== 'I') return prism(g.p0, g.p1, g.polys, g.u, g.v, g.w, seg, g.sh, cuts);
   const L = len(sub(g.p1, g.p0));
   const splits = g.copes.flatMap((c) => [c.top, c.bot ? g.d - c.bot : 0]).filter((x) => x > 0);
@@ -511,11 +520,11 @@ export function splicePlates(lo: Geo, hi: Geo, kind: 'bearing' | 'flange'): { fa
   return { faces, boxes, dots };
 }
 
-export type ConnType = 'shear_tab' | 'end_plate' | 'flange_plates' | 'welded' | 'gusset';
-export const PINNED: ConnType[] = ['shear_tab', 'gusset'];
+export type ConnType = 'shear_tab' | 'end_plate' | 'flange_plates' | 'welded' | 'gusset' | 'clevis';
+export const PINNED: ConnType[] = ['shear_tab', 'gusset', 'clevis'];
 // the gap a member leaves at its end, for each connection type. For a
 // gusset it leaves room for the 2 x 2 bolt group, whatever the brace angle.
-export const SETBACK: Record<ConnType, number> = { shear_tab: 13, flange_plates: 13, end_plate: 25, welded: 0, gusset: 195 };
+export const SETBACK: Record<ConnType, number> = { shear_tab: 13, flange_plates: 13, end_plate: 25, welded: 0, gusset: 195, clevis: 110 };
 
 // the solid of one connection and its bolt dots
 // `reach`: how far the plates go along the member, in mm from its end.
@@ -609,6 +618,33 @@ export function hardware(g: Geo, typ: ConnType, r: Resolved): { faces: Face[]; d
     const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
     const zc = dot(sub(poly[0], r.fp), nrm);
     boxes.push(boxOf(add(add(add(r.fp, mul(r.direc, (x0 + x1) / 2)), mul(across, (y0 + y1) / 2)), mul(nrm, zc)), across, r.direc, t, y1 - y0, x1 - x0));
+  } else if (typ === 'clevis') {
+    // A rod end. A tab plate is welded to the support face. The rod ends in
+    // a clevis: a short block, then a fork of two plates on both sides of
+    // the tab, held by one pin through all three.
+    const t = 12;
+    let nrm = cross(r.direc, g.u);
+    if (len(nrm) < 1e-3) nrm = g.v;
+    nrm = norm(nrm);
+    const across = norm(cross(nrm, r.direc)); // in the tab plane, along the support face
+    const side = norm(cross(nrm, inward)); // in the tab plane, across the rod
+    const at = (u: number, s2: number, n = 0) => add(add(add(p, mul(inward, u)), mul(side, s2)), mul(nrm, n));
+    const pin = -60; // mm before the rod end
+    const w = Math.max(25, g.sec.d / 2 + 8); // half width of the fork
+    const [f0, f1] = [pin - 35, -10]; // the fork, along the rod
+    for (const s of [-1, 1]) plate(at((f0 + f1) / 2, 0, s * (t / 2 + 5)), side, inward, 8, 2 * w, f1 - f0);
+    plate(at(2.5, 0), side, inward, t + 18, 2 * w, 25);
+    reach.push(15);
+    dots.push({ p: at(pin, 0), axis: nrm, half: t / 2 + 9 });
+    // the tab: around the pin, down to its own foot on the face
+    const area = [at(pin - 30, -30, -t / 2), at(pin - 30, 30, -t / 2), at(pin + 30, 30, -t / 2), at(pin + 30, -30, -t / 2)];
+    const foot = area.map((q) => sub(q, mul(r.direc, dot(sub(q, r.fp), r.direc))));
+    const poly = hull2([...area, ...foot], across, r.direc);
+    faces.push(...slab(poly, nrm, t));
+    const xs = poly.map((q) => dot(sub(q, r.fp), r.direc));
+    const ys = poly.map((q) => dot(sub(q, r.fp), across));
+    const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+    boxes.push(boxOf(add(add(r.fp, mul(r.direc, (x0 + x1) / 2)), mul(across, (y0 + y1) / 2)), across, r.direc, t, y1 - y0, x1 - x0));
   }
   return { faces, dots, reach, boxes };
 }

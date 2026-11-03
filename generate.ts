@@ -6,7 +6,7 @@
 // - box: four columns in a rectangle, beams and braces only in its four
 //   walls, nothing sticks out.
 // The solver checks it stands up, fixes it if not, and sizes the members.
-import { add, len, mul, sub, type V } from './vec.ts';
+import { add, len, mul, norm, sub, type V } from './vec.ts';
 import { solve, type Elem, type FNode } from './solver.ts';
 import type { Catalog, Section } from './sections.ts';
 import {
@@ -45,7 +45,22 @@ export function mulberry32(a: number) {
 // the depth of the arm.
 type Brace = { a: number; zb: number; sec: Section; end: 0 | 1 };
 // An arm starts on column `col`. A bay beam also ends on column `to`.
-type Arm = { id: string; col: number; to?: number; z: number; bearing: number; L: number; conn: ConnType; conn2?: ConnType; sec: Section; braces: Brace[] };
+type Arm = {
+  id: string; col: number; to?: number; z: number; bearing: number; L: number; conn: ConnType; conn2?: ConnType; sec: Section; braces: Brace[];
+  truss?: Truss; rod?: Rod;
+};
+// A Warren truss under an arm. The arm is its top chord. D: from the top of
+// the arm down to the top of the bottom chord. The bottom chord starts on
+// the column (a bay: runs to the other column) and ends at `end`, measured
+// along the arm. Each web diagonal goes from `b` on the bottom chord to `t`
+// on the top chord, both measured along the arm.
+type Web = { b: number; t: number; sec: Section };
+type Truss = { D: number; end: number; chord: Section; conn: ConnType; conn2?: ConnType; webs: Web[] };
+// A tension rod: from the column at height zr down to the top of the arm, `a` along it.
+type Rod = { a: number; zr: number; sec: Section };
+const chordId = (a: Arm) => `${a.id}-chord`;
+const webId = (a: Arm, k: number) => `${a.id}-web${k + 1}`;
+const rodId = (a: Arm) => `${a.id}-rod`;
 const drop = (a: Arm, b: Brace) => a.z - a.sec.d - b.zb;
 const braceId = (a: Arm, i: number) => `${a.id}-brace${i ? i + 1 : ''}`;
 type Secondary = { id: string; arm: number; a: number; side: 1 | -1; L: number; conn: ConnType; sec: Section };
@@ -199,6 +214,105 @@ function addBrace(a: Arm, arms: Arm[], cat: Catalog, end: 0 | 1 = 0, reach = 0.5
   return true;
 }
 
+// ------------------------------------------------------------- trusses and rods
+// They come after the fix loop, from a draw of their own, so a seed keeps
+// its structure. A truss takes the place of the braces of its arm.
+const H_MIN = 700; // mm, the clear height between the two chords
+const NODE_GAP = 50; // two diagonals that meet at a node land this far on each side of it
+const TUBE_MIN = 400; // mm, a diagonal between its two gussets: room for both knife plates
+const TRUSS_P = { bay: 0.35, arm: 0.3 };
+const ROD_P = 0.4;
+// how far the face of the column is from its axis, for a beam on that bearing
+const colFace = (st: Structure, bearing: number) => (bearing % 180 === 0 ? st.col.d / 2 : st.col.tw / 2);
+
+// The faces of the columns a member at `a` lands on: its own, and the far one in a bay.
+const endFaces = (a: Arm): [number, number][] => [[a.col, a.bearing], ...(a.to === undefined ? [] : [[a.to, (a.bearing + 180) % 360] as [number, number]])];
+
+function trussFor(st: Structure, a: Arm, cat: Catalog, rng: () => number): Truss | undefined {
+  const h = r50(H_MIN + 200 * rng());
+  const D = a.sec.d + h;
+  const zc = a.z - D;
+  if (zc < 700) return undefined;
+  // nothing else on the column faces it lands on, from the arm down to under the chord
+  const ends = endFaces(a);
+  if (faces(st.arms).some((f) => f.a !== a && ends.some(([c, b]) => f.col === c && f.bearing === b) && f.z > zc - 900 && f.z < a.z)) return undefined;
+  // the nodes of the zigzag, along the arm, and which ones are on the top chord
+  let xs: number[];
+  let top: (k: number) => boolean;
+  if (a.to !== undefined) {
+    // a bay: from a bottom node near one column to a bottom node near the other
+    const s0 = r50(colFace(st, a.bearing) + 400);
+    const m = Math.max(1, Math.round((a.L - 2 * s0) / (2 * h)));
+    const q = (a.L - 2 * s0) / (2 * m);
+    if (q < 0.8 * h) return undefined;
+    xs = [...Array(2 * m + 1).keys()].map((k) => s0 + k * q);
+    top = (k) => k % 2 === 1;
+  } else {
+    // an arm: at least two diagonals, the last one up to the tip
+    const s0 = r50(colFace(st, a.bearing) + 400);
+    const span = a.L - 150 - s0;
+    const n = Math.max(2, Math.round(span / h));
+    const q = span / n;
+    if (q < 0.6 * h) return undefined;
+    xs = [...Array(n + 1).keys()].map((k) => s0 + k * q);
+    top = (k) => (n - k) % 2 === 0;
+  }
+  const n = xs.length - 1;
+  const webs: Web[] = [];
+  for (let k = 0; k < n; k++) {
+    const x0 = xs[k] + (k > 0 ? NODE_GAP : 0);
+    const x1 = xs[k + 1] - (k + 1 < n ? NODE_GAP : 0);
+    const [b, t] = top(k) ? [x1, x0] : [x0, x1];
+    if ((Math.hypot(t - b, h) * (h - 2 * SETBACK.gusset)) / h < TUBE_MIN) return undefined;
+    webs.push({ b: r50(b), t: r50(t), sec: mid(cat.tubes) });
+  }
+  const end = a.to !== undefined ? a.L : Math.max(...webs.map((w) => w.b)) + 300;
+  const conn = () => pick(rng, { shear_tab: 0.6, end_plate: 0.4 }) as ConnType;
+  return { D, end, chord: mid(cat.beams), conn: conn(), conn2: a.to !== undefined ? conn() : undefined, webs };
+}
+
+// a rod from the column down to an arm that sticks out, if the column above
+// has room for it: under the next arm on that face and under its braces
+function rodFor(st: Structure, a: Arm, cat: Catalog, rng: () => number): Rod | undefined {
+  if (a.to !== undefined || a.braces.length || a.truss || a.L < 900) return undefined;
+  const at = Math.min(r50(a.L * (0.65 + 0.2 * rng())), a.L - 150);
+  let top = st.H - 250;
+  for (const f of faces(st.arms)) {
+    if (f.a === a || f.col !== a.col || f.bearing !== a.bearing || f.z <= a.z) continue;
+    top = Math.min(top, f.z - f.a.sec.d - 300);
+    if (f.a.truss) top = Math.min(top, f.z - f.a.truss.D - f.a.truss.chord.d - 300);
+    const e = f.col === f.a.col && f.bearing === f.a.bearing ? 0 : 1;
+    for (const b of f.a.braces) if (b.end === e) top = Math.min(top, b.zb - 300);
+  }
+  const zr = Math.min(a.z + r50(at * (0.7 + 0.5 * rng())), Math.floor(top / 50) * 50);
+  if (zr - a.z < Math.max(400, 0.5 * at)) return undefined;
+  return { a: at, zr, sec: cat.rods[Math.floor(cat.rods.length / 2)] };
+}
+
+// trusses first, so a rod knows the chords above it
+function addTrussesAndRods(st: Structure, cat: Catalog, rng: () => number, log: string[]): boolean {
+  let added = false;
+  for (const a of st.arms) {
+    const r = rng();
+    if (r >= (a.to !== undefined ? TRUSS_P.bay : TRUSS_P.arm) || (a.to === undefined && a.L < 1400)) continue;
+    const tr = trussFor(st, a, cat, rng);
+    if (!tr) continue;
+    a.truss = tr;
+    a.braces = [];
+    added = true;
+    log.push(`${a.id}: truss, ${tr.webs.length} diagonals, ${tr.D} mm deep`);
+  }
+  for (const a of st.arms) {
+    if (rng() >= ROD_P) continue;
+    const rod = rodFor(st, a, cat, rng);
+    if (!rod) continue;
+    a.rod = rod;
+    added = true;
+    log.push(`${a.id}: tension rod, up to ${rod.zr} mm`);
+  }
+  return added;
+}
+
 // ------------------------------------------------------------- analysis
 type Model = { nodes: FNode[]; elems: Elem[]; owner: string[]; nodeOwner: string[][] };
 
@@ -230,7 +344,11 @@ function model(st: Structure, p: Params): Model {
     const zs = new Set([0, st.H]);
     if (sp) zs.add(sp.z);
     for (const a of st.arms) {
-      if (a.col === ci || a.to === ci) zs.add(a.z);
+      if (a.col === ci || a.to === ci) {
+        zs.add(a.z);
+        if (a.truss) zs.add(a.z - a.truss.D);
+      }
+      if (a.rod && a.col === ci) zs.add(a.rod.zr);
       for (const b of a.braces) if ((b.end ? a.to : a.col) === ci) zs.add(b.zb);
     }
     node(c.x, 'column', true);
@@ -248,8 +366,27 @@ function model(st: Structure, p: Params): Model {
     const at = new Set([0, a.L]);
     for (const b of a.braces) at.add(b.end ? a.L - b.a : b.a);
     for (const s of st.secs) if (s.arm === i) at.add(s.a);
+    for (const wb of a.truss?.webs ?? []) at.add(wb.t);
+    if (a.rod) at.add(a.rod.a);
     const pts = [...at].sort((x, y) => x - y).map((t) => add(o, mul(h, t)));
     chain(a.id, pts, a.sec, PINNED.includes(a.conn), w(a.sec) + p.load, a.conn2 !== undefined && PINNED.includes(a.conn2));
+    const tr = a.truss;
+    if (tr) {
+      // the bottom chord carries only its own weight
+      const oc = add(o, [0, 0, -tr.D]);
+      const cs = [...new Set([0, tr.end, ...tr.webs.map((wb) => wb.b)])].sort((x, y) => x - y).map((t) => add(oc, mul(h, t)));
+      chain(chordId(a), cs, tr.chord, PINNED.includes(tr.conn), w(tr.chord), tr.conn2 !== undefined && PINNED.includes(tr.conn2));
+      tr.webs.forEach((wb, k) => {
+        const id = webId(a, k);
+        elems.push({ i: node(add(oc, mul(h, wb.b)), id), j: node(add(o, mul(h, wb.t)), id), p: wb.sec, pinI: true, pinJ: true, q: [0, 0, -w(wb.sec)] });
+        owner.push(id);
+      });
+    }
+    if (a.rod) {
+      const id = rodId(a);
+      elems.push({ i: node(add(st.cols[a.col].x, [0, 0, a.rod.zr]), id), j: node(add(o, mul(h, a.rod.a)), id), p: a.rod.sec, pinI: true, pinJ: true, q: [0, 0, -w(a.rod.sec)] });
+      owner.push(id);
+    }
     a.braces.forEach((b, k) => {
       const b0 = add(st.cols[b.end ? a.to! : a.col].x, [0, 0, b.zb]);
       const b1 = add(o, mul(h, b.end ? a.L - b.a : b.a));
@@ -310,8 +447,11 @@ function worstOf(m: Model, res: Forces[]) {
   });
   return worst;
 }
-// beams that frame into the column web must fit between its flanges
-const webClear = (arms: Arm[]) => Math.max(0, ...arms.filter((a) => a.bearing % 180 === 90).map((a) => a.sec.bf + 40));
+// beams that frame into the column web (above `z`) must fit between its flanges
+const webClear = (arms: Arm[], z = -Infinity) => Math.max(0, ...arms.filter((a) => a.bearing % 180 === 90).flatMap((a) => [
+  ...(a.z - a.sec.d > z ? [a.sec.bf + 40] : []),
+  ...(a.truss && a.z - a.truss.D - a.truss.chord.d > z ? [a.truss.chord.bf + 40] : []),
+]));
 
 function size(st: Structure, m: Model, res: { N: number; My: number; Mz: number }[], cat: Catalog, fy: number, check = false): number {
   const worst = worstOf(m, res);
@@ -320,12 +460,23 @@ function size(st: Structure, m: Model, res: { N: number; My: number; Mz: number 
   // the lightest section that works; in check mode, the current one is kept
   const choose = (list: Section[], who: string, cur: Section, ok: (s: Section) => boolean = () => true) => {
     const f = worst.get(who)!;
-    const s = check ? cur : (list.find((s) => ok(s) && ratio(s, f) < LIMIT) ?? list[list.length - 1]);
+    // none works: the heaviest one that keeps the rule
+    const s = check ? cur : (list.find((s) => ok(s) && ratio(s, f) < LIMIT) ?? list.findLast(ok) ?? list[list.length - 1]);
     maxRatio = Math.max(maxRatio, ratio(s, f));
     return s;
   };
   for (const a of st.arms) {
-    a.sec = choose(cat.beams, a.id, a.sec, (s) => s.d >= 200);
+    // a top chord keeps the clear height of its truss
+    a.sec = choose(cat.beams, a.id, a.sec, (s) => s.d >= 200 && (!a.truss || a.truss.D - s.d >= H_MIN));
+    const tr = a.truss;
+    if (tr) {
+      tr.chord = choose(cat.beams, chordId(a), tr.chord, (s) => s.d >= 150 && s.d <= Math.max(a.sec.d, 360));
+      tr.webs.forEach((wb, k) => {
+        const L = Math.hypot(wb.t - wb.b, tr.D - a.sec.d);
+        wb.sec = choose(cat.tubes, webId(a, k), wb.sec, (s) => L / s.rmin < 200);
+      });
+    }
+    if (a.rod) a.rod.sec = choose(cat.rods, rodId(a), a.rod.sec);
     a.braces.forEach((b, k) => {
       const L = Math.hypot(b.a, drop(a, b));
       b.sec = choose(cat.tubes, braceId(a, k), b.sec, (s) => L / s.rmin < 200);
@@ -363,6 +514,12 @@ function pickSplice(st: Structure, rng: () => number): Splice | undefined {
     const ext = [a.conn, a.conn2].includes('end_plate') ? 90 : 16;
     busy.push([a.z - a.sec.d - ext, a.z + ext]);
     for (const b of a.braces) busy.push([b.zb - 300, b.zb + 300]);
+    if (a.truss) {
+      const zc = a.z - a.truss.D;
+      const e = [a.truss.conn, a.truss.conn2].includes('end_plate') ? 90 : 16;
+      busy.push([zc - a.truss.chord.d - e, zc + e]);
+    }
+    if (a.rod) busy.push([a.rod.zr - 400, a.rod.zr + 100]);
   }
   const ok: number[] = [];
   for (let z = r50(0.3 * st.H); z <= 0.7 * st.H; z += 50)
@@ -377,7 +534,7 @@ function pickSplice(st: Structure, rng: () => number): Splice | undefined {
 function sizeTop(st: Structure, m: Model, res: Forces[], cat: Catalog, fy: number) {
   const sp = st.splice!;
   const f = worstOf(m, res).get('column-top')!;
-  const need = webClear(st.arms.filter((a) => a.z - a.sec.d > sp.z));
+  const need = webClear(st.arms, sp.z);
   sp.sec = cat.columns.find((s) => s.A <= st.col.A && s.d >= 200 && s.d - 2 * s.tf >= need && ratioOf(s, f, fy) < LIMIT) ?? st.col;
   // the same section above and below: no reason to splice
   if (sp.sec === st.col) st.splice = undefined;
@@ -478,6 +635,48 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
         { S: g, sId: a.id, conn: 'gusset', at: 'to' },
       ], a.to === undefined ? hb : [h[1], -h[0], 0]); // from outside, level; in a bay, from the side
     });
+    const tr = a.truss;
+    if (tr) {
+      // the bottom chord, on the column like the arm, then the diagonals between the two chords
+      const oc = add(o, [0, 0, -tr.D]);
+      const zcm = a.z - tr.D - tr.chord.d / 2;
+      const Sc = colAt(a.col, zcm);
+      const cEnds: End[] = [{ S: Sc, sId: Sc.id, conn: tr.conn, at: 'from' }];
+      let c1 = add(oc, mul(h, tr.end));
+      if (a.to !== undefined) {
+        const Sj = colAt(a.to, zcm);
+        c1 = add(c1, mul(h, -(supportFace(Sj, mul(h, -1)) + SETBACK[tr.conn2!])));
+        cEnds.push({ S: Sj, sId: Sj.id, conn: tr.conn2!, at: 'to' });
+      }
+      const cg = geo(chordId(a), tr.chord, add(oc, mul(h, supportFace(Sc, h) + SETBACK[tr.conn])), c1, true);
+      armGeo.set(cg.id, cg);
+      member(cg, cEnds, a.to === undefined ? h : [0, 0, 1]);
+      tr.webs.forEach((wb, k) => {
+        const B = add(oc, mul(h, wb.b));
+        const C = add(add(o, mul(h, wb.t)), [0, 0, -a.sec.d]);
+        const un = norm(sub(C, B));
+        const t = SETBACK.gusset / un[2];
+        const wg = geo(webId(a, k), wb.sec, add(B, mul(un, t)), sub(C, mul(un, t)), false);
+        member(wg, [
+          { S: cg, sId: cg.id, conn: 'gusset', at: 'from' },
+          { S: g, sId: a.id, conn: 'gusset', at: 'to' },
+        ], [h[1], -h[0], 0]);
+      });
+    }
+    if (a.rod) {
+      // from the column down to the top flange, a clevis at both ends
+      const Sr = colAt(a.col, a.rod.zr);
+      const R = add(st.cols[a.col].x, [0, 0, a.rod.zr]);
+      const A = add(o, mul(h, a.rod.a));
+      const un = norm(sub(A, R));
+      const t0 = (supportFace(Sr, h) + SETBACK.clevis) / (un[0] * h[0] + un[1] * h[1]);
+      const t1 = SETBACK.clevis / -un[2];
+      const rg = geo(rodId(a), a.rod.sec, add(R, mul(un, t0)), sub(A, mul(un, t1)), false);
+      member(rg, [
+        { S: Sr, sId: Sr.id, conn: 'clevis', at: 'from' },
+        { S: g, sId: a.id, conn: 'clevis', at: 'to' },
+      ], h);
+    }
   }
   for (const s of st.secs) {
     const a = st.arms[s.arm];
@@ -524,12 +723,16 @@ function details(
     extra(`${id}-cap`, hi.id, [flat(cap, X, Y, 20, rect(hi.sec.bf + 30, hi.sec.d + 30))], down);
     // continuity plates, at the flange levels of each moment beam on a flange face
     const levels: number[] = [];
-    for (const a of st.arms)
-      for (const [ci2, conn, bearing] of [[a.col, a.conn, a.bearing], [a.to, a.conn2, a.bearing + 180]] as const) {
-        if (ci2 !== ci || !conn || !MOMENT.includes(conn) || bearing % 180 !== 0) continue;
-        for (const z of [a.z - a.sec.tf / 2, a.z - a.sec.d + a.sec.tf / 2])
-          if (levels.every((l) => Math.abs(l - z) > 30)) levels.push(z);
-      }
+    // each beam end on a column: column, connection, bearing, top of steel, section
+    const beamEnds = st.arms.flatMap((a) => [
+      [a.col, a.conn, a.bearing, a.z, a.sec], [a.to, a.conn2, a.bearing + 180, a.z, a.sec],
+      ...(a.truss ? [[a.col, a.truss.conn, a.bearing, a.z - a.truss.D, a.truss.chord], [a.to, a.truss.conn2, a.bearing + 180, a.z - a.truss.D, a.truss.chord]] : []),
+    ] as [number | undefined, ConnType | undefined, number, number, Section][]);
+    for (const [ci2, conn, bearing, zt, sec] of beamEnds) {
+      if (ci2 !== ci || !conn || !MOMENT.includes(conn) || bearing % 180 !== 0) continue;
+      for (const z of [zt - sec.tf / 2, zt - sec.d + sec.tf / 2])
+        if (levels.every((l) => Math.abs(l - z) > 30)) levels.push(z);
+    }
     levels.sort((p, q) => p - q).forEach((z, k) => {
       const S = colAt(ci, z);
       const o = add(c.x, [0, 0, z]);
@@ -557,6 +760,20 @@ function details(
       const o = add(add(start(st, a), mul(h, b.end ? a.L - b.a : b.a)), [0, 0, -a.sec.d / 2]);
       for (const s of [-1, 1]) extra(`${a.id}-stiffener${k ? k + 1 : ''}${s < 0 ? 'a' : 'b'}`, a.id, [stiffener(a.sec, o, mul(g.v, s), Z, 10)], mul(g.v, s));
     });
+    // and at each node of a truss, in both chords
+    const tr = a.truss;
+    if (tr) {
+      const cg = armGeo.get(chordId(a))!;
+      tr.webs.forEach((wb, k) => {
+        const ot = add(add(start(st, a), mul(h, wb.t)), [0, 0, -a.sec.d / 2]);
+        const ob = add(add(start(st, a), mul(h, wb.b)), [0, 0, -tr.D - tr.chord.d / 2]);
+        for (const s of [-1, 1]) {
+          const sd = s < 0 ? 'a' : 'b';
+          extra(`${webId(a, k)}-stiffener-t${sd}`, a.id, [stiffener(a.sec, ot, mul(g.v, s), Z, 10)], mul(g.v, s));
+          extra(`${webId(a, k)}-stiffener-b${sd}`, cg.id, [stiffener(tr.chord, ob, mul(cg.v, s), Z, 10)], mul(cg.v, s));
+        }
+      });
+    }
   }
 }
 const rect = (w: number, h: number): P2[] => [[-w / 2, -h / 2], [w / 2, -h / 2], [w / 2, h / 2], [-w / 2, h / 2]];
@@ -611,13 +828,35 @@ export function generate(p0: Partial<Params>, cat: Catalog, detail: Detail = 'bo
     if (sized === 3) break;
     sized++;
   }
+  const again = () => (solves++, solve((m = model(st, p)).nodes, m.elems));
+  // trusses and rods, from a draw of their own: size them, then check. If
+  // the structure does not stand up with them, go back to it without them.
+  if (ok) {
+    const keep = { ratio, col: st.col, arms: st.arms.map((a) => ({ sec: a.sec, braces: a.braces })), secs: st.secs.map((s) => s.sec) };
+    const n = log.length;
+    if (addTrussesAndRods(st, cat, mulberry32(p.seed * 2654435 + 5), log)) {
+      let good = true;
+      for (let k = 0; k < 4 && good; k++) {
+        const r = again();
+        if (r.ok) ratio = size(st, m, r.forces, cat, p.fy, k === 3);
+        else good = false;
+      }
+      if (!good) {
+        st.col = keep.col;
+        ratio = keep.ratio;
+        st.arms.forEach((a, i) => Object.assign(a, keep.arms[i], { truss: undefined, rod: undefined }));
+        st.secs.forEach((s, i) => (s.sec = keep.secs[i]));
+        log.splice(n, log.length - n, 'trusses and rods: mechanism, left out');
+        m = model(st, p);
+      }
+    }
+  }
   // the details, from a draw of their own
   const det = mulberry32(p.seed * 15485863 + 3);
   const b = det();
   st.base = b < 0.5 ? 'none' : b < 0.8 ? 'flange' : 'all';
   st.splice = ok ? pickSplice(st, det) : undefined;
   // solve with the cut, size the upper shaft, then check it (sizeTop can drop the splice)
-  const again = () => (solves++, solve((m = model(st, p)).nodes, m.elems));
   if (st.splice) {
     const r = again();
     if (r.ok) sizeTop(st, m, r.forces, cat, p.fy);

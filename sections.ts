@@ -5,7 +5,7 @@
 
 export type Section = {
   id: string;
-  kind: 'I' | 'RHS';
+  kind: 'I' | 'RHS' | 'ROD';
   d: number; // depth
   bf: number; // flange width (RHS: width)
   tf: number; // flange thickness (RHS: wall)
@@ -19,7 +19,7 @@ export type Section = {
   rmin: number;
 };
 
-export type Catalog = { beams: Section[]; columns: Section[]; tubes: Section[] };
+export type Catalog = { beams: Section[]; columns: Section[]; tubes: Section[]; rods: Section[] };
 export type Family = 'aisc' | 'eu';
 
 export function iSection(id: string, d: number, bf: number, tf: number, tw: number): Section {
@@ -43,6 +43,19 @@ export function rhsSection(id: string, h: number, b: number, t: number): Section
   const Ww = (h * b * b - (h - 2 * t) * (b - 2 * t) ** 2) / 4;
   return { id, kind: 'RHS', d: h, bf: b, tf: t, tw: t, A, Is, Iw, J, Ws, Ww, rmin: Math.sqrt(Math.min(Is, Iw) / A) };
 }
+
+// a solid round bar of diameter D (a tension rod)
+export function rodSection(id: string, D: number): Section {
+  const A = (Math.PI * D * D) / 4;
+  const I = (Math.PI * D ** 4) / 64;
+  return { id, kind: 'ROD', d: D, bf: D, tf: D / 2, tw: D / 2, A, Is: I, Iw: I, J: 2 * I, Ws: D ** 3 / 6, Ww: D ** 3 / 6, rmin: D / 4 };
+}
+
+// rod diameters: inches for AISC, mm for EU (the tables have no rods)
+const RODS: Record<Family, [string, number][]> = {
+  aisc: [['3/4', 0.75], ['7/8', 0.875], ['1', 1], ['1-1/4', 1.25], ['1-1/2', 1.5], ['1-3/4', 1.75], ['2', 2]].map(([n, x]) => [`ROD ${n}"`, (x as number) * 25.4]),
+  eu: [16, 20, 24, 27, 30, 36, 42, 48].map((x) => [`M${x} rod`, x]),
+};
 
 export function parseCsv(text: string): Record<string, string>[] {
   const lines = text.trim().split(/\r?\n/);
@@ -70,5 +83,6 @@ export function loadCatalog(family: Family, i: string, hss: string): Catalog {
     beams: shapes.filter((s) => (family === 'aisc' ? s.bf / s.d < 0.75 : s.id.startsWith('IPE'))).sort(byArea),
     columns: shapes.filter((s) => s.bf / s.d >= 0.8).sort(byArea),
     tubes: tubes.sort(byArea),
+    rods: RODS[family].map(([id, D]) => rodSection(id, D)),
   };
 }
