@@ -77,9 +77,9 @@ const OUTLINE = {
       vec3 id = I(vec2(0.0));
       bool bolt = id.b > 0.5; // a bolt head gets thin lines only
       float hit = 0.0;
-      for (int k = 1; k <= 8; k++) {
+      for (int k = 1; k <= 12; k++) {
         float r = float(k);
-        if (r > width + 0.5) break;
+        if (r > width) break;
         for (int a = 0; a < 8; a++) {
           float t = float(a) * 0.785398;
           vec2 o = vec2(cos(t), sin(t)) * r;
@@ -91,7 +91,28 @@ const OUTLINE = {
         }
       }
       if (hit < 0.5) discard;
-      gl_FragColor = vec4(color, 1.0);
+      gl_FragColor = vec4(1.0);
+    }`,
+};
+
+// the outlines are found per pixel, so they come out all or nothing: they
+// are found at SS times the screen size, then averaged down to the screen
+const DOWN = {
+  vertexShader: OUTLINE.vertexShader,
+  fragmentShader: `
+    uniform sampler2D tLine;
+    uniform vec2 px; // one screen pixel, in uv
+    uniform vec3 color;
+    varying vec2 vUv;
+    void main() {
+      // 4 linear taps cover the footprint of the pixel on the big texture
+      float a = 0.0;
+      for (int i = 0; i < 2; i++)
+        for (int j = 0; j < 2; j++)
+          a += texture2D(tLine, vUv + (vec2(float(i), float(j)) - 0.5) * 0.5 * px).a;
+      a *= 0.25;
+      if (a <= 0.0) discard;
+      gl_FragColor = vec4(color, a);
       #include <colorspace_fragment>
     }`,
 };
@@ -129,8 +150,15 @@ export function createViewer(host: HTMLElement, onTurn: (az: number, el: number,
     ...OUTLINE,
     uniforms: {
       tDepth: { value: rt.depthTexture }, tId: { value: rt.texture }, texel: { value: [1, 1] },
-      deep: { value: 0 }, touch: { value: 0 }, width: { value: 2 }, color: { value: new Color() },
+      deep: { value: 0 }, touch: { value: 0 }, width: { value: 2 },
     },
+    depthTest: false, depthWrite: false,
+  });
+  // the outlines alone, at the size of rt, read back with linear filtering
+  const lt = new WebGLRenderTarget(1, 1);
+  const down = new ShaderMaterial({
+    ...DOWN,
+    uniforms: { tLine: { value: lt.texture }, px: { value: [1, 1] }, color: { value: new Color() } },
     depthTest: false, depthWrite: false, transparent: true,
   });
   const quad = new Mesh(new PlaneGeometry(2, 2), outline);
@@ -175,6 +203,12 @@ export function createViewer(host: HTMLElement, onTurn: (az: number, el: number,
       renderer.setClearColor('#000000');
       renderer.clear();
       renderer.render(scene, cam);
+      // the outlines, at the same big size
+      renderer.setRenderTarget(lt);
+      renderer.setClearColor('#000000', 0);
+      quad.material = outline;
+      renderer.render(overlay, cam);
+      renderer.setClearColor('#000000', 1);
       renderer.setRenderTarget(null);
       renderer.setClearColor(colors.bg);
       for (const p of pieces) {
@@ -185,6 +219,7 @@ export function createViewer(host: HTMLElement, onTurn: (az: number, el: number,
     renderer.render(scene, cam);
     if (two) {
       renderer.autoClear = false;
+      quad.material = down;
       renderer.render(overlay, cam);
       renderer.autoClear = true;
     }
@@ -200,9 +235,14 @@ export function createViewer(host: HTMLElement, onTurn: (az: number, el: number,
     [w, h] = [Math.max(1, b.width), Math.max(1, b.height)];
     renderer.setSize(w, h);
     const pr = renderer.getPixelRatio();
-    rt.setSize(Math.round(w * pr), Math.round(h * pr));
-    outline.uniforms.texel.value = [1 / (w * pr), 1 / (h * pr)];
-    outline.uniforms.width.value = THICK * pr;
+    // about 3 samples per CSS px each way: 2x on a 1x screen, 1.5x on a 2x one
+    const ss = Math.min(2, Math.max(1, 3 / pr));
+    const [rw, rh] = [Math.round(w * pr * ss), Math.round(h * pr * ss)];
+    rt.setSize(rw, rh);
+    lt.setSize(rw, rh);
+    outline.uniforms.texel.value = [1 / rw, 1 / rh];
+    outline.uniforms.width.value = THICK * pr * ss;
+    down.uniforms.px.value = [1 / (w * pr), 1 / (h * pr)];
     for (const p of pieces) p.mat.resolution.set(w, h);
     if (fitted && pieces.length) reset();
     else place();
@@ -441,7 +481,7 @@ export function createViewer(host: HTMLElement, onTurn: (az: number, el: number,
     setColors(c) {
       colors = c;
       fillMat.color.set(c.bg);
-      outline.uniforms.color.value.set(c.fg);
+      down.uniforms.color.value.set(c.fg);
       for (const p of pieces) p.mat.color.set(p.part.accent ? c.accent : c.fg);
       redraw();
     },
