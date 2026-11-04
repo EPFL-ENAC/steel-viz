@@ -11,7 +11,7 @@ import Seg from './Seg.vue';
 import Slider from './Slider.vue';
 import { catalog, dev, params, s, setView, stats, turnTo, type Built } from './state.ts';
 
-const CONN: Record<string, string> = { shear_tab: 'shear tab', end_plate: 'end plate', flange_plates: 'flange plates', welded: 'welded', gusset: 'gusset' };
+const CONN: Record<string, string> = { shear_tab: 'shear tab', end_plate: 'end plate', flange_plates: 'flange plates', welded: 'welded', gusset: 'gusset', gusset_lap: 'lapped gusset' };
 
 // ---- the structure
 const built = shallowRef<Built | null>(null);
@@ -27,7 +27,7 @@ function build(animate: boolean) {
   }
 }
 build(true);
-watch(() => [s.seed, s.form, s.arms, s.height, s.load, s.family], () => build(true));
+watch(() => [s.seed, s.form, s.arms, s.height, s.load, s.family, s.shapes], () => build(true));
 watch(() => s.detail, () => build(false));
 
 const replay = ref(0);
@@ -46,7 +46,7 @@ const members = computed(() => {
   const st = built.value?.r.st;
   if (!st) return [];
   return [
-    ...st.arms.map((a) => [a.id, `${a.sec.id}, ${CONN[a.conn]}${a.braces.map((b) => ', brace ' + b.sec.id).join('')}${a.post ? ', post ' + a.post.sec.id : ''}${a.splice !== undefined ? ', splice' : ''}`]),
+    ...st.arms.map((a) => [a.id, `${a.sec.id}, ${CONN[a.conn]}${a.braces.map((b) => ', brace ' + b.sec.id).join('')}${a.truss ? ', chord ' + a.truss.chord.id : ''}${a.post ? ', post ' + a.post.sec.id : ''}${a.splice !== undefined ? ', splice' : ''}`]),
     ...st.secs.map((x) => [x.id, `${x.sec.id}, ${CONN[x.conn]}`]),
   ];
 });
@@ -111,7 +111,8 @@ async function copy() {
         <Slider id="arms" v-model="s.arms" label="Arms" :min="1" :max="12" :step="1" :out="String(s.arms)" />
         <Slider id="height" v-model="s.height" label="Height" :min="1500" :max="6000" :step="250" :out="`${(s.height / 1000).toFixed(2)} m`" />
         <Slider id="load" v-model="s.load" label="Load" :min="10" :max="200" :step="10" :out="`${s.load} kN/m`" />
-        <Seg v-model="s.family" label="Section tables" :options="[['aisc', 'AISC (W, HSS)'], ['eu', 'EU (IPE, HE)']]" />
+        <Seg v-model="s.family" label="Section tables" :options="[['aisc', 'AISC (W, HSS, C, L)'], ['eu', 'EU (IPE, HE, UPN, L)']]" />
+        <Seg v-model="s.shapes" label="Channels, angles, tees" :options="[['none', 'None'], ['some', 'Some'], ['all', 'All']]" />
       </fieldset>
 
       <fieldset>

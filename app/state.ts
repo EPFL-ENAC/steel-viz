@@ -2,13 +2,17 @@
 // link opens the same structure. Also the catalogs, and what the dev server
 // says about this checkout.
 import { reactive, ref, watch } from 'vue';
-import type { Result } from '../generate.ts';
+import { DEFAULTS as GEN, type Result } from '../generate.ts';
 import { loadCatalog, type Catalog, type Family } from '../sections.ts';
 import { VIEWS } from '../steel.ts';
 import aiscI from '../sections/aisc-sections.csv?raw';
 import aiscHss from '../sections/hss-aisc-sections.csv?raw';
 import euI from '../sections/european-sections.csv?raw';
 import euHss from '../sections/hss-european-sections.csv?raw';
+import aiscC from '../sections/channel-aisc-sections.csv?raw';
+import aiscL from '../sections/angle-aisc-sections.csv?raw';
+import euC from '../sections/channel-european-sections.csv?raw';
+import euL from '../sections/angle-european-sections.csv?raw';
 
 const DEFAULTS = {
   seed: 5,
@@ -17,6 +21,7 @@ const DEFAULTS = {
   height: 2500,
   load: 100,
   family: 'aisc' as Family,
+  shapes: 'some', // channels, double angles and tees: none, some or all (see SHAPE_P)
   detail: 'bolts',
   view: 'iso', // '' when the angle is free
   az: VIEWS.iso[0],
@@ -64,9 +69,11 @@ export function setView(name: string) {
   s.el = Math.round(VIEWS[name][1]);
 }
 
-export const params = () => ({ seed: s.seed || 1, form: s.form, arms: s.arms, height: s.height, load: s.load, fy: s.family === 'eu' ? 355 : 345 });
+// the shapes setting (none, some, all in the hash) as shapeP
+const SHAPE_P: Record<string, number> = { none: 0, some: GEN.shapeP, all: 1 };
+export const params = () => ({ seed: s.seed || 1, form: s.form, arms: s.arms, height: s.height, load: s.load, shapeP: SHAPE_P[s.shapes] ?? GEN.shapeP, fy: s.family === 'eu' ? 355 : 345 });
 
-const TABLES: Record<Family, [string, string]> = { aisc: [aiscI, aiscHss], eu: [euI, euHss] };
+const TABLES: Record<Family, [string, string, string, string]> = { aisc: [aiscI, aiscHss, aiscC, aiscL], eu: [euI, euHss, euC, euL] };
 const cats: Partial<Record<Family, Catalog>> = {};
 export const catalog = (fam: Family) => (cats[fam] ??= loadCatalog(fam, ...TABLES[fam]));
 

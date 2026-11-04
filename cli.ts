@@ -1,6 +1,7 @@
 // node cli.ts --seed 3 --view iso --family aisc --out x.svg
 //   [--detail members|plates|bolts] [--arms 5] [--height 6000] [--load 20]
 //   [--form mix|tree|portal|box] [--animate] [--frames] [--painter] [--flat] [--size px]
+//   [--shapes 0.35] (the chance of a channel, double angle or tee member, 0 for none)
 // node cli.ts --specimen specimens/Chi_and_Uang_2002_DC2.json --view iso
 //   a real test from a JSON file (specimen.ts), with the same view and drawing options
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -29,7 +30,7 @@ const t0 = performance.now();
 const cat = loadCatalog(family, ...readTables(family));
 const t1 = performance.now();
 const r = generate(
-  { seed: +opt('seed', '1'), form: opt('form', 'mix') as Params['form'], arms: +opt('arms', `${DEFAULTS.arms}`), height: +opt('height', `${DEFAULTS.height}`), load: +opt('load', `${DEFAULTS.load}`), fy: family === 'eu' ? 355 : 345, specimen: spec },
+  { seed: +opt('seed', '1'), form: opt('form', 'mix') as Params['form'], arms: +opt('arms', `${DEFAULTS.arms}`), height: +opt('height', `${DEFAULTS.height}`), load: +opt('load', `${DEFAULTS.load}`), shapeP: +opt('shapes', `${DEFAULTS.shapeP}`), fy: family === 'eu' ? 355 : 345, specimen: spec },
   cat,
   detail,
 );

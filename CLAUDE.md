@@ -19,7 +19,7 @@ node --test --test-name-pattern "clash|support"    # some tests by name
 pnpm dev                  # the playground (Vue app in app/) with live reload, on PLAYGROUND_PORT or 5180
 pnpm build                # the playground as a static site in dist/ (build output, never commit it)
 pnpm run build:lib        # the package (index.ts, 3d.ts) as JS and .d.ts in lib/ (only a release tag has it, see release.sh)
-node cli.ts --seed 5 --view iso --out s5.svg       # also --form, --family eu, --animate, --frames, --painter, --size 96
+node cli.ts --seed 5 --view iso --out s5.svg       # also --form, --family eu, --shapes 0..1, --animate, --frames, --painter, --size 96
 node pick.ts --count 150 --top 12 --sheet best.html
 node cli.ts --specimen specimens/Chi_and_Uang_2002_DC2.json --view iso   # a real test from a JSON file (specimen.ts)
 ```
@@ -37,14 +37,14 @@ Node only strips the types. `pnpm run type-check` checks them (`tsc` with `tscon
 5. The package has two entries. `index.ts` (`@epfl-enac/steel-viz`) re-exports the core: generate, loadCatalog, the painter render, timeline, the specimen input. `3d.ts` (`@epfl-enac/steel-viz/3d`) re-exports `renderHLR` and `createViewer`. three.js and its two helpers are optional peer dependencies (and dev dependencies here). The hub passes its own CSV text to `loadCatalog()`, the package ships no table. When you export something new for the hub, add it to `index.ts` (or `3d.ts` if it needs three.js).
 6. The playground is a Vue 3 app in `app/`, served by Vite (`vite.config.ts`). It imports the core modules directly. `app/state.ts` holds the settings and keeps them in the URL hash, `Drawing.vue` draws (3D, SVG, both, or vs main). `app/dev-plugin.ts` is for the dev server only: the branch info, the "vs main" bundle (the merge base with `main`, from `git archive`), and a full reload when a file outside `app/` changes.
 
-Seeds must stay stable. `generate()` uses a separate `mulberry32` random stream for each stage (form, topology, trusses and rods, details). When you add a new random feature, give it its own stream. If it takes draws from the main `rng`, every seed after it changes, and the seeds picked for the logo change too.
+Seeds must stay stable. `generate()` uses a separate `mulberry32` random stream for each stage (form, topology, trusses and rods, details). When you add a new random feature, give it its own stream. If it takes draws from the main `rng`, every seed after it changes, and the seeds picked for the logo change too. The shape of a member (`shapeP`: double angle brace, channel secondary, tee chord) is one draw per member, seeded from the seed and the member id (`shaped()` in `generate.ts`), so it doesn't depend on the order of the other draws.
 
 Units are mm everywhere. `hlr.ts` converts to metres before it calls three-edge-projection (see the README). Import `three-edge-projection/src/ProjectionGenerator.js`, not the package root. The library ships no types: `three-edge-projection.d.ts` types the part `hlr.ts` uses. If `hlr.ts` uses more of it, add it there.
 
 ## Rules
 
 - AISC copyright: the AISC Steel Sculpture drawings and plans are AISC's work. Never commit or publish anything taken from them. Only generic kinds of steel details (splices, gussets, clevis, trusses) go into the generator.
-- `sections/*.csv` are copies of the RESSLab Hub tables. Change them in the hub first, then copy them here.
+- The I and HSS tables in `sections/` are copies of the RESSLab Hub tables. Change them in the hub first, then copy them here. The channel and angle tables are ours until the hub has them: `sections/README.md` says where they come from and how to make them again.
 - Commits use Conventional Commits.
 - Never add a `prepare` or `prepack` script to `package.json`: pnpm runs them when the hub installs the git dependency. The built `lib/` goes into the release tag only (`release.sh`, run by a human). Never commit `lib/` on a branch, and never create or push a tag.
 
