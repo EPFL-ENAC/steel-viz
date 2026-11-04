@@ -7,4 +7,5 @@ export { DEFAULTS, floating, generate, type Detail, type Form, type MemberCheck,
 export { loadCatalog, type Catalog, type Family, type Section } from './sections.ts';
 export { BOLT_MS, CRANES, DETAIL, VIEWS, buildEnd, camera, forSize, render, shortestBuild, timeline, type Part, type PartInfo, type RenderOpts, type Slot, type TimelineOpts } from './steel.ts';
 export { renderHLR } from './hlr.ts';
-export { findSection, fromHubConnection, toSpecimen, type SectionRef, type Specimen, type SpecimenBeam } from './specimen.ts';
+export { findSection, type SectionRef, type Specimen, type SpecimenBeam } from './specimen.ts';
+export { fromHubConnection, toSpecimen, type HubRecord } from './hub.ts';

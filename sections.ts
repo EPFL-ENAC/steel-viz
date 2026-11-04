@@ -152,15 +152,33 @@ const RODS: Record<Family, [string, number][]> = {
   eu: [16, 20, 24, 27, 30, 36, 42, 48].map((x) => [`M${x} rod`, x]),
 };
 
+// A CSV text (RFC 4180) as one object per row, keyed by the header. A quoted
+// cell can hold commas, new lines and "" for a quote: the hub tables have them
+// (a reference on many lines). Cells are trimmed, empty lines skipped, the
+// line ends can be \n or \r\n, a BOM at the start is dropped.
 export function parseCsv(text: string): Record<string, string>[] {
-  const lines = text.trim().split(/\r?\n/);
-  const head = lines[0].split(',');
-  return lines.slice(1).map((l) => {
-    const cells = l.split(',');
-    const row: Record<string, string> = {};
-    head.forEach((h, i) => (row[h] = (cells[i] ?? '').replace(/"/g, '').trim()));
-    return row;
-  });
+  const rows: string[][] = [];
+  let [row, cell, quoted] = [[] as string[], '', false];
+  const s = text.replace(/^﻿/, '');
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (quoted) {
+      if (ch !== '"') cell += ch;
+      else if (s[i + 1] === '"') [cell, i] = [cell + '"', i + 1];
+      else quoted = false;
+    } else if (ch === '"') quoted = true;
+    else if (ch === ',') [row, cell] = [[...row, cell], ''];
+    else if (ch === '\n' || ch === '\r') {
+      if (ch === '\r' && s[i + 1] === '\n') i++;
+      rows.push([...row, cell]);
+      [row, cell] = [[], ''];
+    } else cell += ch;
+  }
+  rows.push([...row, cell]);
+  const [head, ...body] = rows.filter((r) => r.some((c) => c.trim()));
+  if (!head) return [];
+  const keys = head.map((h) => h.trim());
+  return body.map((cells) => Object.fromEntries(keys.map((k, i) => [k, (cells[i] ?? '').trim()])));
 }
 
 const byArea = (a: Section, b: Section) => a.A - b.A;

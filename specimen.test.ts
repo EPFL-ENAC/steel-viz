@@ -6,7 +6,8 @@ import { loadCatalog, type Family } from './sections.ts';
 import { floating, generate } from './generate.ts';
 import { clashes } from './clash.ts';
 import { readTables } from './tables.ts';
-import { findSection, fromHubConnection, toSpecimen, type Specimen } from './specimen.ts';
+import { findSection, type Specimen } from './specimen.ts';
+import { fromHubConnection, toSpecimen } from './hub.ts';
 
 const cats = { aisc: loadCatalog('aisc', ...readTables('aisc')), eu: loadCatalog('eu', ...readTables('eu')) };
 const record = (id: string) => JSON.parse(readFileSync(new URL(`./specimens/${id}.json`, import.meta.url), 'utf8'));

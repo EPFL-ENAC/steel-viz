@@ -15,7 +15,7 @@ import { DEFAULTS, floating, generate, type Detail, type Params } from './genera
 import { render as painter, VIEWS } from './steel.ts';
 import { renderHLR } from './hlr.ts';
 import { readTables } from './tables.ts';
-import { toSpecimen } from './specimen.ts';
+import { toSpecimen } from './hub.ts';
 
 
 const args = process.argv.slice(2);
