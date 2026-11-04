@@ -7,7 +7,7 @@
 //
 // No three.js here: this file only needs the section formulas.
 import { iSection, rhsSection, type Catalog, type Family, type Section } from './sections.ts';
-import type { ConnType } from './steel.ts';
+import { BEAM_CONN_KINDS, type ConnType } from './steel.ts';
 
 // A name from the section tables ('W14X82', 'HE 300 B', also written
 // 'W14x82', 'HEB 300'), a built-up name ('H-700x300x13x24': d x bf x tw x tf),
@@ -19,7 +19,7 @@ export type SpecimenBeam = {
   bearing: 0 | 90 | 180 | 270; // 0 and 180 on the column flanges, 90 and 270 on its web
   length: number; // mm, from the column axis to the beam tip
   at?: number; // mm, beam centre line above the column foot (default: half the column height)
-  connection: ConnType; // shear_tab, end_plate, flange_plates or welded
+  connection: ConnType; // one of BEAM_CONNS: shear_tab, end_plate, flange_plates, welded, ...
 };
 
 export type Specimen = {
@@ -31,7 +31,8 @@ export type Specimen = {
   notes?: string[]; // what we draw differently from the real test, copied into the log
 };
 
-export const BEAM_CONNS: ConnType[] = ['shear_tab', 'end_plate', 'flange_plates', 'welded'];
+// the kinds a beam end of a specimen can have
+export const BEAM_CONNS: ConnType[] = BEAM_CONN_KINDS;
 
 // ------------------------------------------------------------- sections
 // table ids and hub names written the same way: W14x82 -> W14X82, HEB 300 -> HE300B
