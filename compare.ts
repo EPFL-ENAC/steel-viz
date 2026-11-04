@@ -21,13 +21,25 @@ const opt = (k: string, d: string) => (args.includes(`--${k}`) ? args[args.index
 const sheet = opt('sheet', 'compare.html');
 const only = opt('only', '');
 
-// a case above these limits fails, unless it is listed in EXPLAINED
-const MAX_DIFF = 0.01; // lines only one drawing has, as a share of the length
-const MAX_COUNT = 0.02; // line count difference, as a share (and at least 2 lines)
+// A case above this limit fails, unless it is listed in EXPLAINED. The limit
+// is for the lines only one drawing has, and for the double lines the new
+// one adds, as a share of the length.
+//
+// The line count is printed, but it is not in the rule: the new renderer cuts
+// lines at other points (a line on the side of a face in front, a gap probe
+// on the side of a face), so a few lines become two, with the same length.
+// And it shows short lines the old one hid by mistake, behind faces seen edge
+// on. The double line check does what the count was for.
+const MAX_DIFF = 0.01;
+const SMALL = 1; // drawing units (10 mm): the count leaves out shorter pieces
 const TOL = 0.2; // drawing units (2 mm): two lines closer than this are the same
 const STEP = 0.5; // drawing units between two sample points
 const EXPLAINED: Record<string, string> = {
-  // 'aisc tree 5 iso': 'why it is different',
+  // the top edge of a column under its cap or splice plate is hidden in the
+  // end. The old one dropped it from the animation, the new one shows it as
+  // hidden until the plate comes in. The new one is right.
+  'eu portal 35 iso': 'column top under the cap plate, kept in the animation',
+  'eu box 7 iso': 'column tops under the splice plates, kept in the animation',
 };
 
 const cats = { aisc: loadCatalog('aisc', ...readTables('aisc')), eu: loadCatalog('eu', ...readTables('eu')) };
@@ -107,6 +119,30 @@ function only1(a: Seg[], b: Seg[]): { length: number; bits: Seg[] } {
   return { length, bits };
 }
 
+// the length of `a` that lies on another line of `a`, or on a line of `under`
+// (a double line). A sample closer than SMALL to the end of its line is not
+// counted: lines that meet at a corner touch there.
+function doubled(a: Seg[], under: Seg[]): number {
+  let length = 0;
+  a.forEach((g, i) => {
+    const others = [...a.slice(0, i), ...a.slice(i + 1), ...under];
+    const l = len(g);
+    const n = Math.max(1, Math.ceil(l / STEP));
+    const keep: Seg[] = [];
+    for (let k = 0; k < n; k++) {
+      const tm = (k + 0.5) / n;
+      if (tm * l < SMALL || (1 - tm) * l < SMALL) continue;
+      keep.push([g[0] + (g[2] - g[0]) * (k / n), g[1] + (g[3] - g[1]) * (k / n), g[0] + (g[2] - g[0]) * ((k + 1) / n), g[1] + (g[3] - g[1]) * ((k + 1) / n)]);
+    }
+    if (keep.length) length += total(keep) - only1(keep, others.filter((o) => near2(o, g))).length;
+  });
+  return length;
+}
+// the box of `o` touches the box of `g` (plus TOL)
+const near2 = (o: Seg, g: Seg) =>
+  Math.max(o[0], o[2]) >= Math.min(g[0], g[2]) - TOL && Math.min(o[0], o[2]) <= Math.max(g[0], g[2]) + TOL &&
+  Math.max(o[1], o[3]) >= Math.min(g[1], g[3]) - TOL && Math.min(o[1], o[3]) <= Math.max(g[1], g[3]) + TOL;
+
 // ------------------------------------------------------------- the cases
 type Case = { name: string; parts: Part[] };
 function cases(): Case[] {
@@ -126,11 +162,13 @@ type Row = {
   name: string;
   score: number; // lines only one drawing has, share of the visible length
   hidden: number; // the same for the hidden pieces of the animation
+  dbl: [number, number]; // length of double lines, old and new
   counts: Record<Kind, [number, number]>;
   lengths: Record<Kind, [number, number, number, number]>; // old, new, old only, new only
   bad: string[];
   svgs: [string, string];
   bits: [Seg[], Seg[]];
+  hbits: [Seg[], Seg[]];
   ms: [number, number];
 };
 
@@ -141,16 +179,19 @@ function compare(name: string, parts: Part[], o: RenderOpts): Row {
   const counts = {} as Row['counts'];
   const lengths = {} as Row['lengths'];
   const bits: [Seg[], Seg[]] = [[], []];
+  const hbits: [Seg[], Seg[]] = [[], []];
   const bad: string[] = [];
   for (const k of KINDS) {
     const x = only1(A[k], B[k]);
     const y = only1(B[k], A[k]);
-    counts[k] = [A[k].length, B[k].length];
+    const long = (l: Seg[]) => l.filter((g) => Math.hypot(g[2] - g[0], g[3] - g[1]) >= SMALL).length;
+    counts[k] = [long(A[k]), long(B[k])];
     lengths[k] = [total(A[k]), total(B[k]), x.length, y.length];
     if (k !== 'hidden') bits[0].push(...x.bits), bits[1].push(...y.bits);
-    const dc = Math.abs(A[k].length - B[k].length);
-    if (dc > Math.max(2, MAX_COUNT * A[k].length)) bad.push(`${k} count ${A[k].length} -> ${B[k].length}`);
+    else hbits[0].push(...x.bits), hbits[1].push(...y.bits);
   }
+  // double lines: thin on thin or on thick, thick on thick
+  const dbl: [number, number] = [doubled(A.thin, A.thick) + doubled(A.thick, []), doubled(B.thin, B.thick) + doubled(B.thick, [])];
   const vis = (['thin', 'thick', 'fill'] as const).reduce((s, k) => s + Math.max(lengths[k][0], lengths[k][1]), 0);
   const diff = (['thin', 'thick', 'fill'] as const).reduce((s, k) => s + lengths[k][2] + lengths[k][3], 0);
   const score = vis ? diff / vis : 0;
@@ -158,7 +199,8 @@ function compare(name: string, parts: Part[], o: RenderOpts): Row {
   const hidden = Math.max(hl[0], hl[1]) ? (hl[2] + hl[3]) / Math.max(hl[0], hl[1]) : 0;
   if (score > MAX_DIFF) bad.push(`lines ${(score * 100).toFixed(2)}%`);
   if (hidden > MAX_DIFF) bad.push(`hidden ${(hidden * 100).toFixed(2)}%`);
-  return { name, score, hidden, counts, lengths, bad, svgs: [a.svg, b.svg], bits, ms: [a.ms, b.ms] };
+  if (dbl[1] - dbl[0] > MAX_DIFF * vis) bad.push(`double lines ${dbl[0].toFixed(0)} -> ${dbl[1].toFixed(0)}`);
+  return { name, score, hidden, dbl, counts, lengths, bad, svgs: [a.svg, b.svg], bits, hbits, ms: [a.ms, b.ms] };
 }
 
 // ------------------------------------------------------------- run
@@ -207,11 +249,13 @@ for (const k of KINDS)
     `  ${k.padEnd(6)} count ${cnt(k, 0)} -> ${cnt(k, 1)}, length ${tot(k, 0).toFixed(0)} -> ${tot(k, 1).toFixed(0)}, ` +
       `old only ${pct(tot(k, 2) / tot(k, 0))}, new only ${pct(tot(k, 3) / tot(k, 0))}`,
   );
+console.log(`  double lines, length: old ${rows.reduce((s, r) => s + r.dbl[0], 0).toFixed(0)}, new ${rows.reduce((s, r) => s + r.dbl[1], 0).toFixed(0)}`);
+for (const r of [...rows].sort((p, q) => q.dbl[1] - q.dbl[0] - (p.dbl[1] - p.dbl[0])).slice(0, 8)) console.log(`    ${r.name}: ${r.dbl.map((v) => v.toFixed(1)).join(' -> ')}`);
 console.log(`  worst lines ${pct(Math.max(...rows.map((r) => r.score)))}, worst hidden ${pct(Math.max(...rows.map((r) => r.hidden)))}`);
 console.log(`  time, all drawings: old ${(sum.old / 1000).toFixed(1)} s, new ${(sum.new / 1000).toFixed(1)} s`);
 for (const r of explained) console.log(`  explained: ${r.name}: ${r.bad.join(', ')} (${EXPLAINED[r.name]})`);
-for (const r of fails.slice(0, 40)) console.log(`  FAIL ${r.name}: ${r.bad.join(', ')}`);
-if (fails.length > 40) console.log(`  ... and ${fails.length - 40} more`);
+for (const r of fails.slice(0, args.includes('--all') ? Infinity : 40)) console.log(`  FAIL ${r.name}: ${r.bad.join(', ')}`);
+if (fails.length > 40 && !args.includes('--all')) console.log(`  ... and ${fails.length - 40} more`);
 
 // the sheet: the worst drawings, old, new, and what only one of them has
 const diffSvg = (r: Row) => {
@@ -220,7 +264,8 @@ const diffSvg = (r: Row) => {
   const base = r.svgs[0].replace(/<svg[^>]*>/, '').replace('</svg>', '');
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" class="steel" viewBox="${vb}"><g style="opacity:.25">${base}</g>` +
-    `<path d="${d(r.bits[0])}" style="fill:none;stroke:#e30713;stroke-width:3"/><path d="${d(r.bits[1])}" style="fill:none;stroke:#1060ff;stroke-width:3"/></svg>`
+    `<path d="${d(r.bits[0])}" style="fill:none;stroke:#e30713;stroke-width:3"/><path d="${d(r.bits[1])}" style="fill:none;stroke:#1060ff;stroke-width:3"/>` +
+    `<path d="${d(r.hbits[0])}" style="fill:none;stroke:#e30713;stroke-width:2;stroke-dasharray:3 2"/><path d="${d(r.hbits[1])}" style="fill:none;stroke:#1060ff;stroke-width:2;stroke-dasharray:3 2"/></svg>`
   );
 };
 const html = [
@@ -235,6 +280,8 @@ const html = [
   ),
 ].join('\n');
 writeFileSync(sheet, html);
+// one case: also its difference as an SVG file, next to the sheet
+if (only) for (const r of rows) writeFileSync(sheet.replace(/\.html$/, `-${r.name.split(' ').pop()}.svg`), diffSvg(r));
 console.log(`  sheet: ${sheet}`);
 bench();
 console.log(fails.length ? `NOT GREEN: ${fails.length} drawings fail` : 'GREEN');
