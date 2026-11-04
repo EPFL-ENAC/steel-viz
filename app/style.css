@@ -78,18 +78,19 @@ button.primary:hover { background: var(--primary-hover); border-color: var(--pri
 .drawing svg { width: 100%; height: 100%; max-width: 100%; }
 .drawing.px svg { width: var(--px); height: auto; }
 .drawing { cursor: grab; touch-action: none; user-select: none; }
-/* two views of the same structure: the WebGL one to turn and zoom, the exact SVG for export */
-#svg, #svgBase { position: relative; min-width: 0; min-height: 0; box-sizing: border-box; padding: 16px; display: grid; place-items: center; }
-#svgBase { display: none; }
-#gl { position: relative; min-width: 0; min-height: 0; overflow: hidden; }
-.drawing.v-3d #svg, .drawing.v-svg #gl { display: none; }
-/* both: the 3D view on the left, the exact drawing on the right */
-.drawing.v-both { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
-.drawing.v-both #gl { border-right: 1px solid var(--border); }
-/* vs main (dev server only): this branch on the left, the base branch on the right */
-.drawing.v-diff { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
-.drawing.v-diff #gl { display: none; }
-.drawing.v-diff #svgBase { display: grid; }
+/* a pane: one structure, in WebGL, as the exact SVG, or both */
+.drawing.compare { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.pane { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); min-width: 0; min-height: 0; }
+.drawing.compare > .pane + .pane { border-left: 1px solid var(--border); }
+.pane .svg { position: relative; min-width: 0; min-height: 0; box-sizing: border-box; padding: 16px; display: grid; place-items: center; }
+.pane .gl { position: relative; min-width: 0; min-height: 0; overflow: hidden; }
+.pane.v-3d .svg, .pane.v-svg .gl { display: none; }
+/* both: the 3D view on the left, the exact drawing on the right. In compare: 3D above, SVG below */
+.pane.v-both { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.pane.v-both .gl { border-right: 1px solid var(--border); }
+.drawing.compare .pane.v-both { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); }
+.drawing.compare .pane.v-both .gl { border-right: 0; border-bottom: 1px solid var(--border); }
+.note-pane { place-items: center; padding: 16px; }
 /* the tooltip of the part under the mouse, in the 3D view */
 .tip {
   position: fixed; z-index: 10; pointer-events: none; max-width: 340px;
@@ -103,11 +104,12 @@ button.primary:hover { background: var(--primary-hover); border-color: var(--pri
 .tip dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 1px 10px; margin: 0; }
 .tip dt { color: var(--fg-muted); }
 .tip dd { margin: 0; font-variant-numeric: tabular-nums; }
-.drawing.v-diff #svg { border-right: 1px solid var(--border); }
-.drawing.v-both #gl::before, .drawing.v-both #svg::before, .drawing.v-diff #svg::before, .drawing.v-diff #svgBase::before {
+.drawing.compare .pane > ::before, .drawing.v-both .pane > ::before {
   content: attr(data-label); position: absolute; top: 10px; left: 12px; z-index: 1;
   font-size: 12px; color: var(--fg-muted); pointer-events: none;
 }
+.titleblock .ids summary { cursor: pointer; font-size: 12px; color: var(--fg-muted); }
+.titleblock .ids p { margin: 2px 0 0; }
 .drawing.turning { cursor: grabbing; }
 .drawing:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
 .hint { position: absolute; top: 10px; right: 12px; font-size: 12px; color: var(--fg-muted); pointer-events: none; }

@@ -2,7 +2,8 @@
 // - /__dev/info: the branch, the commit, and the base commit for "vs main".
 // - /__dev/base.js: the generator and the renderers of the base branch, bundled
 //   from `git archive` of the merge base with PLAYGROUND_BASE (default main).
-//   It sets globalThis.BASE. Kept per commit in node_modules/.cache.
+//   It sets globalThis.BASE (see app/engine.ts). Kept per commit in
+//   node_modules/.cache. With the WebGL viewer, so three.js too.
 // - A change outside app/ (generator, renderers, tables) reloads the whole
 //   page. The settings live in the URL hash, so they stay.
 import { execFileSync, execSync } from 'node:child_process';
@@ -43,13 +44,16 @@ async function bundleBase(sha: string) {
   // files it has, its loadCatalog() takes as many as it knows
   const tables = (fam: Family) =>
     JSON.stringify([...TABLE_FILES[fam], ...SHAPE_FILES[fam]].map((f) => join(dir, 'sections', f)).filter(existsSync).map((f) => readFileSync(f, 'utf8')));
+  const gl = existsSync(join(dir, 'webgl.ts'));
   const r = await build({
     stdin: {
+      // steel.ts as a whole: an export the base does not have yet is just undefined
       contents: `import { loadCatalog } from './sections.ts';
 import { generate } from './generate.ts';
-import { render } from './steel.ts';
+import * as steel from './steel.ts';
 import { renderHLR } from './hlr.ts';
-globalThis.BASE = { loadCatalog, generate, render, renderHLR, TABLES: { aisc: ${tables('aisc')}, eu: ${tables('eu')} } };`,
+${gl ? "import { createViewer } from './webgl.ts';" : 'const createViewer = undefined;'}
+globalThis.BASE = { loadCatalog, generate, steel, renderHLR, createViewer, TABLES: { aisc: ${tables('aisc')}, eu: ${tables('eu')} } };`,
       resolveDir: dir,
       loader: 'ts',
     },

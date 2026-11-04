@@ -2,4 +2,4 @@
 // (hlr.ts) and the WebGL viewer (webgl.ts). It loads three.js, so import it
 // only where it is needed, with a dynamic import().
 export { renderHLR } from './hlr.ts';
-export { createViewer, type Colors, type Viewer } from './webgl.ts';
+export { createViewer, type Colors, type Frame, type Viewer } from './webgl.ts';

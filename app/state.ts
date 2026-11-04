@@ -27,9 +27,11 @@ const DEFAULTS = {
   az: VIEWS.iso[0],
   el: Math.round(VIEWS.iso[1]),
   weights: 'two',
-  viewer: '3d', // 3d, svg, both, or diff (vs main, dev server only)
+  viewer: '3d', // 3d, svg or both
+  compare: 0, // 1: this branch and the base branch side by side (dev server only)
   size: 0, // px, 0 for full size
   duration: 6, // s, the length of the build animation, 0 for none
+  speed: 1, // how fast one part comes in (see timeline in steel.ts)
   theme: '', // '' follows the system
 };
 export type Settings = typeof DEFAULTS;
@@ -41,6 +43,8 @@ function fromHash(): Settings {
     const d = (DEFAULTS as any)[k];
     (s as any)[k] = typeof d === 'number' ? (v !== '' && Number.isFinite(Number(v)) ? Number(v) : d) : v;
   }
+  // an old link: "vs main" was a viewer
+  if ((s.viewer as string) === 'diff') Object.assign(s, { viewer: 'svg', compare: 1 });
   return s;
 }
 
@@ -91,5 +95,5 @@ fetch('/__dev/info')
   .catch(() => null)
   .then((d) => {
     dev.value = d;
-    if (!d && s.viewer === 'diff') s.viewer = '3d';
+    if (!d) s.compare = 0;
   });

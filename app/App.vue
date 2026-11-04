@@ -59,7 +59,6 @@ const column = computed(() => {
 const viewName = computed({ get: () => s.view, set: setView });
 const az = computed({ get: () => s.az, set: (v) => turnTo(v, s.el) });
 const el = computed({ get: () => s.el, set: (v) => turnTo(s.az, v) });
-const viewers = computed<[string, string][]>(() => [['3d', '3D'], ['svg', 'SVG'], ['both', 'Both'], ...(dev.value ? [['diff', `vs ${dev.value.base.ref}`] as [string, string]] : [])]);
 
 // ---- theme
 const media = matchMedia('(prefers-color-scheme: dark)');
@@ -78,6 +77,7 @@ watchEffect(() => {
 
 // ---- copy
 const drawing = ref<InstanceType<typeof Drawing>>();
+const diff = computed(() => drawing.value?.diff);
 const copyNote = ref('');
 async function copy() {
   try {
@@ -120,7 +120,8 @@ async function copy() {
         <Seg v-model="s.detail" label="Detail" :options="[['members', 'Members'], ['plates', 'Plates'], ['bolts', 'Bolts']]" />
         <Seg v-model="viewName" label="View" :options="[['iso', 'Iso'], ['south', 'S'], ['west', 'W'], ['north', 'N'], ['east', 'E'], ['plan', 'Plan']]" />
         <Seg v-model="s.weights" label="Line weights" :options="[['two', 'Two weights'], ['one', 'One weight']]" />
-        <Seg v-model="s.viewer" label="Viewer" :options="viewers" />
+        <Seg v-model="s.viewer" label="Viewer" :options="[['3d', '3D'], ['svg', 'SVG'], ['both', 'Both']]" />
+        <Seg v-if="dev" v-model="s.compare" label="Compare" :options="[[0, 'This branch'], [1, `vs ${dev.base.ref}`]]" />
         <Seg v-model="s.size" label="SVG size" :options="[[0, 'Full size'], [256, '256 px'], [96, '96 px'], [48, '48 px']]" />
         <Slider id="az" v-model="az" label="Azimuth" :min="0" :max="359" :step="1" :out="`${s.az}°`" />
         <Slider id="el" v-model="el" label="Elevation" :min="0" :max="90" :step="1" :out="`${s.el}°`" />
@@ -155,7 +156,16 @@ async function copy() {
         <div><dt>Solver</dt><dd>{{ built ? `${built.r.nodes} nodes, ${built.r.solves} solves` : '' }}</dd></div>
         <div><dt>Drawing</dt><dd>{{ stats.draw }}</dd></div>
         <div><dt>Time</dt><dd>{{ stats.ms }}</dd></div>
-        <div v-if="s.viewer === 'diff'"><dt>vs {{ dev?.base.ref }}</dt><dd>{{ stats.base }}</dd></div>
+        <div v-if="s.compare && dev">
+          <dt>vs {{ dev.base.ref }}</dt>
+          <dd>{{ stats.base }}</dd>
+          <details v-if="diff && diff.added.length + diff.gone.length + diff.changed.length" class="ids">
+            <summary>Part ids</summary>
+            <p v-if="diff.added.length"><b>New</b> {{ diff.added.join(', ') }}</p>
+            <p v-if="diff.gone.length"><b>Gone</b> {{ diff.gone.join(', ') }}</p>
+            <p v-if="diff.changed.length"><b>Changed</b> {{ diff.changed.join(', ') }}</p>
+          </details>
+        </div>
       </dl>
     </main>
   </div>
