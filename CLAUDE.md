@@ -20,6 +20,7 @@ pnpm dev                  # the playground (Vue app in app/) with live reload, o
 pnpm build                # the playground as a static site in dist/ (build output, never commit it)
 pnpm run build:lib        # the package (index.ts, 3d.ts) as JS and .d.ts in lib/ (only a release tag has it, see release.sh)
 node cli.ts --seed 5 --view iso --out s5.svg       # also --form, --family eu, --shapes 0..1, --animate, --frames, --painter, --size 96
+node cli.ts --seed 5 --storeys 2 --bracing chevron --conn welded --span 1.4 --arm-length 0.5,0.9   # the look settings, see Params in generate.ts
 node pick.ts --count 150 --top 12 --sheet best.html
 node cli.ts --specimen specimens/Chi_and_Uang_2002_DC2.json --view iso   # a real test from a JSON file (specimen.ts)
 ```

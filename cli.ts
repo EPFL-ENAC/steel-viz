@@ -2,6 +2,9 @@
 //   [--detail members|plates|bolts] [--arms 5] [--height 6000] [--load 20]
 //   [--form mix|tree|portal|box] [--animate] [--frames] [--painter] [--flat] [--size px]
 //   [--shapes 0.35] (the chance of a channel, double angle or tee member, 0 for none)
+//   the look (see Params in generate.ts): [--storeys 0|1|2] [--span 1] [--bracing auto|none|knee|chevron|diagonal]
+//   [--conn auto|shear_tab|end_plate|flange_plates|welded] [--arm-length 0.3,0.7] [--arm-height 0.35,0.95]
+//   [--braces 0.3] [--secondaries 0.35] [--posts 0.3] [--beam-splices 0.3] [--trusses 1] [--rods 0.4] [--col-splice 0.6]
 // node cli.ts --specimen specimens/Chi_and_Uang_2002_DC2.json --view iso
 //   a real test from a JSON file (specimen.ts), with the same view and drawing options
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -29,8 +32,19 @@ const render = args.includes('--painter') ? painter : renderHLR;
 const t0 = performance.now();
 const cat = loadCatalog(family, ...readTables(family));
 const t1 = performance.now();
+const num = (k: string, d: number) => +opt(k, `${d}`);
+const pair = (k: string, d: [number, number]) => opt(k, d.join(',')).split(',').map(Number) as [number, number];
 const r = generate(
-  { seed: +opt('seed', '1'), form: opt('form', 'mix') as Params['form'], arms: +opt('arms', `${DEFAULTS.arms}`), height: +opt('height', `${DEFAULTS.height}`), load: +opt('load', `${DEFAULTS.load}`), shapeP: +opt('shapes', `${DEFAULTS.shapeP}`), fy: family === 'eu' ? 355 : 345, specimen: spec },
+  {
+    seed: +opt('seed', '1'), form: opt('form', 'mix') as Params['form'], arms: num('arms', DEFAULTS.arms), height: num('height', DEFAULTS.height),
+    load: num('load', DEFAULTS.load), shapeP: num('shapes', DEFAULTS.shapeP), fy: family === 'eu' ? 355 : 345, specimen: spec,
+    storeys: num('storeys', DEFAULTS.storeys) as Params['storeys'], spanK: num('span', DEFAULTS.spanK),
+    bracing: opt('bracing', DEFAULTS.bracing) as Params['bracing'], conn: opt('conn', DEFAULTS.conn) as Params['conn'],
+    armL: pair('arm-length', DEFAULTS.armL), armZ: pair('arm-height', DEFAULTS.armZ),
+    braceP: num('braces', DEFAULTS.braceP), secondaryP: num('secondaries', DEFAULTS.secondaryP), postP: num('posts', DEFAULTS.postP),
+    beamSpliceP: num('beam-splices', DEFAULTS.beamSpliceP), trussK: num('trusses', DEFAULTS.trussK), rodP: num('rods', DEFAULTS.rodP),
+    colSpliceP: num('col-splice', DEFAULTS.colSpliceP),
+  },
   cat,
   detail,
 );
