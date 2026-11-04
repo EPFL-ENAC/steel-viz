@@ -5,7 +5,7 @@
 <script setup lang="ts">
 import { computed, ref, shallowRef, watch, watchEffect } from 'vue';
 import { BEAM_CONN_KINDS, BRACING_KINDS, floating, generate } from '../generate.ts';
-import { timeline } from '../steel.ts';
+import { CONNS, timeline, type ConnType } from '../steel.ts';
 import Drawing from './Drawing.vue';
 import { anim, here } from './engine.ts';
 import GoodSeeds from './GoodSeeds.vue';
@@ -15,7 +15,7 @@ import Seg from './Seg.vue';
 import Slider from './Slider.vue';
 import { BUILD_KEYS, GROUPS, catalog, dev, params, s, setView, stats, turnTo, type Built } from './state.ts';
 
-const CONN: Record<string, string> = { shear_tab: 'shear tab', end_plate: 'end plate', flange_plates: 'flange plates', welded: 'welded', gusset: 'gusset', gusset_lap: 'lapped gusset' };
+const CONN = (c: ConnType) => CONNS[c].label;
 
 // ---- the structure
 const built = shallowRef<Built | null>(null);
@@ -73,8 +73,8 @@ const members = computed(() => {
   const st = built.value?.r.st;
   if (!st) return [];
   return [
-    ...st.arms.map((a) => [a.id, `${a.sec.id}, ${CONN[a.conn]}${a.braces.map((b) => ', brace ' + b.sec.id).join('')}${a.truss ? ', chord ' + a.truss.chord.id : ''}${a.post ? ', post ' + a.post.sec.id : ''}${a.splice !== undefined ? ', splice' : ''}`]),
-    ...st.secs.map((x) => [x.id, `${x.sec.id}, ${CONN[x.conn]}`]),
+    ...st.arms.map((a) => [a.id, `${a.sec.id}, ${CONN(a.conn)}${a.braces.map((b) => ', brace ' + b.sec.id).join('')}${a.truss ? ', chord ' + a.truss.chord.id : ''}${a.post ? ', post ' + a.post.sec.id : ''}${a.splice !== undefined ? ', splice' : ''}`]),
+    ...st.secs.map((x) => [x.id, `${x.sec.id}, ${CONN(x.conn)}`]),
   ];
 });
 const column = computed(() => {
@@ -158,7 +158,7 @@ async function copy(what: 'svg' | 'link') {
             <label class="epfl-label" for="conn">Beam connections</label>
             <select id="conn" v-model="s.conn" class="epfl-select">
               <option value="auto">The seed picks</option>
-              <option v-for="c in BEAM_CONN_KINDS" :key="c" :value="c">All {{ CONN[c] }}</option>
+              <option v-for="c in BEAM_CONN_KINDS" :key="c" :value="c">All {{ CONN(c) }}</option>
             </select>
           </div>
         </Section>
@@ -172,6 +172,7 @@ async function copy(what: 'svg' | 'link') {
           <Slider id="trusses" v-model="s.trusses" label="Trusses" :min="0" :max="2.5" :step="0.1" :out="`× ${s.trusses.toFixed(1)}`" />
           <Slider id="rods" v-model="s.rods" label="Tension rods" :min="0" :max="1" :step="0.05" :out="pct(s.rods)" />
           <Slider id="colSplice" v-model="s.colSplice" label="Column splice" :min="0" :max="1" :step="0.05" :out="pct(s.colSplice)" />
+          <Slider id="connKinds" v-model="s.connKinds" label="More connection kinds" :min="0" :max="1" :step="0.05" :out="pct(s.connKinds)" />
         </Section>
 
         <Section id="view" title="View" :keys="GROUPS.view" open>

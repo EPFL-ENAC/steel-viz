@@ -25,7 +25,7 @@ export function overlap(a: Box, b: Box): boolean {
   return true;
 }
 
-const own = (a: string, b: string) => b === `${a}-from-conn` || b === `${a}-to-conn`;
+export const own = (a: string, b: string) => b === `${a}-from-conn` || b === `${a}-to-conn`;
 
 // every pair of parts that go through each other
 export function clashes(parts: Part[]): [string, string][] {

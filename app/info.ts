@@ -2,13 +2,13 @@
 // a member its section, its length, its connections and its check.
 import type { Result } from '../generate.ts';
 import type { Section } from '../sections.ts';
-import type { Part } from '../steel.ts';
+import { CONNS, type ConnType, type Part } from '../steel.ts';
 
 export type Tip = { title: string; id: string; rows: [string, string][]; warn?: boolean };
 
 const SHAPE: Record<Section['kind'], string> = { I: 'I', C: 'channel', T: 'tee', '2L': 'double angle', RHS: 'tube', ROD: 'round bar' };
+// the beam end kinds have their label in the catalog, these say more
 const CONN: Record<string, string> = {
-  shear_tab: 'shear tab', end_plate: 'end plate', flange_plates: 'flange plates', welded: 'welded',
   gusset: 'gusset, knife plate', gusset_small: 'small gusset', gusset_lap: 'gusset between the angles', clevis: 'clevis and pin',
   bearing: 'bearing', flange: 'flange plates',
 };
@@ -24,7 +24,7 @@ function dims(s: Section): string {
     default: return `d ${n1(s.d)}, bf ${n1(s.bf)}, tw ${n1(s.tw)}, tf ${n1(s.tf)} mm`;
   }
 }
-const conns = (cs: string[]) => [...new Set(cs)].map((c) => CONN[c] ?? c).join(', ');
+const conns = (cs: string[]) => [...new Set(cs)].map((c) => CONN[c] ?? CONNS[c as ConnType]?.label ?? c).join(', ');
 
 export function describe(part: Part, r: Result): Tip {
   const info = part.info ?? { type: part.kind ?? 'part' };

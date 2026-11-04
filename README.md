@@ -56,6 +56,26 @@ Then come posts and beam splices, each from a draw of its own (`postP` and `beam
 - Post: a short column, 400 to 900 mm high, on the top flange of a beam. It has a base plate bolted to the flange with 4 bolts, and a cap plate. It is free at the top. It goes on an arm that sticks out (with no rod and no truss, and only if the column has room above it), or on a bay beam of the top storey. At most 2 in a structure. Its flanges are not wider than the beam flange. The solver takes it: it is fixed on the beam, and it brings the load of 800 mm of beam as a point load at its top. The solver sizes it, and if the structure does not stand up with the posts, they are left out.
 - Beam splice: a bay beam of 2000 mm or more, with no truss, is cut in two pieces. Bolted plates on both flanges and on the web join them, the same plates as a flange splice of a column. The cut is between 20 and 40 % of the span from one end, where the moment is small, and clear of the end plates, the braces, the secondary beams and a post. A box gets it less often, because it has many bay beams. It is a full strength splice, so the solver keeps the beam in one piece.
 
+### Beam end connections
+
+Each beam end has one kind of connection. The kinds are a small catalog, `CONNS` in `steel.ts`. Each entry says where the kind fits, if the solver takes it as a pin or a moment, its setback (the gap the beam leaves at its end), how far its plates go past the beam on the support, and how to draw its plates, bolts and clash boxes. A new kind is one entry there.
+
+| kind | `--conn` | fits | solver | parts |
+|---|---|---|---|---|
+| shear tab | `shear_tab` | column flange, column web, beam | pin | one plate in the web plane, one line of bolts through the beam web |
+| end plate | `end_plate` | column flange, column web, beam | moment | a plate on the beam end, bolted to the face. On a column it is extended, with bolts above and below the flanges. On a beam it is flush. |
+| flange plates | `flange_plates` | column flange, column web | moment | a bolted plate on each flange, welded to the face |
+| welded | `welded` | column flange, column web, beam | moment | no plate |
+| clip angles | `clip_angles` | column flange, column web, beam | pin | two angles, one on each side of the beam web. One line of bolts through both angles and the web, two lines into the face. |
+| seated | `seated` | column flange, column web | pin | a seat angle under the bottom flange, bolted to the face, and a small angle on the top flange |
+| stiffened seat | `stiffened_seat` | column flange, column web | pin | a seat plate under the bottom flange on a welded stiffener, and a small angle on the top flange |
+| tee | `tee` | column flange, column web, beam | pin | a WT: its flange bolted to the face, its stem bolted to the beam web. On a channel, the stem is on the side away from its flanges. |
+| stiffened end plate | `end_plate_stiffened` | column flange, column web | moment | the extended end plate, with a triangle stiffener above the top flange and below the bottom flange |
+
+The fix loop and the sizing only use the first four kinds. The other five come after, from a draw of their own (`connKindsP`, 0.35 by default). Each beam end takes one draw, keyed by its id like the member shapes, so the result doesn't depend on the order of the draws. Under `connKindsP`, the end gets a kind that can take the place of the one it has, and that fits where it lands. Clip angles, the two seats and the tee take the place of a shear tab. The stiffened end plate takes the place of an end plate. Each one has the same pin or moment and the same setback as the kind it replaces. So the solver, the sections and the members don't change, only the plates at the end. A secondary beam on a beam can only get clip angles or a tee. A truss chord keeps its kind.
+
+The column splice keeps clear of the seats and the end plates. A new kind that would go through another part goes back to the old one. With `connKindsP` at 0, a seed gives the same parts as before these kinds (`params.test.ts` checks it). With `--conn` set to one kind, there is no draw: every beam end that can take it gets it.
+
 A detail plate that would go through another part is left out. For example, a continuity plate on the side of the web where another beam frames in.
 
 ### The look settings
@@ -69,7 +89,7 @@ Arms, height and load are not the only knobs. These `Params` in `generate.ts` ch
 | `bracing` | auto | `--bracing none\|knee\|chevron\|diagonal` | Layout, bracing | the bracing of every bay storey |
 | `armL` | 0.3, 0.7 | `--arm-length 0.3,0.7` | Layout, arm length | the band of arm lengths, as a part of the height. Portal side arms take 3/4 of the band. |
 | `armZ` | 0.35, 0.95 | `--arm-height 0.35,0.95` | Layout, arm height | the band of heights where arms leave the column |
-| `conn` | auto | `--conn shear_tab\|end_plate\|flange_plates\|welded` | Layout, connections | the beam connection. A secondary beam keeps its own when it can't take this one. |
+| `conn` | auto | `--conn shear_tab\|end_plate\|...` (see "Beam end connections") | Layout, connections | the beam connection. A secondary beam keeps its own when it can't take this one. |
 | `braceP` | 0.3 | `--braces` | Details | the chance of braces on an arm |
 | `secondaryP` | 0.35 | `--secondaries` | Details | the chance of secondary beams |
 | `postP` | 0.3 | `--posts` | Details | the chance of posts |
@@ -77,6 +97,7 @@ Arms, height and load are not the only knobs. These `Params` in `generate.ts` ch
 | `trussK` | 1 | `--trusses` | Details | multiplies the truss chances (0 for none) |
 | `rodP` | 0.4 | `--rods` | Details | the chance of a tension rod |
 | `colSpliceP` | 0.6 | `--col-splice` | Details | the chance of a column splice |
+| `connKindsP` | 0.35 | `--conn-kinds` | Details, more connection kinds | the chance that a beam end gets one of the newer kinds (see "Beam end connections") |
 
 ```sh
 node cli.ts --seed 5 --form portal --storeys 2 --bracing chevron --conn welded --span 1.4
@@ -110,7 +131,7 @@ The sections are the real ones, so there is no fix loop and no sizing. The solve
 - `bearing`: 0 and 180 put the beam on a column flange, 90 and 270 on the web.
 - `length`: from the column axis to the beam tip, in mm.
 - `at`: the height of the beam centre line above the column foot. By default, half the column height.
-- `connection`: `shear_tab`, `end_plate`, `flange_plates` or `welded`. A beam alone on a shear tab is a mechanism: the log says so, and the drawing still comes out.
+- `connection`: one of the kinds of "Beam end connections" above that fit a column (`shear_tab`, `end_plate`, `flange_plates`, `welded`, `clip_angles`, `seated`, `stiffened_seat`, `tee`, `end_plate_stiffened`). A beam alone on a pinned kind (a shear tab, clip angles, a seat, a tee) is a mechanism: the log says so, and the drawing still comes out.
 - `continuity: false` leaves out the continuity plates. `beams: []` gives a column alone.
 
 From a hub record:

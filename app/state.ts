@@ -40,6 +40,7 @@ const DEFAULTS = {
   trusses: GEN.trussK, // times the usual chance
   rods: GEN.rodP,
   colSplice: GEN.colSpliceP,
+  connKinds: GEN.connKindsP,
   // view
   viewer: '3d', // 3d, svg or both
   compare: 0, // 1: this branch and the base branch side by side (dev server only)
@@ -61,7 +62,7 @@ export type Key = keyof Settings;
 export const GROUPS = {
   structure: ['form', 'arms', 'height', 'load', 'family', 'shapes'],
   layout: ['storeys', 'span', 'bracing', 'armLmin', 'armLmax', 'armZmin', 'armZmax', 'conn'],
-  details: ['braces', 'secondaries', 'posts', 'splices', 'trusses', 'rods', 'colSplice'],
+  details: ['braces', 'secondaries', 'posts', 'splices', 'trusses', 'rods', 'colSplice', 'connKinds'],
   view: ['viewer', 'compare', 'view', 'az', 'el', 'weights', 'detail', 'size'],
   animation: ['duration', 'speed'],
 } satisfies Record<string, Key[]>;
@@ -119,7 +120,7 @@ export const params = (): Partial<Params> => ({
   storeys: s.storeys as Params['storeys'], spanK: s.span, bracing: s.bracing as Params['bracing'],
   armL: [s.armLmin, s.armLmax], armZ: [s.armZmin, s.armZmax], conn: s.conn as Params['conn'],
   braceP: s.braces, secondaryP: s.secondaries, postP: s.posts, beamSpliceP: s.splices,
-  trussK: s.trusses, rodP: s.rods, colSpliceP: s.colSplice,
+  trussK: s.trusses, rodP: s.rods, colSpliceP: s.colSplice, connKindsP: s.connKinds,
 });
 
 const TABLES: Record<Family, [string, string, string, string]> = { aisc: [aiscI, aiscHss, aiscC, aiscL], eu: [euI, euHss, euC, euL] };

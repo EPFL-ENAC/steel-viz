@@ -14,10 +14,10 @@ import { buckling, solve, type Elem, type FNode, type Solved } from './solver.ts
 import { memberRatio } from './checks.ts';
 import type { Catalog, Section } from './sections.ts';
 import {
-  box3, boxOf, flat, geo, hardware, memberBoxes, memberFaces, resolve, splicePlates, stiffener, supportFace, BEARING_T, EDGE, PINNED, SETBACK, SPLICE_HALF,
-  type ConnType, type Geo, type P2, type Part, type PartInfo, type Plate,
+  box3, boxOf, flat, geo, hardware, memberBoxes, memberFaces, resolve, splicePlates, stiffener, supportFace, BEARING_T, BEAM_CONN_KINDS, CONNS, EDGE, PINNED, SETBACK, SPLICE_HALF,
+  type BeamConn, type ConnType, type Fit, type Geo, type P2, type Part, type PartInfo, type Plate,
 } from './steel.ts';
-import { overlap } from './clash.ts';
+import { overlap, own } from './clash.ts';
 import { BEAM_CONNS, findSection, type Specimen } from './specimen.ts';
 
 export type Detail = 'members' | 'plates' | 'bolts';
@@ -31,6 +31,10 @@ export type Params = {
   secondaryP: number;
   postP: number; // the chance of a post, on each beam that can take one
   beamSpliceP: number; // the chance of a splice, on each long bay beam (less on a box)
+  // the chance that a beam end gets one of the newer kinds (clip angles,
+  // seats, tee, stiffened end plate), from a stream of its own. 0: only the
+  // kinds of before, so the same parts as before these kinds.
+  connKindsP: number;
   // the chance that a member gets a channel, angle or tee section: the braces
   // of an arm (double angles), a secondary beam (a channel), a truss bottom
   // chord (a tee). 0: only I, tubes and rods, as before these shapes.
@@ -52,7 +56,7 @@ export type Params = {
   specimen?: Specimen; // a real test: seed, form, arms, height, braceP and secondaryP are not used
 };
 export const DEFAULTS: Params = {
-  seed: 1, arms: 8, height: 2500, load: 100, fy: 345, braceP: 0.3, secondaryP: 0.35, postP: 0.3, beamSpliceP: 0.3, shapeP: 0.35,
+  seed: 1, arms: 8, height: 2500, load: 100, fy: 345, braceP: 0.3, secondaryP: 0.35, postP: 0.3, beamSpliceP: 0.3, connKindsP: 0.35, shapeP: 0.35,
   storeys: 0, spanK: 1, bracing: 'auto', armL: [0.3, 0.7], armZ: [0.35, 0.95], conn: 'auto', trussK: 1, rodP: 0.4, colSpliceP: 0.6,
   seg: 400, form: 'mix',
 };
@@ -143,9 +147,10 @@ function pick<T extends string>(rng: () => number, w: Record<T, number>): T {
   for (const [k, v] of Object.entries<number>(w)) if ((x -= v) < 0) return k as T;
   return Object.keys(w)[0] as T;
 }
+// the draw of a beam end. The kinds added later are not in it: they come
+// from a stream of their own (moreKinds), so the seeds keep their draws.
 const BEAM_CONN = { shear_tab: 0.4, end_plate: 0.2, flange_plates: 0.2, welded: 0.2 };
-export type BeamConn = keyof typeof BEAM_CONN;
-export const BEAM_CONN_KINDS = Object.keys(BEAM_CONN) as BeamConn[];
+export { BEAM_CONN_KINDS, type BeamConn };
 const SEC_CONN = { shear_tab: 0.6, end_plate: 0.25, welded: 0.15 };
 const BRACING = { none: 0.2, knee: 0.3, chevron: 0.3, diagonal: 0.2 };
 export type Bracing = keyof typeof BRACING;
@@ -190,7 +195,7 @@ function tree(p: Params, cat: Catalog, rng: () => number): Structure {
 
 const secConn = (p: Params, rng: () => number): ConnType => {
   const c = pick(rng, SEC_CONN);
-  return p.conn !== 'auto' && p.conn in SEC_CONN ? p.conn : c;
+  return p.conn !== 'auto' && CONNS[p.conn].fits!.includes('beam') ? p.conn : c;
 };
 
 function secondaries(p: Params, cat: Catalog, rng: () => number, arms: Arm[]): Secondary[] {
@@ -689,20 +694,23 @@ function fix(st: Structure, m: Model, nodeIdx: number, cat: Catalog, rng: () => 
         log.push(`${a.id}: mechanism, added a brace`);
         return true;
       }
+      const old = a.conn;
       a.conn = pick(rng, { end_plate: 1, flange_plates: 1, welded: 1 });
-      log.push(`${a.id}: mechanism, shear tab -> ${a.conn}`);
+      log.push(`${a.id}: mechanism, ${CONNS[old].label} -> ${a.conn}`);
       return true;
     }
     if (a.conn2 && PINNED.includes(a.conn2)) {
+      const old = a.conn2;
       a.conn2 = pick(rng, { end_plate: 1, flange_plates: 1, welded: 1 });
-      log.push(`${a.id}: mechanism, far end shear tab -> ${a.conn2}`);
+      log.push(`${a.id}: mechanism, far end ${CONNS[old].label} -> ${a.conn2}`);
       return true;
     }
   }
   for (const s of st.secs.filter((s) => who.includes(s.id))) {
     if (!PINNED.includes(s.conn)) continue;
+    const old = s.conn;
     s.conn = rng() < 0.6 ? 'end_plate' : 'welded';
-    log.push(`${s.id}: mechanism, shear tab -> ${s.conn}`);
+    log.push(`${s.id}: mechanism, ${CONNS[old].label} -> ${s.conn}`);
     return true;
   }
   return false;
@@ -877,6 +885,63 @@ function braceGeo(st: Structure, a: Arm, b: Brace, k: number, S: Geo) {
   return { g: geo(braceId(a, k), b.sec, add(B, mul(un, t0)), sub(C, mul(un, t1)), false), conn, hb };
 }
 
+// More kinds of beam end, from a stream of their own. Each end takes one
+// keyed draw, like shaped(): an arm end (key `arm3-from`, `arm3-to`) or a
+// secondary beam (its id). Under connKindsP, the end gets a kind that can
+// take the place of the one it has (`replaces` in CONNS) and fits where it
+// lands. Same pin or moment and same setback: the solver, the sections and
+// the lengths don't change, only the plates at the end. p.conn set by hand
+// wins: no change.
+// part: the id of its plates (a beam splice, picked later, renames the far piece)
+type Swap = { key: string; part: () => string; old: ConnType; set: (c: ConnType) => void };
+function moreKinds(st: Structure, p: Params, log: string[]): Swap[] {
+  if (p.connKindsP <= 0 || p.conn !== 'auto') return [];
+  const swaps: Swap[] = [];
+  const swap = (key: string, part: () => string, old: ConnType, fit: Fit, set: (c: ConnType) => void) => {
+    const rng = mulberry32(p.seed * 86028121 + fnv1a(key));
+    if (rng() >= p.connKindsP) return;
+    const ks = BEAM_CONN_KINDS.filter((k) => CONNS[k].replaces === old && CONNS[k].fits!.includes(fit));
+    if (!ks.length) return;
+    set(ks[Math.floor(rng() * ks.length)]);
+    swaps.push({ key, part, old, set });
+  };
+  for (const a of st.arms) {
+    // on a column: its flange or its web
+    const fit: Fit = a.bearing % 180 === 0 ? 'flange' : 'web';
+    swap(`${a.id}-from`, () => `${a.id}-from-conn`, a.conn, fit, (c) => (a.conn = c));
+    if (a.conn2) swap(`${a.id}-to`, () => `${a.splice === undefined ? a.id : farId(a)}-to-conn`, a.conn2, fit, (c) => (a.conn2 = c));
+  }
+  for (const s of st.secs) swap(s.id, () => `${s.id}-from-conn`, s.conn, 'beam', (c) => (s.conn = c));
+  if (swaps.length) log.push(`more connection kinds: ${swaps.map((w) => `${w.key} ${CONNS[kindOf(st, w)].label}`).join(', ')}`);
+  return swaps;
+}
+// the kind an end has now
+function kindOf(st: Structure, w: Swap): ConnType {
+  for (const a of st.arms) {
+    if (w.key === `${a.id}-from`) return a.conn;
+    if (w.key === `${a.id}-to`) return a.conn2!;
+  }
+  return st.secs.find((s) => s.id === w.key)!.conn;
+}
+// A new kind that goes through another part (a brace gusset, a rod, the
+// plates of a beam on the other face) goes back to the old one.
+function keepFits(st: Structure, p: Params, swaps: Swap[], log: string[]) {
+  const ps = parts(st, 'plates', p.seg);
+  for (const w of swaps) {
+    const id = w.part();
+    const mine = ps.find((q) => q.id === id);
+    const member = id.replace(/-(from|to)-conn$/, '');
+    const hit = mine?.boxes?.length && ps.some((q) => q !== mine && q.id !== member && !own(member, q.id) && q.boxes?.some((b) => mine.boxes!.some((a) => overlap(a, b))));
+    if (!hit) continue;
+    log.push(`${w.key}: ${CONNS[kindOf(st, w)].label} goes through another part, back to ${CONNS[w.old].label}`);
+    w.set(w.old);
+  }
+}
+
+// how far the plates of the two ends of a beam go past it, below and above
+const past = (...cs: (ConnType | undefined)[]): [number, number] =>
+  [0, 1].map((i) => Math.max(16, ...cs.map((c) => (c ? CONNS[c].past?.[i] ?? 0 : 0)))) as [number, number];
+
 // The splice and the other heights that were free, nearest first
 function pickSplice(st: Structure, p: Params, rng: () => number): { sp: Splice; alts: number[] } | undefined {
   if (rng() >= p.colSpliceP || st.H < 2000) return undefined;
@@ -886,13 +951,13 @@ function pickSplice(st: Structure, p: Params, rng: () => number): { sp: Splice; 
   const busy: [number, number][] = [[0, 400]];
   for (const a of st.arms) {
     // an extended end plate reaches 90 mm past the flanges, flange plates 16
-    const ext = [a.conn, a.conn2].includes('end_plate') ? 90 : 16;
-    busy.push([a.z - a.sec.d - ext, a.z + ext]);
+    const [lo, hi] = past(a.conn, a.conn2);
+    busy.push([a.z - a.sec.d - lo, a.z + hi]);
     for (const b of a.braces) busy.push([b.zb - 300, b.zb + 300]);
     if (a.truss) {
       const zc = a.z - a.truss.D;
-      const e = [a.truss.conn, a.truss.conn2].includes('end_plate') ? 90 : 16;
-      busy.push([zc - a.truss.chord.d - e, zc + e]);
+      const [lo, hi] = past(a.truss.conn, a.truss.conn2);
+      busy.push([zc - a.truss.chord.d - lo, zc + hi]);
     }
     if (a.rod) busy.push([a.rod.zr - 400, a.rod.zr + 100]);
   }
@@ -1148,7 +1213,7 @@ const pieceAt = (armGeo: Map<string, Geo>, a: Arm, t: number): Geo =>
 // The small plates that make a frame look built: a cap on each column, plates
 // across the column where a moment beam pulls on its flanges, stiffeners in a
 // beam where a brace pushes up, gussets at the column feet.
-const MOMENT: ConnType[] = ['end_plate', 'flange_plates', 'welded'];
+const moment = (c: ConnType) => !CONNS[c].pinned && CONNS[c].fits !== undefined;
 function details(
   st: Structure, cols: { lo: Geo; hi: Geo }[], armGeo: Map<string, Geo>, colAt: (ci: number, z: number) => Geo,
   extra: (id: string, on: string, ps: Plate[], from: V, type: string) => void,
@@ -1169,7 +1234,7 @@ function details(
       ...(a.truss ? [[a.col, a.truss.conn, a.bearing, a.z - a.truss.D, a.truss.chord], [a.to, a.truss.conn2, a.bearing + 180, a.z - a.truss.D, a.truss.chord]] : []),
     ] as [number | undefined, ConnType | undefined, number, number, Section][]);
     for (const [ci2, conn, bearing, zt, sec] of st.continuity === false ? [] : beamEnds) {
-      if (ci2 !== ci || !conn || !MOMENT.includes(conn) || bearing % 180 !== 0) continue;
+      if (ci2 !== ci || !conn || !moment(conn) || bearing % 180 !== 0) continue;
       for (const z of sec.kind === 'T' ? [zt - sec.tf / 2] : [zt - sec.tf / 2, zt - sec.d + sec.tf / 2])
         if (levels.every((l) => Math.abs(l - z) > 30)) levels.push(z);
     }
@@ -1355,6 +1420,9 @@ export function generate(p0: Partial<Params>, cat: Catalog, detail: Detail = 'bo
       }
     }
   }
+  // more kinds of beam end, from a draw of their own (before the details:
+  // the column splice keeps clear of their plates)
+  const swaps = ok ? moreKinds(st, p, log) : [];
   // the details, from a draw of their own
   const det = mulberry32(p.seed * 15485863 + 3);
   const b = det();
@@ -1399,6 +1467,7 @@ export function generate(p0: Partial<Params>, cat: Catalog, detail: Detail = 'bo
     addBeamSplices(st, p, mulberry32(p.seed * 32452843 + 11), log);
     dropSplicesOnGussets(st, p, log);
   }
+  if (swaps.length) keepFits(st, p, swaps, log);
   log.push(alphaLog(alpha, amp));
   log.push(`${sized} sizing passes, final max ratio ${ratio.toFixed(2)} (limit ${LIMIT})`);
   const t2 = performance.now();
