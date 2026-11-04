@@ -25,31 +25,18 @@
 //
 // Line widths are in mm at the drawing scale, or in px when `size` says
 // how many px wide the drawing will be shown (a logo, a favicon).
-import { BufferAttribute, BufferGeometry, DoubleSide, Mesh, MeshBasicMaterial, Ray, ShapeUtils, Vector2, Vector3 } from 'three';
+import { BufferAttribute, BufferGeometry, DoubleSide, Mesh, MeshBasicMaterial, Ray, Vector3 } from 'three';
 import { MeshBVH } from 'three-mesh-bvh';
 import { ProjectionGenerator } from 'three-edge-projection/src/ProjectionGenerator.js';
 import { add, cross, dot, mul, norm, sub, type V } from './vec.ts';
 import { BOLT_MS, camera, forSize, timeline, type Face, type Part, type RenderOpts } from './steel.ts';
+import { triangles } from './triangles.ts';
 
 const HEAD = 13; // bolt head height, mm (M20)
 const SOLID = 400; // px: up to this drawing size, bolt heads are solid
 const DEEP = 50; // mm: a jump in depth bigger than this makes an outline
 const SIDE = 1.5; // mm: how far beside (or past the end of) a line we look
 const FRONT = 5; // mm: a surface this much in front of a line end hides it
-
-// triangles of a planar polygon (webgl.ts uses it too)
-export function triangles(pts: V[], out: number[]) {
-  if (pts.length === 3 || pts.length === 4) {
-    for (let i = 1; i + 1 < pts.length; i++) out.push(...pts[0], ...pts[i], ...pts[i + 1]);
-    return;
-  }
-  // not always convex (the end of an I section): earcut in the face plane
-  const n = norm(cross(sub(pts[1], pts[0]), sub(pts[2], pts[0])));
-  const e1 = norm(sub(pts[1], pts[0]));
-  const e2 = cross(n, e1);
-  const flat = pts.map((p) => new Vector2(dot(sub(p, pts[0]), e1), dot(sub(p, pts[0]), e2)));
-  for (const [a, b, c] of ShapeUtils.triangulateShape(flat, [])) out.push(...pts[a], ...pts[b], ...pts[c]);
-}
 
 // a hex head: its corners, and its faces
 function hexHead(b: V, nn: V, R: number): { corners: V[]; faces: Face[] } {
