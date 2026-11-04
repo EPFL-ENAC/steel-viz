@@ -76,8 +76,11 @@ watch([diff, baseNote], () => {
   stats.base = n.length || d.notes.length ? [...n, ...d.notes].join(', ') : 'same parts';
 });
 
-// zoom and pan: from one WebGL view to the other
+// zoom and pan: from one WebGL view to the other. Not in the template: there
+// the refs are unwrapped, so to.value would be undefined.
 const follow = (to: typeof mine, f: Frame | null) => to.value?.setFrame(f);
+const toTheirs = (f: Frame | null) => follow(theirs, f);
+const toMine = (f: Frame | null) => follow(mine, f);
 
 // ---- turn the SVG with the mouse or a finger (the WebGL view turns itself)
 let drag: { x: number; y: number; az: number; el: number; moved: boolean } | null = null;
@@ -131,7 +134,7 @@ defineExpose({ svg: () => mine.value?.svg() ?? '', diff });
       :replay="replay"
       :turning="turning"
       :label="compare ? dev?.branch : undefined"
-      @frame="(f) => follow(theirs, f)"
+      @frame="toTheirs"
     />
     <template v-if="compare">
       <Pane
@@ -143,7 +146,7 @@ defineExpose({ svg: () => mine.value?.svg() ?? '', diff });
         :replay="replay"
         :turning="turning"
         :label="`${baseName}, at ${dev?.base.sha}`"
-        @frame="(f) => follow(mine, f)"
+        @frame="toMine"
       />
       <div v-if="baseNote" class="pane note-pane"><p class="note">{{ baseNote }}</p></div>
     </template>

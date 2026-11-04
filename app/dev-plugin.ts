@@ -3,7 +3,9 @@
 // - /__dev/base.js: the generator and the renderers of the base branch, bundled
 //   from `git archive` of the merge base with PLAYGROUND_BASE (default main).
 //   It sets globalThis.BASE (see app/engine.ts). Kept per commit in
-//   node_modules/.cache. With the WebGL viewer, so three.js too.
+//   node_modules/.cache. With its WebGL viewer (and three.js) only when that
+//   viewer has setFrame(): an older one can't zoom with ours, so the page
+//   draws the base structure with the viewer of this checkout (app/engine.ts).
 // - A change outside app/ (generator, renderers, tables) reloads the whole
 //   page. The settings live in the URL hash, so they stay.
 import { execFileSync, execSync } from 'node:child_process';
@@ -44,7 +46,8 @@ async function bundleBase(sha: string) {
   // files it has, its loadCatalog() takes as many as it knows
   const tables = (fam: Family) =>
     JSON.stringify([...TABLE_FILES[fam], ...SHAPE_FILES[fam]].map((f) => join(dir, 'sections', f)).filter(existsSync).map((f) => readFileSync(f, 'utf8')));
-  const gl = existsSync(join(dir, 'webgl.ts'));
+  const webgl = join(dir, 'webgl.ts');
+  const gl = existsSync(webgl) && readFileSync(webgl, 'utf8').includes('setFrame');
   const r = await build({
     stdin: {
       // steel.ts as a whole: an export the base does not have yet is just undefined

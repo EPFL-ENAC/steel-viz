@@ -48,7 +48,8 @@ const tipStyle = computed(() => {
 });
 const labels = computed(() => {
   const k = props.label ? `${props.label}, ` : '';
-  return { gl: `${k}3D`, svg: `${k}SVG` };
+  // the base structure in the viewer of this checkout: say so
+  return { gl: `${k}3D${props.engine.ownViewer ? '' : ', viewer of this branch'}`, svg: `${k}SVG` };
 });
 
 // line weights: auto is one in WebGL, two in the SVG
