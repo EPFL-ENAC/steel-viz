@@ -3,7 +3,8 @@
 //   [--form mix|tree|portal|box] [--animate] [--frames] [--painter] [--flat] [--size px]
 //   [--shapes 0.35] (the chance of a channel, double angle or tee member, 0 for none)
 //   the look (see Params in generate.ts): [--storeys 0|1|2] [--span 1] [--bracing auto|none|knee|chevron|diagonal]
-//   [--conn auto|shear_tab|end_plate|flange_plates|welded] [--arm-length 0.3,0.7] [--arm-height 0.35,0.95]
+//   [--conn auto|shear_tab|end_plate|flange_plates|welded|clip_angles|seated|stiffened_seat|tee|end_plate_stiffened]
+//   [--arm-length 0.3,0.7] [--arm-height 0.35,0.95]
 //   [--braces 0.3] [--secondaries 0.35] [--posts 0.3] [--beam-splices 0.3] [--trusses 1] [--rods 0.4] [--col-splice 0.6] [--conn-kinds 0.35]
 // node cli.ts --specimen specimens/Chi_and_Uang_2002_DC2.json --view iso
 //   a real test from a JSON file (specimen.ts), with the same view and drawing options
