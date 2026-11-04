@@ -1,20 +1,29 @@
-// A real test specimen, drawn from its sections instead of a seed.
-//
-// v1 draws a beam-to-column subassembly: one column, and one or two beams on
-// it. That is what the `connection` table of RESSLab Hub describes (99 of its
-// 100 tests). hub.ts reads the records of the hub tables into these types.
+// A real test specimen, drawn from its sections instead of a seed. `test`
+// says which kind of test:
+// - connection (the default): a beam-to-column subassembly, one column and
+//   one or two beams on it (the `connection` table of RESSLab Hub). It goes
+//   to buildSpecimen in generate.ts.
+// - brace: one brace, alone or in a test frame (the `braces` table). It goes
+//   to buildBrace in bench.ts.
+// hub.ts reads the records of the hub tables into these types.
 //
 // No three.js here: this file only needs the section formulas.
-import { chsSection, iSection, rhsSection, type Catalog, type Family, type Section } from './sections.ts';
+import { chsSection, doubleAngleOf, iSection, rhsSection, rodSection, teeSection, type Catalog, type Family, type Section } from './sections.ts';
 import { BEAM_CONN_KINDS, type ConnType } from './steel.ts';
 
 // A name from the section tables ('W14X82', 'HE 300 B', also written
 // 'W14x82', 'HEB 300'), a built-up name ('H-700x300x13x24': d x bf x tw x tf),
-// or the dimensions in mm. A round tube (CHS) has a diameter d and a wall t.
+// or the dimensions in mm:
+// - I, RHS, T: depth d, width bf, flange tf, web tw (a tee: d is the full depth)
+// - CHS (round tube): diameter d, wall t. ROD (round bar): diameter d.
+// - 2L (two angles back to back): d the leg along the gap, b the outstanding
+//   leg of one angle, t the thickness
 export type SectionRef =
   | string
-  | { id: string; shape?: 'I' | 'RHS'; d: number; bf: number; tf: number; tw: number }
-  | { id: string; shape: 'CHS'; d: number; t: number };
+  | { id: string; shape?: 'I' | 'RHS' | 'T'; d: number; bf: number; tf: number; tw: number }
+  | { id: string; shape: 'CHS'; d: number; t: number }
+  | { id: string; shape: 'ROD'; d: number }
+  | { id: string; shape: '2L'; d: number; b: number; t: number };
 
 export type SpecimenBeam = {
   section: SectionRef;
@@ -24,7 +33,8 @@ export type SpecimenBeam = {
   connection: ConnType; // one of BEAM_CONNS: shear_tab, end_plate, flange_plates, welded, ...
 };
 
-export type Specimen = {
+export type ConnSpecimen = {
+  test?: 'connection';
   id: string; // the hub id, for example 'Chi_and_Uang_2002_DC2'
   family?: Family; // the section table for section names (default aisc)
   column: { section: SectionRef; height: number };
@@ -35,6 +45,32 @@ export type Specimen = {
   load?: 'beam' | 'column';
   notes?: string[]; // what we draw differently from the real test, copied into the log
 };
+
+// A brace test. The brace is in a vertical plane, `angle` above the
+// horizontal, `length` between its two work points.
+// - frame SB: the brace alone, its bottom end on a floor block, its top end
+//   under a loading beam that an actuator pushes.
+// - SBF: the brace in a one bay frame of the rig, from a foot corner to the
+//   opposite top corner.
+// - DBF: two braces in an X in the same frame (each one `length` long).
+// - ends gusset: a gusset plate at each end, the tube on it from `clear / 2`
+//   before the end. fixed: an end plate on a seat. pin: an end plate on a
+//   pin joint (the work point is the pin).
+export type BraceSpecimen = {
+  test: 'brace';
+  id: string;
+  family?: Family;
+  section: SectionRef;
+  length: number; // mm, between the work points (l_b)
+  clear?: number; // mm, between the two gussets (l_b_clear)
+  angle: number; // degrees above the horizontal
+  ends: 'gusset' | 'fixed' | 'pin';
+  plates?: { top?: number; bottom?: number }; // mm, the thickness of the gussets or the end plates
+  frame: 'SB' | 'SBF' | 'DBF';
+  notes?: string[];
+};
+
+export type Specimen = ConnSpecimen | BraceSpecimen;
 
 // the kinds a beam end of a specimen can have
 export const BEAM_CONNS: ConnType[] = BEAM_CONN_KINDS;
@@ -49,19 +85,35 @@ const key = (s: string) => {
 // H-700x300x13x24, H500X200X10X16, BH 400x200x8x13: d x bf x tw x tf
 const BUILT_UP = /^(?:BH|H|I)?[-\s]*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)$/i;
 
+const positive = (id: string, xs: Record<string, number>) => {
+  for (const [k, v] of Object.entries(xs))
+    if (!(typeof v === 'number' && v > 0)) throw new Error(`section ${id}: ${k} must be a number above 0, not ${JSON.stringify(v)}`);
+};
+
 export function findSection(ref: SectionRef, cat: Catalog): Section {
   if (typeof ref !== 'string' && ref.shape === 'CHS') {
     const { id, d, t } = ref;
-    for (const [k, v] of Object.entries({ d, t }))
-      if (!(typeof v === 'number' && v > 0)) throw new Error(`section ${id}: ${k} must be a number above 0, not ${JSON.stringify(v)}`);
+    positive(id, { d, t });
     if (2 * t >= d) throw new Error(`section ${id}: the wall is too thick for its size (d ${d}, t ${t})`);
     return chsSection(id, d, t);
   }
+  if (typeof ref !== 'string' && ref.shape === 'ROD') {
+    positive(ref.id, { d: ref.d });
+    return rodSection(ref.id, ref.d);
+  }
+  if (typeof ref !== 'string' && ref.shape === '2L') {
+    const { id, d, b, t } = ref;
+    positive(id, { d, b, t });
+    if (t >= Math.min(d, b)) throw new Error(`section ${id}: the angles are too thick for their legs (d ${d}, b ${b}, t ${t})`);
+    return doubleAngleOf(id, d, b, t);
+  }
   if (typeof ref !== 'string') {
     const { id, d, bf, tf, tw } = ref;
-    for (const [k, v] of Object.entries({ d, bf, tf, tw }))
-      if (!(typeof v === 'number' && v > 0)) throw new Error(`section ${id}: ${k} must be a number above 0, not ${JSON.stringify(v)}`);
-    if (2 * tf >= d || (ref.shape !== 'RHS' && tw >= bf)) throw new Error(`section ${id}: the plates are too thick for its size (d ${d}, bf ${bf}, tf ${tf}, tw ${tw})`);
+    positive(id, { d, bf, tf, tw });
+    // a tee has one flange, an I two
+    const thick = ref.shape === 'T' ? tf >= d : 2 * tf >= d;
+    if (thick || (ref.shape !== 'RHS' && tw >= bf)) throw new Error(`section ${id}: the plates are too thick for its size (d ${d}, bf ${bf}, tf ${tf}, tw ${tw})`);
+    if (ref.shape === 'T') return teeSection(id, d, bf, tf, tw);
     return ref.shape === 'RHS' ? rhsSection(id, d, bf, tf) : iSection(id, d, bf, tf, tw);
   }
   const k = key(ref);

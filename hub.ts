@@ -9,7 +9,7 @@
 //
 // No three.js and no Node API here: index.ts exports it.
 import type { ConnType } from './steel.ts';
-import type { SectionRef, Specimen, SpecimenBeam } from './specimen.ts';
+import type { BraceSpecimen, ConnSpecimen, SectionRef, Specimen, SpecimenBeam } from './specimen.ts';
 
 export type HubRecord = Record<string, unknown>;
 
@@ -61,7 +61,7 @@ const HUB_CONN: Record<string, [ConnType, string?]> = {
 
 // one record of the hub `connection` table (connections.csv): one column and
 // one or two beams
-export function fromHubConnection(rec: HubRecord): Specimen {
+export function fromHubConnection(rec: HubRecord): ConnSpecimen {
   const id = String(rec.id ?? rec.specimen_designation ?? 'specimen').trim();
   const { text, value, num, unsupported } = fields(rec, id);
   const type = text('specimen_type');
@@ -94,6 +94,81 @@ export function fromHubConnection(rec: HubRecord): Specimen {
   return { id, column: { section: column, height }, beams, continuity: tcp > 0, load, notes };
 }
 
+// ------------------------------------------------------------- braces
+const BRACE_ENDS: Record<string, BraceSpecimen['ends']> = { 'Gusset plate': 'gusset', 'Fixed-fixed end': 'fixed', 'Pin-Pin end': 'pin' };
+// a double angle name: L152x89x9.5 or 2 L89x64x6.4 (long x short x t), 49.7x3.88 (leg x t)
+const ANGLES = /^(?:2\s*)?L?\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)(?:\s*[x×]\s*(\d+(?:\.\d+)?))?$/i;
+
+// one record of the hub `braces` table (steel_braces.csv): one brace, alone
+// (SB) or in a frame (SBF, DBF). The section comes from the numbers, except
+// for double angles (from the name, the numbers don't mean the same thing in
+// every row). In the data t_br is the flange of an I and w_br its web (the
+// data dictionary says the other way round).
+export function fromHubBrace(rec: HubRecord): BraceSpecimen {
+  const id = String(rec.id ?? rec.specimen_ID ?? 'brace').trim();
+  const { text, value, num, unsupported } = fields(rec, id);
+  const notes: string[] = [];
+  const name = text('cross_section_size');
+  const shape = text('cross_section_shape');
+  let section: SectionRef;
+  if (!shape) throw new Error(`${id}: cross_section_shape is missing`);
+  else if (shape === 'Rectangular HSS') {
+    const [d, bf, t] = [num('d_br'), num('b_br'), num('t_br')];
+    section = { id: name || `HSS ${d}x${bf}x${t}`, shape: 'RHS', d, bf, tf: t, tw: t };
+  } else if (shape === 'Circular HSS') {
+    const [d, t] = [num('d_br'), num('t_br')];
+    section = { id: name || `CHS ${d}x${t}`, shape: 'CHS', d, t };
+  } else if (shape === 'Round Bar') {
+    const d = num('d_br');
+    section = { id: name || `RB ${d}`, shape: 'ROD', d };
+  } else if (shape === 'I-shaped') {
+    const [d, bf, tf, tw] = [num('d_br'), num('b_br'), num('t_br'), num('w_br')];
+    const tee = /^WT/i.test(name);
+    if (tee) notes.push(`${name} is a tee, drawn as a tee (cross_section_shape says I-shaped)`);
+    section = { id: name || `H ${d}x${bf}x${tw}x${tf}`, shape: tee ? 'T' : 'I', d, bf, tf, tw };
+  } else if (shape === 'Double Angle') {
+    const m = ANGLES.exec(name);
+    let [long, short, t] = m ? (m[3] ? [m[1], m[2], m[3]] : [m[1], m[1], m[2]]).map(Number) : [NaN, NaN, NaN];
+    if (!m) {
+      // no name to read: the long leg in d_br, both short legs in b_br
+      [long, short, t] = [num('d_br'), num('b_br') / 2, num('t_br')];
+      notes.push(`double angle sizes from d_br and b_br (the name "${name}" does not read)`);
+    } else if (Number.isFinite(value('t_br')) && Math.abs(value('t_br') - t) > 0.05)
+      notes.push(`t_br ${value('t_br')} does not match the name ${name}, drawn ${t} thick`);
+    section = { id: m ? `2L${name.replace(/^(?:2\s*)?L?\s*/i, '')}` : `2L ${long}x${short}x${t}`, shape: '2L', d: long, b: short, t };
+  } else throw unsupported('cross_section_shape');
+
+  const length = num('l_b');
+  const c = value('l_b_clear');
+  let angle = value('brace_angle');
+  if (!Number.isFinite(angle)) {
+    angle = 45;
+    notes.push('brace_angle is not given, drawn at 45°');
+  } else if (!(angle > 0 && angle < 90)) throw unsupported('brace_angle');
+  let frame = text('configuration').toUpperCase();
+  if (!frame) {
+    frame = 'SB';
+    notes.push('configuration is not given, drawn as a single brace (SB)');
+  } else if (frame !== 'SB' && frame !== 'SBF' && frame !== 'DBF') throw unsupported('configuration');
+  const bc = text('boundary_condition');
+  if (!bc) throw new Error(`${id}: boundary_condition is missing`);
+  const ends = BRACE_ENDS[bc];
+  if (!ends) throw unsupported('boundary_condition');
+  // the plate thickness. Some rows have the end type there instead.
+  const plate = (f: string) => {
+    const x = value(f);
+    if (x > 0) return mm(x);
+    if (text(f) && !Number.isFinite(x)) notes.push(`${f} says "${text(f)}", not a thickness (the ends follow boundary_condition "${bc}")`);
+    return undefined;
+  };
+  const [top, bottom] = [plate('t_t'), plate('t_b')];
+  if (ends === 'gusset') notes.push('the gussets have a generic outline: l_1t to l_8b are not used');
+  return {
+    test: 'brace', id, section, length, ...(Number.isFinite(c) ? { clear: mm(c) } : {}), angle, ends,
+    plates: { top, bottom }, frame: frame as BraceSpecimen['frame'], notes,
+  };
+}
+
 // ------------------------------------------------------------- any record
 // a JSON object: our own Specimen, or a hub record (the reader is picked from
 // a field only its table has)
@@ -101,6 +176,9 @@ export function toSpecimen(json: unknown): Specimen {
   if (!json || typeof json !== 'object' || Array.isArray(json)) throw new Error('a specimen must be a JSON object');
   const o = json as HubRecord;
   if ('specimen_type' in o) return fromHubConnection(o);
-  if ('column' in o) return { beams: [], ...(o as Partial<Specimen>) } as Specimen;
-  throw new Error('not a specimen: no "column" (a Specimen) and no "specimen_type" (a hub connection record)');
+  if ('brace_angle' in o) return fromHubBrace(o);
+  if (o.test === 'brace') return o as BraceSpecimen;
+  if (o.test !== undefined && o.test !== 'connection') throw new Error(`test "${String(o.test)}" is not known (connection or brace)`);
+  if ('column' in o) return { beams: [], ...(o as Partial<ConnSpecimen>) } as ConnSpecimen;
+  throw new Error('not a specimen: no "column" or "test" (a Specimen), no "specimen_type" or "brace_angle" (a hub record)');
 }

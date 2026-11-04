@@ -5,7 +5,7 @@ Steel structures drawn like a technical drawing, with a 3D view and a build anim
 What RESSLab Hub uses it for:
 
 - Now: the logo. The hub takes an exported SVG, not this code.
-- Next: the build animation as a loading animation, then a view of each experiment in the hub. For that, the repo is also a package with two entries (see "Use as a package" below). The input for the experiments is ready: `--specimen` draws a beam-to-column test from its real sections, not from a seed (see below).
+- Next: the build animation as a loading animation, then a view of each experiment in the hub. For that, the repo is also a package with two entries (see "Use as a package" below). The input for the experiments is ready: `--specimen` draws a beam-to-column test or a brace test from its real sections, not from a seed (see below).
 
 What comes next is in [ROADMAP.md](ROADMAP.md).
 
@@ -108,7 +108,10 @@ A setting can give a mechanism (the status says so), never a clash or a floating
 
 Parts must not go through each other. A secondary beam is coped (its flanges cut back) where it meets the flanges of its arm, and its plate fits between those flanges. A brace stays above the arms under it on the same face of its column, and is long enough that its two gussets don't touch. `clash.ts` checks this with boxes, and `geometry.test.ts` runs it on every form, 240 structures, and on 72 more with every member in its other shape (`shapeP` 1).
 
-It can also draw a real test of RESSLab Hub instead of a seed: a specimen. For now it draws a beam-to-column subassembly (the test of one connection): one column with one or two beams, in its test rig. That's what the `connection` table of the hub describes, 99 of its 100 tests.
+It can also draw a real test of RESSLab Hub instead of a seed: a specimen. For now it draws two kinds of test, each one in its test rig:
+
+- A beam-to-column subassembly (the test of one connection): one column with one or two beams. That's the `connection` table of the hub, 99 of its 100 tests.
+- A brace test: one brace, alone or in a test frame. That's the `braces` table, 279 of its 294 tests. See "Brace tests" below.
 
 The sections are the real ones, so there is no fix loop and no sizing. The solver runs once, and the log gives `alphaCr` and the max ratio under `--load`, only as information. The end plates and the continuity plates are drawn. Splices, foot gussets, trusses, rods and posts are not.
 
@@ -168,6 +171,36 @@ node cli.ts --specimen specimens/Chi_and_Uang_2002_DC2.json --view iso   # write
 
 `--specimen` takes the same drawing options as a seed (`--view`, `--detail`, `--animate`, `--frames`, `--painter`, `--size`). The family comes from `--family`, else from the file, else aisc. `--seed`, `--form`, `--arms` and `--height` don't apply. `specimen.test.ts` covers the two hub files, the format and the errors.
 
+### Brace tests
+
+A record of the hub `braces` table (it has a `brace_angle`) is a brace test. `bench.ts` draws it. The brace is in a vertical plane, `brace_angle` above the horizontal, with `l_b` between its two work points. There is no solve: the brace is only drawn.
+
+- `configuration` gives the rig. SB: the bottom end on a floor block, the top end under a loading beam, and an actuator pushes the beam from a reaction wall. SBF: a one bay frame around the brace, its columns on pins, the actuator on the top beam. DBF: two braces in an X in the same frame. They are side by side where they cross, and the middle connection is not drawn. `nr` is drawn as SB.
+- `boundary_condition` gives the ends. Gusset plate: a gusset at each end, and the tube runs on it up to `(l_b - l_b_clear) / 2` from the work point. Fixed: an end plate on a seat. Pin: an end plate on a pin joint, the pin at the work point.
+- The rig faces (the floor block, the frame flanges) come as close to the work points as the end details let them.
+- `t_t` and `t_b` give the thickness of the gussets (or end plates). Some rows have the end type there ("Pin-Pin Ended"). Then the thickness is a default, and the log says so.
+- The gussets have a generic outline. `l_1t` to `l_8b` are not used, nobody says what the 8 lengths are.
+
+The section comes from the numbers:
+
+| `cross_section_shape` | drawn as |
+|---|---|
+| Rectangular HSS | a tube, `d_br` x `b_br` x `t_br` |
+| Circular HSS | a round tube, `d_br` x `t_br` |
+| Round Bar | a rod, `d_br` |
+| I-shaped | an I. `t_br` is the flange and `w_br` the web (the data dictionary says the other way round). A `WT` name gives a tee. |
+| Double Angle | from the name. `L152x89x9.5` and `2 L89x64x6.4` are long leg x short leg x t, long legs back to back. `49.7x3.88` has equal legs. `d_br` and `b_br` don't mean the same thing in every row, so they are used only when the name doesn't read. |
+| Angle, Double Channel, Flat Bar | not drawn yet (15 rows) |
+
+A brace test of our own, as JSON:
+
+```json
+{ "test": "brace", "id": "my-brace", "section": "HSS6X6X3/8", "length": 3000, "clear": 2400,
+  "angle": 40, "ends": "gusset", "frame": "SBF", "plates": { "top": 12, "bottom": 12 } }
+```
+
+`brace.test.ts` covers the three hub files of `specimens/` (`Fell_et_al_HSS1-1` SB, `Takeuchi_Matsui_528` SBF, `Wakabayashi_DPC1-1` DBF), every frame with every end type, the section shapes and the errors.
+
 The output is an SVG line drawing with the hidden lines removed. The SVG can also build itself step by step, as an animation.
 
 Two renderers:
@@ -216,8 +249,9 @@ Files:
 - `sections/`, `tables.ts`: the CSV tables (see `sections/README.md`), and how Node reads them.
 - `solver.ts`: 3D frame solver (6 DOF per node, pinned ends, finds mechanisms), and the buckling analysis (`alphaCr`).
 - `checks.ts`: the member checks (AISC 360-22 E3, F2, F6, H1-1).
-- `generate.ts`: topology, the fix loop, trusses and rods, posts and beam splices, and the sizing. Also the specimen path (`buildSpecimen`).
-- `specimen.ts`, `specimens/`: a real test as input (the `Specimen` type, the section lookup), and two hub records as examples and test data.
+- `generate.ts`: topology, the fix loop, trusses and rods, posts and beam splices, and the sizing. Also the specimen path (`buildSpecimen`), and it sends a brace test to `bench.ts`.
+- `bench.ts`: a brace test in its rig (`buildBrace`).
+- `specimen.ts`, `specimens/`: a real test as input (the `Specimen` type, the section lookup), and hub records as examples and test data.
 - `hub.ts`: reads a record of the hub test tables as a `Specimen`. `hub-count.ts` runs it on every row of resslab-hub-data and counts what we can draw (`node hub-count.ts [folder]`).
 - `rig.ts`: the test rig parts (reaction blocks, pins, links, actuators, rollers, rig frame members).
 - `steel.ts`: geometry (profiles, copes, plates, clevis, bolts), camera and the painter renderer.
@@ -244,7 +278,7 @@ The repo is also the package `@epfl-enac/steel-viz`. It is not on npm. The hub t
 
 It has two entries:
 
-- `@epfl-enac/steel-viz`: the light entry. `generate`, `loadCatalog`, the exact drawing `renderHLR`, the painter `render`, `timeline`, `camera`, `VIEWS`, and the specimen input (`toSpecimen`, `fromHubConnection`). It loads no package. `package.test.ts` checks it. Use it for the loading animation and the SVG drawings.
+- `@epfl-enac/steel-viz`: the light entry. `generate`, `loadCatalog`, the exact drawing `renderHLR`, the painter `render`, `timeline`, `camera`, `VIEWS`, and the specimen input (`toSpecimen`, `fromHubConnection`, `fromHubBrace`). It loads no package. `package.test.ts` checks it. Use it for the loading animation and the SVG drawings.
 - `@epfl-enac/steel-viz/3d`: `createViewer` (the WebGL view). It loads no package either, but it is bigger. Import it with a dynamic `import()`, only on the page that needs it, so it stays out of the main bundle.
 
 The package has no section table. The hub has the same CSV files (ours are copies of them), so it passes their text to `loadCatalog()`:
@@ -260,7 +294,7 @@ const [az, el] = VIEWS.iso;
 const { svg } = render(parts, { az, el, animate: true }); // an SVG that builds itself with CSS
 ```
 
-For the EU family, pass `european-sections.csv` and `hss-european-sections.csv` with `'eu'`. A test of the hub goes through `fromHubConnection(record)`, then `generate({ specimen }, catalog)`.
+For the EU family, pass `european-sections.csv` and `hss-european-sections.csv` with `'eu'`. A test of the hub goes through `toSpecimen(record)` (or `fromHubConnection`, `fromHubBrace`), then `generate({ specimen }, catalog)`.
 
 The hub has no channel or angle table, so this catalog has no channels and no double angles: the braces and the secondary beams keep their tube and I sections. The tees still come, because they are made from the I table. To get the same drawing as here, also pass the channel and angle CSV files of `sections/` (`loadCatalog('aisc', iCsv, hssCsv, channelCsv, angleCsv)`). For no other shape at all, pass `shapeP: 0` to `generate()`.
 

@@ -4,15 +4,15 @@
 // is fine, so the safe path is the same formulas for both.
 
 // I: W, IPE, HE. RHS: square tube. ROD: round bar. CHS: round tube (no table
-// has one, only a specimen gives it). C: channel. 2L: two equal angles back to
-// back, ANGLE_GAP apart. T: a tee, half an I.
+// has one, only a specimen gives it). C: channel. 2L: two angles back to back,
+// ANGLE_GAP apart (equal legs in the tables). T: a tee, half an I.
 export type Kind = 'I' | 'RHS' | 'ROD' | 'CHS' | 'C' | '2L' | 'T';
 
 export type Section = {
   id: string;
   kind: Kind;
-  d: number; // depth (2L: the leg)
-  bf: number; // flange width (RHS: width, ROD and CHS: the diameter, 2L: both legs and the gap)
+  d: number; // depth (2L: the leg along the gap)
+  bf: number; // flange width (RHS: width, ROD and CHS: the diameter, 2L: both outstanding legs and the gap)
   tf: number; // flange thickness (RHS and CHS: wall, 2L: angle thickness)
   tw: number; // web thickness (RHS and CHS: wall, 2L: angle thickness)
   A: number;
@@ -146,8 +146,15 @@ function shaped(id: string, kind: Kind, d: number, bf: number, tf: number, tw: n
 // a channel: C, MC, UPN, UPE (parallel flanges of the mean thickness)
 export const channelSection = (id: string, d: number, bf: number, tf: number, tw: number) => shaped(id, 'C', d, bf, tf, tw);
 
+// two angles back to back, ANGLE_GAP apart: `long` is the leg along the gap,
+// `short` the outstanding leg of one angle (a specimen brace, 2 L89x64x6.4)
+export const doubleAngleOf = (id: string, long: number, short: number, t: number) => shaped(id, '2L', long, 2 * short + ANGLE_GAP, t, t);
+
 // two equal angles (leg x leg x t) back to back: 2L4X4X1/2, 2L 100x100x10
-export const doubleAngle = (id: string, leg: number, t: number) => shaped(`2${id}`, '2L', leg, 2 * leg + ANGLE_GAP, t, t);
+export const doubleAngle = (id: string, leg: number, t: number) => doubleAngleOf(`2${id}`, leg, leg, t);
+
+// a tee from its dimensions: d the full depth, flange bf x tf, stem tw (a specimen brace, WT125x33.5)
+export const teeSection = (id: string, d: number, bf: number, tf: number, tw: number) => shaped(id, 'T', d, bf, tf, tw);
 
 // half an I: W16X50 gives WT8X25, IPE 300 gives 1/2 IPE 300
 export function teeOf(s: Section): Section {

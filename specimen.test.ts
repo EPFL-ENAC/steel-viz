@@ -6,7 +6,7 @@ import { loadCatalog, type Family } from './sections.ts';
 import { floating, generate } from './generate.ts';
 import { clashes } from './clash.ts';
 import { readTables } from './tables.ts';
-import { findSection, type Specimen } from './specimen.ts';
+import { findSection, type ConnSpecimen } from './specimen.ts';
 import { fromHubConnection, toSpecimen } from './hub.ts';
 import { geo, memberFaces } from './steel.ts';
 
@@ -136,7 +136,7 @@ test('findSection: table names written the hub way, built-up names, errors', () 
 });
 
 // hand-written specimens, in our own format
-const column = (beams: Specimen['beams']): Specimen => ({ id: 'test', column: { section: 'W14X90', height: 3000 }, beams });
+const column = (beams: ConnSpecimen['beams']): ConnSpecimen => ({ id: 'test', column: { section: 'W14X90', height: 3000 }, beams });
 
 test('a column alone stands up, in its rig', () => {
   const r = generate({ specimen: column([]) }, cats.aisc);
@@ -179,7 +179,7 @@ test('a cantilever on a shear tab is a mechanism, not a crash', () => {
 
 test('a specimen that does not fit throws a clear error', () => {
   const beam = { section: 'W16X31', bearing: 0, length: 2000, connection: 'welded' } as const;
-  const fails = (beams: Specimen['beams'], msg: RegExp) => assert.throws(() => generate({ specimen: column(beams) }, cats.aisc), msg);
+  const fails = (beams: ConnSpecimen['beams'], msg: RegExp) => assert.throws(() => generate({ specimen: column(beams) }, cats.aisc), msg);
   fails([beam, { ...beam, at: 1600 }], /beam1 and beam2 are on the same face/);
   fails([{ ...beam, at: 2900 }], /not inside the column height/);
   fails([{ ...beam, length: 200 }], /too short/);

@@ -133,6 +133,15 @@ export function link(id: string, from: V, to: V, axis: V, D: number, o: RigOpts)
   return rigPart(id, s, { from: u, ...o }, 'Link');
 }
 
+// A seat: a steel block that holds the end of a specimen on the rig (a
+// floor block, a frame corner). pts: its outline in the plane (ax, ay)
+// through o, width: its size along ax x ay. box: its solid for the clash
+// check when the outline is not a rectangle (default: the box around pts).
+export function seat(id: string, o: V, ax: V, ay: V, width: number, pts: P2[], ro: RigOpts, box?: Box): Part {
+  const p = flat(o, ax, ay, width, pts);
+  return rigPart(id, { faces: p.faces, boxes: [box ?? p.box] }, ro, 'Seat');
+}
+
 // A frame member of the rig: an I section from p0 to p1. w: its depth
 // direction (default: vertical for a beam, y for a column).
 export function rigMember(id: string, sec: Section, p0: V, p1: V, o: RigOpts, w?: V): Part {
@@ -154,9 +163,9 @@ export function crosshead(id: string, at: V, across: V, span: number, floor: num
   return rigPart(id, join(...posts, beam), o, 'Crosshead');
 }
 
-// The lightest I of the catalog at least minDepth deep, for the members of
-// a rig frame (the deepest one when none is deep enough).
-export function rigSection(cat: Catalog, minDepth: number): Section {
+// The lightest I of the catalog at least minDepth deep and minWidth wide, for
+// the members of a rig frame (the deepest one when none is big enough).
+export function rigSection(cat: Catalog, minDepth: number, minWidth = 0): Section {
   const all = [...cat.columns, ...cat.beams].sort((a, b) => a.A - b.A);
-  return all.find((s) => s.d >= minDepth) ?? all.reduce((a, b) => (b.d > a.d ? b : a));
+  return all.find((s) => s.d >= minDepth && s.bf >= minWidth) ?? all.reduce((a, b) => (b.d > a.d ? b : a));
 }

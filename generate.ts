@@ -18,7 +18,8 @@ import {
   type BeamConn, type ConnType, type Fit, type Geo, type P2, type Part, type PartInfo, type Plate,
 } from './steel.ts';
 import { overlap, own } from './clash.ts';
-import { BEAM_CONNS, findSection, type Specimen } from './specimen.ts';
+import { BEAM_CONNS, findSection, type BraceSpecimen, type ConnSpecimen, type Specimen } from './specimen.ts';
+import { buildBrace } from './bench.ts';
 import { actuator, block, clevis, hingeSize, link } from './rig.ts';
 
 export type Detail = 'members' | 'plates' | 'bolts';
@@ -132,6 +133,8 @@ type Base = 'none' | 'flange' | 'all';
 export type Structure = {
   form: Form | 'specimen'; id?: string; H: number; col: Section; cols: Col[]; arms: Arm[]; secs: Secondary[]; splice?: Splice; base?: Base; continuity?: boolean;
   load?: 'beam' | 'column'; minA?: Record<string, number>;
+  // a brace test (bench.ts): col is the brace section, H the height of its top work point
+  brace?: { frame: BraceSpecimen['frame']; L: number; angle: number; ends: BraceSpecimen['ends'] };
 };
 const colId = (i: number) => (i ? `column${i + 1}` : 'column');
 const baseId = (i: number) => (i ? `base${i + 1}` : 'base');
@@ -551,7 +554,7 @@ function dropSplicesOnGussets(st: Structure, p: Params, log: string[]) {
 }
 
 // a real test specimen: one column and its beams, all given (specimen.ts)
-function specimen(spec: Specimen, cat: Catalog): Structure {
+function specimen(spec: ConnSpecimen, cat: Catalog): Structure {
   const H = spec.column.height;
   const bad = (msg: string) => new Error(`${spec.id}: ${msg}`);
   if (!(H > 0)) throw bad(`the column height must be above 0, not ${JSON.stringify(H)}`);
@@ -1446,6 +1449,7 @@ export type Result = {
 
 export function generate(p0: Partial<Params>, cat: Catalog, detail: Detail = 'bolts'): Result {
   const p = { ...DEFAULTS, ...p0 };
+  if (p.specimen?.test === 'brace') return buildBrace(p, p.specimen, cat, detail);
   if (p.specimen) return buildSpecimen(p, p.specimen, cat, detail);
   const rng = mulberry32(p.seed * 7919 + 13);
   const t0 = performance.now();
@@ -1600,7 +1604,7 @@ export function generate(p0: Partial<Params>, cat: Catalog, detail: Detail = 'bo
 // that it stands up as built, and gives the max ratio under p.load (only for
 // the log, the test loads are not known here). No trusses, rods, splice or
 // base gussets.
-function buildSpecimen(p: Params, spec: Specimen, cat: Catalog, detail: Detail): Result {
+function buildSpecimen(p: Params, spec: ConnSpecimen, cat: Catalog, detail: Detail): Result {
   const t0 = performance.now();
   const st = specimen(spec, cat);
   const t1 = performance.now();

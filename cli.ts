@@ -62,7 +62,9 @@ const beams = r.st.arms.map((a) => `${a.sec.id} ${a.conn}${a.braces.map((b) => '
 console.log(
   [
     `${out}: ${spec ? `specimen ${spec.id}` : `seed ${opt('seed', '1')}`}, ${family}, view ${view}, detail ${detail}, ${render === painter ? 'painter' : 'hlr'}`,
-    spec
+    r.st.brace
+      ? `  structure: specimen, brace test ${r.st.brace.frame}, ${r.st.col.id} ${r.st.brace.L} mm at ${r.st.brace.angle}°, ${r.st.brace.ends} ends`
+      : spec
       ? `  structure: specimen, column ${r.st.col.id} ${r.st.H} mm high, ${r.st.arms.length} beam${r.st.arms.length === 1 ? '' : 's'} (${beams})${r.st.continuity === false ? ', no continuity plates' : ''}, ${r.st.load} loaded`
       : `  structure: ${r.st.form}, ${r.st.cols.length} × column ${r.st.col.id}, ${r.st.arms.length} arms (${beams})` +
         (r.st.secs.length ? `, ${r.st.secs.length} secondary (${r.st.secs.map((s) => `${s.sec.id} ${s.conn}`).join('; ')})` : ''),

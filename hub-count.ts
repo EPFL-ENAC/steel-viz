@@ -19,6 +19,7 @@ import { toSpecimen } from './hub.ts';
 // the tables we read, and their CSV file in resslab-hub-data
 export const HUB_TABLES: Record<string, string> = {
   connections: 'connections/connections.csv',
+  braces: 'braces/steel_braces.csv',
 };
 
 export function findHubData(dir?: string): string | undefined {
