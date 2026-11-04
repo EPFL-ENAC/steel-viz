@@ -163,7 +163,7 @@ The output is an SVG line drawing with the hidden lines removed. The SVG can als
 
 Two renderers:
 
-- `hlr.ts` (the default): exact hidden lines, from [three-edge-projection](https://github.com/gkjohnson/three-edge-projection). It takes 50 to 150 ms for one structure.
+- `hlr.ts` (the default): exact hidden lines, in plain TypeScript (no package). It puts the triangles of all faces in a grid on the screen, and cuts out of each edge the pieces that are behind a triangle. It takes about 25 to 30 ms for one structure (about 1550 faces).
 - `render` in `steel.ts` (`--painter`): the painter's trick, ported from `sculpture_render.py` (resslab-hub, branch `feat/logo-aisc`). About 5 ms, but some lines are wrong. The playground uses it only while you drag the view in an SVG mode.
 
 The playground also has a 3D view (`webgl.ts`, the "3D" choice, on by default). It is for looking at the structure, not for export. It runs in plain WebGL2, with no three.js, and builds the geometry once per structure, so you can turn it, move it and zoom with every bolt shown, at the frame rate of the screen. Faces are filled with the background and the GPU depth buffer hides the hidden lines. Edges are thin lines: each segment is a small quad with round ends, drawn as instances and sized in the vertex shader (as three's `LineSegments2` did before). A second pass gives the thick outlines with the same rule as `hlr.ts` (a jump in depth over 50 mm, or another part behind), read from a depth and part-id texture. That pass works per pixel, so it runs at about 3 samples per CSS px (2x on a 1x screen) and is averaged down, or the outlines would show stair steps. Bolt heads get thin lines only. The build animation plays in 3D too, on the same `timeline()`. The lines are close to the exact drawing but not the same (no gaps, no merged lines). "Copy SVG" always gives the exact drawing from `hlr.ts`, for the current view.
@@ -189,7 +189,7 @@ To find a structure that works as a logo, `score.ts` gives each one a score from
 node pick.ts --count 150 --arms 4,5,6 --top 12 --sheet best.html  # best.html shows the 12 best drawings
 ```
 
-It needs Node 24 or newer. Node runs the `.ts` files directly. Install the deps once (three.js, three-mesh-bvh, three-edge-projection, and Vite and Vue for the playground):
+It needs Node 24 or newer. Node runs the `.ts` files directly. Install the deps once (Vite and Vue for the playground, esbuild for a test, TypeScript for the type check):
 
 ```sh
 pnpm install                                          # once
@@ -199,8 +199,6 @@ node cli.ts --seed 5 --view iso --frames --out s5.svg # one structure, plus buil
 pnpm dev                                              # the playground, with live reload
 pnpm build                                            # the playground as a static site in dist/
 ```
-
-three-edge-projection is not on npm, it comes from GitHub (tag `v0.0.11`). Import `three-edge-projection/src/ProjectionGenerator.js`, not the package root: the root also loads `SilhouetteGenerator`, which needs `clipper2-js`. The library works in metres: it only looks for faces up to 1000 units in front of an edge. So `hlr.ts` turns mm into m before it calls it.
 
 Files:
 
@@ -214,14 +212,13 @@ Files:
 - `steel.ts`: geometry (profiles, copes, plates, clevis, bolts), camera and the painter renderer.
 - `clash.ts`: do two parts go through each other (each part as a few boxes).
 - `score.ts`, `pick.ts`: the logo score, and the scan over many seeds.
-- `hlr.ts`: the exact hidden-line renderer, with bolt heads as real hex solids.
+- `hlr.ts`: the exact hidden-line renderer, with bolt heads as real hex solids. No package. `hlr.test.ts` checks it on small cases.
 - `webgl.ts`: the 3D view of the playground, in plain WebGL2.
-- `triangles.ts`: the triangles of a flat face (a port of the earcut steps that three.js ran), for `webgl.ts` and `hlr.ts`.
-- `three-edge-projection.d.ts`: types for the part of three-edge-projection that `hlr.ts` uses (the library ships none).
+- `triangles.ts`: the triangles of a flat face, for `webgl.ts` and `hlr.ts`.
 - `cli.ts`: the command line.
 - `app/`, `vite.config.ts`: the playground, a Vue app served by Vite.
 - `index.ts`, `3d.ts`: the two entries of the package (see below).
-- `package.test.ts`: checks that the light entry and the 3D viewer (`webgl.ts`) load no three.js, no other package and no Node API.
+- `package.test.ts`: checks that the light entry and the 3D entry load no package and no Node API.
 - `tsconfig.lib.json`, `release.sh`: the package build, and the release tag.
 
 `dist/`, `lib/` and the SVGs are build output, they stay out of git. `lib/` is only in the commit of a release tag.
@@ -236,8 +233,8 @@ The repo is also the package `@epfl-enac/steel-viz`. It is not on npm. The hub t
 
 It has two entries:
 
-- `@epfl-enac/steel-viz`: the light entry. `generate`, `loadCatalog`, the painter `render`, `timeline`, `camera`, `VIEWS`, and the specimen input (`toSpecimen`, `fromHubConnection`). It loads no three.js and no other package. `package.test.ts` checks it. Use it for the loading animation.
-- `@epfl-enac/steel-viz/3d`: `renderHLR` (the exact drawing) and `createViewer` (the WebGL view). It loads three.js, for `renderHLR` only: the viewer alone loads no package. Import it with a dynamic `import()`, only on the page that needs it, so three.js stays out of the main bundle.
+- `@epfl-enac/steel-viz`: the light entry. `generate`, `loadCatalog`, the exact drawing `renderHLR`, the painter `render`, `timeline`, `camera`, `VIEWS`, and the specimen input (`toSpecimen`, `fromHubConnection`). It loads no package. `package.test.ts` checks it. Use it for the loading animation and the SVG drawings.
+- `@epfl-enac/steel-viz/3d`: `createViewer` (the WebGL view). It loads no package either, but it is bigger. Import it with a dynamic `import()`, only on the page that needs it, so it stays out of the main bundle.
 
 The package has no section table. The hub has the same CSV files (ours are copies of them), so it passes their text to `loadCatalog()`:
 
@@ -256,25 +253,7 @@ For the EU family, pass `european-sections.csv` and `hss-european-sections.csv` 
 
 The hub has no channel or angle table, so this catalog has no channels and no double angles: the braces and the secondary beams keep their tube and I sections. The tees still come, because they are made from the I table. To get the same drawing as here, also pass the channel and angle CSV files of `sections/` (`loadCatalog('aisc', iCsv, hssCsv, channelCsv, angleCsv)`). For no other shape at all, pass `shapeP: 0` to `generate()`.
 
-The 3D entry needs three.js, three-mesh-bvh and three-edge-projection. They are optional peer dependencies, so the light entry installs none of them. To use the 3D entry, the hub adds them itself, with the versions of our `package.json`:
-
-```json
-"three": "0.187.0",
-"three-mesh-bvh": "0.9.17",
-"three-edge-projection": "github:gkjohnson/three-edge-projection#v0.0.11"
-```
-
-three-edge-projection asks for `clipper2-js` as a peer, and pnpm installs missing peers by default (with Angular for clipper2-js). We don't use it. So in `frontend/pnpm-workspace.yaml` of the hub, make it optional:
-
-```yaml
-packageExtensions:
-  three-edge-projection:
-    peerDependenciesMeta:
-      clipper2-js:
-        optional: true
-```
-
-Then:
+The package has no dependency, so the hub installs nothing else. For the 3D view:
 
 ```ts
 const { createViewer } = await import('@epfl-enac/steel-viz/3d');
