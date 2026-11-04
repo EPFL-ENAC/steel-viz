@@ -58,6 +58,33 @@ Then come posts and beam splices, each from a draw of its own (`postP` and `beam
 
 A detail plate that would go through another part is left out. For example, a continuity plate on the side of the web where another beam frames in.
 
+### The look settings
+
+Arms, height and load are not the only knobs. These `Params` in `generate.ts` change the look too. Each one has an auto or default value. At that value the seed takes the same draws, so it gives the same structure as before (`params.test.ts` checks it on 30 seeds). When you set one, the seed still takes its draw, then the value replaces it.
+
+| param | default | CLI | playground | what it does |
+|---|---|---|---|---|
+| `storeys` | 0 (auto) | `--storeys 0\|1\|2` | Layout, storeys | one or two storeys for a portal or a box |
+| `spanK` | 1 | `--span 1` | Layout, span | multiplies the bay spans (0.6 to 1.6 in the playground) |
+| `bracing` | auto | `--bracing none\|knee\|chevron\|diagonal` | Layout, bracing | the bracing of every bay storey |
+| `armL` | 0.3, 0.7 | `--arm-length 0.3,0.7` | Layout, arm length | the band of arm lengths, as a part of the height. Portal side arms take 3/4 of the band. |
+| `armZ` | 0.35, 0.95 | `--arm-height 0.35,0.95` | Layout, arm height | the band of heights where arms leave the column |
+| `conn` | auto | `--conn shear_tab\|end_plate\|flange_plates\|welded` | Layout, connections | the beam connection. A secondary beam keeps its own when it can't take this one. |
+| `braceP` | 0.3 | `--braces` | Details | the chance of braces on an arm |
+| `secondaryP` | 0.35 | `--secondaries` | Details | the chance of secondary beams |
+| `postP` | 0.3 | `--posts` | Details | the chance of posts |
+| `beamSpliceP` | 0.3 | `--beam-splices` | Details | the chance of a beam splice |
+| `trussK` | 1 | `--trusses` | Details | multiplies the truss chances (0 for none) |
+| `rodP` | 0.4 | `--rods` | Details | the chance of a tension rod |
+| `colSpliceP` | 0.6 | `--col-splice` | Details | the chance of a column splice |
+
+```sh
+node cli.ts --seed 5 --form portal --storeys 2 --bracing chevron --conn welded --span 1.4
+node cli.ts --seed 5 --form tree --arm-length 0.5,0.9 --arm-height 0.6,1
+```
+
+A setting can give a mechanism (the status says so), never a clash or a floating part (`params.test.ts`, 25 seeds for each case).
+
 Parts must not go through each other. A secondary beam is coped (its flanges cut back) where it meets the flanges of its arm, and its plate fits between those flanges. A brace stays above the arms under it on the same face of its column, and is long enough that its two gussets don't touch. `clash.ts` checks this with boxes, and `geometry.test.ts` runs it on every form, 240 structures, and on 72 more with every member in its other shape (`shapeP` 1).
 
 It can also draw a real test of RESSLab Hub instead of a seed: a specimen. For now it draws a beam-to-column subassembly (the test of one connection): one column on a base plate, with one or two beams. That's what the `connection` table of the hub describes, 99 of its 100 tests.
@@ -131,9 +158,9 @@ The exact renderer draws like a technical drawing:
 - No double lines. Lines that lie on top of each other in the same part are merged, and a thin line under a thick one is removed.
 - Widths for a size. `--size 96` (or "96 px" in the playground) says the drawing will be shown 96 px wide. Then the outlines are 2 px and the inner lines 1 px, so a small logo keeps readable lines. Small drawings also show less: no bolts at 160 px or less, no plates at 64 px or less, no secondary beams at 40 px or less (`DETAIL` in `steel.ts`).
 
-`--flat` (or "One weight" in the playground) draws every line at one width, as before, with no gaps.
+`--flat` (or "One" in the line weights of the playground) draws every line at one width, as before, with no gaps. In the playground, the line weights are on auto by default: one weight in the 3D view, two in the SVG and in "Copy SVG".
 
-The build animation (`--animate`) shows the parts put in place, like on a site. The columns come down from above. An arm slides in from outside the frame, along its own axis, after its plates. A bay beam is lowered between its two columns. Then the bolts pop in one by one. A part waits only for the parts it stands on, and up to three beams can fly in at the same time (`CRANES` in `steel.ts`), so a big structure builds in about 4 s. Each part has a `kind` and a `from` direction for this (set in `generate.ts`), and `timeline()` in `steel.ts` says when each part moves and lands. A line that a later part hides stays visible until that part lands. While a beam moves, its lines are already cut where other parts will hide it at the end, so a small hole can move with it.
+The build animation (`--animate`) shows the parts put in place, like on a site. The columns come down from above. An arm slides in from outside the frame, along its own axis, after its plates. A bay beam is lowered between its two columns. Then the bolts pop in one by one. A part waits only for the parts it stands on, and up to three beams can fly in at the same time (`CRANES` in `steel.ts`), so a big structure builds in about 4 s. The animation has two knobs. `speed` says how fast one part comes in (2 is twice as fast). `duration` (ms, optional) says how long the whole build lasts: `timeline(parts, { speed, duration })` keeps the order and the time of each part, and moves their start times so the last part lands at the end. So a short build with slow parts has many parts in the air at once, and a long build with fast parts has pauses. If one part is slower than the whole build, all parts come at once (`shortestBuild()` gives the shortest build that keeps the order). `RenderOpts` and `Viewer.build()` take the same two. Each part has a `kind` and a `from` direction for this (set in `generate.ts`), and `timeline()` in `steel.ts` says when each part moves and lands. A line that a later part hides stays visible until that part lands. While a beam moves, its lines are already cut where other parts will hide it at the end, so a small hole can move with it.
 
 To find a structure that works as a logo, `score.ts` gives each one a score from 0 to 1. It looks at the big shapes from the chosen view: do they fill a square, does the weight sit on the columns, how many members, how many members cross each other. `pick.ts` scans many seeds and lists the best ones (450 structures take about 2 s). In the playground, "Find good seeds" does the same for 200 seeds and shows the best 8.
 
@@ -249,4 +276,8 @@ To make a release (a human does it):
 - It reloads on each save. A change in `app/` is a hot reload. A change in the generator, a renderer or a table reloads the page.
 - The settings (seed, form, shapes, view, viewer...) live in the URL hash. A reload keeps them, and you can send the link.
 - Above the controls: the branch, its commit, and if it has changes not committed.
-- The "vs main" viewer draws the same structure twice: with this checkout on the left, and with the code of `main` on the right (the merge base, so only what the branch changed). The title block says "same drawing" or what differs. `PLAYGROUND_BASE` picks another base branch. That code comes from `git archive`, in `node_modules/.cache/steel-viz-base/`.
+- "Compare with main" (in View, dev server only) draws the same structure twice, side by side, in the viewer you picked (3D, SVG or both): this checkout on the left, the code of `main` on the right (the merge base, so only what the branch changed). Turn one and the other turns too, and in 3D the zoom and pan follow. When the base viewer has no `setFrame()` (main before this), the dev server leaves it out of the base bundle, and the page draws the base structure with the viewer of this checkout. The label of the view says "viewer of this branch" then. The title block says "same parts" or what differs (new, gone and changed parts, the column, the status), with the list of part ids. `PLAYGROUND_BASE` picks another base branch. That code comes from `git archive`, in `node_modules/.cache/steel-viz-base/`. An old link with `viewer=diff` opens in SVG with compare on.
+
+The controls are in a rail of sections you can fold: structure, layout, details, view, animation, good seeds, analysis. A section says how many of its settings are not on their default, and has a button to reset them. The browser keeps which sections are open. The rail uses the EPFL design tokens and CSS, copied in `app/epfl/` (see its README). The dark theme is ours. On a phone, the drawing comes first and the rail under it.
+
+"Build time" is 0 by default: no animation, a change draws the new structure at once. Over 0, each change plays the build in that time, and "Play again" plays it once more. "Build time" and "Part speed" (×0.25 to ×4) are the two knobs of `timeline()`. Under them, the rail says about how many parts are in the air at once.

@@ -309,7 +309,7 @@ export function renderHLR(parts: Part[], o: RenderOpts): { svg: string; faces: n
   ];
 
   // the build animation: when each part moves, and from where
-  const slots = timeline(shown, o.speed);
+  const slots = timeline(shown, { speed: o.speed, duration: o.duration });
   const landAt = (step: number) => slots.get(step)?.land ?? 0;
   // how far to move a part along the 2D direction (ux, uy) so it is out of the frame
   const away = (pi: number, ux: number, uy: number) => {

@@ -35,11 +35,27 @@ export type Params = {
   // of an arm (double angles), a secondary beam (a channel), a truss bottom
   // chord (a tee). 0: only I, tubes and rods, as before these shapes.
   shapeP: number;
+  // The look of the structure. The seed still takes the same draws, then a
+  // value set here replaces what it drew: at their default, every seed gives
+  // the same structure as before these settings.
+  storeys: 0 | 1 | 2; // portal and box: 0 lets the seed pick
+  spanK: number; // portal and box: the bays are this many times longer
+  bracing: Bracing | 'auto'; // portal and box: the bracing of every bay storey
+  armL: [number, number]; // tree arms, from this to this times the height (the arms of a portal: 3/4 of the band)
+  armZ: [number, number]; // where the arms land on the column, from this to this times the height
+  conn: BeamConn | 'auto'; // every beam end (a secondary beam takes it when it can)
+  trussK: number; // the chance of a truss, times this
+  rodP: number; // the chance of a tension rod, on each arm
+  colSpliceP: number; // the chance of a column splice
   seg: number;
   form: Form | 'mix'; // mix: the seed picks the form
   specimen?: Specimen; // a real test: seed, form, arms, height, braceP and secondaryP are not used
 };
-export const DEFAULTS: Params = { seed: 1, arms: 8, height: 2500, load: 100, fy: 345, braceP: 0.3, secondaryP: 0.35, postP: 0.3, beamSpliceP: 0.3, shapeP: 0.35, seg: 400, form: 'mix' };
+export const DEFAULTS: Params = {
+  seed: 1, arms: 8, height: 2500, load: 100, fy: 345, braceP: 0.3, secondaryP: 0.35, postP: 0.3, beamSpliceP: 0.3, shapeP: 0.35,
+  storeys: 0, spanK: 1, bracing: 'auto', armL: [0.3, 0.7], armZ: [0.35, 0.95], conn: 'auto', trussK: 1, rodP: 0.4, colSpliceP: 0.6,
+  seg: 400, form: 'mix',
+};
 
 export function mulberry32(a: number) {
   return () => {
@@ -128,6 +144,19 @@ function pick<T extends string>(rng: () => number, w: Record<T, number>): T {
   return Object.keys(w)[0] as T;
 }
 const BEAM_CONN = { shear_tab: 0.4, end_plate: 0.2, flange_plates: 0.2, welded: 0.2 };
+export type BeamConn = keyof typeof BEAM_CONN;
+export const BEAM_CONN_KINDS = Object.keys(BEAM_CONN) as BeamConn[];
+const SEC_CONN = { shear_tab: 0.6, end_plate: 0.25, welded: 0.15 };
+const BRACING = { none: 0.2, knee: 0.3, chevron: 0.3, diagonal: 0.2 };
+export type Bracing = keyof typeof BRACING;
+export const BRACING_KINDS = Object.keys(BRACING) as Bracing[];
+// a beam end: the seed draws it, p.conn replaces it
+const beamConn = (p: Params, rng: () => number): BeamConn => {
+  const c = pick(rng, BEAM_CONN);
+  return p.conn === 'auto' ? c : p.conn;
+};
+// a point in a band [lo, hi], from a draw u in [0, 1)
+const band = ([lo, hi]: [number, number], u: number) => lo + (hi - lo) * u;
 
 // every face of a column an arm lands on: its column, bearing and height
 function faces(arms: Arm[]) {
@@ -144,12 +173,12 @@ function tree(p: Params, cat: Catalog, rng: () => number): Structure {
   const H = p.height;
   const arms: Arm[] = [];
   for (let k = 0, tries = 0; k < p.arms && tries < 200; tries++) {
-    const z = Math.round((0.35 + 0.6 * rng()) * H / 150) * 150;
+    const z = Math.round(band(p.armZ, rng()) * H / 150) * 150;
     const bearing = 90 * Math.floor(rng() * 4);
     // arms on the same side need room between them
     if (arms.some((a) => a.bearing === bearing && Math.abs(a.z - z) < 900)) continue;
-    const L = r50((0.3 + 0.4 * rng()) * H);
-    const conn = pick(rng, BEAM_CONN);
+    const L = r50(band(p.armL, rng()) * H);
+    const conn = beamConn(p, rng);
     arms.push({ id: `arm${k + 1}`, col: 0, z, bearing, L, conn, sec: mid(cat.beams), braces: [] });
     k++;
   }
@@ -158,6 +187,11 @@ function tree(p: Params, cat: Catalog, rng: () => number): Structure {
   for (const a of arms) if (rng() < p.braceP) addBrace(a, arms, cat);
   return { form: 'tree', H, col: mid(cat.columns), cols: [{ x: [0, 0, 0] }], arms, secs: secondaries(p, cat, rng, arms) };
 }
+
+const secConn = (p: Params, rng: () => number): ConnType => {
+  const c = pick(rng, SEC_CONN);
+  return p.conn !== 'auto' && p.conn in SEC_CONN ? p.conn : c;
+};
 
 function secondaries(p: Params, cat: Catalog, rng: () => number, arms: Arm[]): Secondary[] {
   const secs: Secondary[] = [];
@@ -168,7 +202,7 @@ function secondaries(p: Params, cat: Catalog, rng: () => number, arms: Arm[]): S
     secs.push({
       id: `sec${secs.length + 1}`, arm: i, a: r50(at * a.L),
       side: rng() < 0.5 ? 1 : -1, L: r50((0.25 + 0.25 * rng()) * (a.to === undefined ? a.L : Math.min(a.L, p.height))),
-      conn: pick(rng, { shear_tab: 0.6, end_plate: 0.25, welded: 0.15 }), sec: mid(cat.beams),
+      conn: secConn(p, rng), sec: mid(cat.beams),
     });
   });
   return secs;
@@ -182,12 +216,13 @@ function secondaries(p: Params, cat: Catalog, rng: () => number, arms: Arm[]): S
 // middle of the beam) or one diagonal. A portal also gets a few arms out of
 // its columns.
 function frame(form: 'portal' | 'box', p: Params, cat: Catalog, rng: () => number): Structure {
-  const storeys = rng() < 0.4 ? 2 : 1;
+  const drawn = rng() < 0.4 ? 2 : 1;
+  const storeys = p.storeys || drawn;
   const H = r150(p.height * (storeys === 2 ? 1.5 : 1));
   const b0 = 90 * Math.floor(rng() * 4);
   const cols: Col[] = [{ x: [0, 0, 0] }];
   const bays: [number, number, number][] = []; // from column, to column, bearing
-  const span = () => r50((0.8 + 0.5 * rng()) * p.height);
+  const span = () => r50((0.8 + 0.5 * rng()) * p.height * p.spanK);
   if (form === 'portal') {
     cols.push({ x: mul(hdir(b0), span()) });
     bays.push([0, 1, b0]);
@@ -203,18 +238,19 @@ function frame(form: 'portal' | 'box', p: Params, cat: Catalog, rng: () => numbe
   for (const [i, j, bearing] of bays)
     for (const z of levels) {
       const L = Math.round(len(sub(cols[j].x, cols[i].x)));
-      arms.push({ id: '', col: i, to: j, z, bearing, L, conn: pick(rng, BEAM_CONN), conn2: pick(rng, BEAM_CONN), sec: mid(cat.beams), braces: [] });
-      bracing.push(pick(rng, { none: 0.2, knee: 0.3, chevron: 0.3, diagonal: 0.2 }));
+      arms.push({ id: '', col: i, to: j, z, bearing, L, conn: beamConn(p, rng), conn2: beamConn(p, rng), sec: mid(cat.beams), braces: [] });
+      const b = pick(rng, BRACING);
+      bracing.push(p.bracing === 'auto' ? b : p.bracing);
     }
   // a few arms out of the columns, never on the side of a bay
   const nArms = form === 'box' ? 0 : Math.max(0, Math.min(3, Math.round((p.arms - arms.length) / 3)));
   for (let k = 0, tries = 0; k < nArms && tries < 100; tries++) {
     const col = Math.floor(rng() * cols.length);
     const bearing = 90 * Math.floor(rng() * 4);
-    const z = r150((0.35 + 0.6 * rng()) * H);
-    const L = r50((0.3 + 0.3 * rng()) * p.height);
+    const z = r150(band(p.armZ, rng()) * H);
+    const L = r50(band([p.armL[0], p.armL[0] + 0.75 * (p.armL[1] - p.armL[0])], rng()) * p.height);
     if (faces(arms).some((f) => f.col === col && f.bearing === bearing && (f.a.to !== undefined || Math.abs(f.z - z) < 900))) continue;
-    arms.push({ id: '', col, z, bearing, L, conn: pick(rng, BEAM_CONN), sec: mid(cat.beams), braces: [] });
+    arms.push({ id: '', col, z, bearing, L, conn: beamConn(p, rng), sec: mid(cat.beams), braces: [] });
     k++;
   }
   arms.forEach((a, i) => (a.id = `arm${i + 1}`));
@@ -262,12 +298,12 @@ const NODE_GAP = 50; // two diagonals that meet at a node land this far on each 
 const TUBE_MIN = 400; // mm, a diagonal between its two gussets: room for both knife plates
 // the chance of a truss: a bay beam of a portal, a bay beam of a box (a box
 // has 4 to 8 of them), an arm that sticks out
+// (times p.trussK)
 const TRUSS_P = { bay: 0.35, box: 0.1, arm: 0.3 };
 // A low truss, for the arms of a tree: they are short, and close to the arm
 // below on the same face. It takes the room under the arm, down to the floor
 // or to the arm below, and its diagonals use the small gusset.
 const LOW = { min: 450, max: 650, floor: 500, gap: 450, chord: 250, tube: 250 };
-const ROD_P = 0.4;
 // how far the face of the column is from its axis, for a beam on that bearing
 const colFace = (st: Structure, bearing: number) => (bearing % 180 === 0 ? st.col.d / 2 : st.col.tw / 2);
 
@@ -355,11 +391,11 @@ function rodFor(st: Structure, a: Arm, cat: Catalog, rng: () => number): Rod | u
 }
 
 // trusses first, so a rod knows the chords above it
-function addTrussesAndRods(st: Structure, cat: Catalog, rng: () => number, log: string[]): boolean {
+function addTrussesAndRods(st: Structure, p: Params, cat: Catalog, rng: () => number, log: string[]): boolean {
   let added = false;
   for (const a of st.arms) {
     const r = rng();
-    const P = a.to === undefined ? TRUSS_P.arm : st.form === 'box' ? TRUSS_P.box : TRUSS_P.bay;
+    const P = p.trussK * (a.to === undefined ? TRUSS_P.arm : st.form === 'box' ? TRUSS_P.box : TRUSS_P.bay);
     if (r >= P || (a.to === undefined && a.L < 1400)) continue;
     const tr = trussFor(st, a, cat, rng);
     if (!tr) continue;
@@ -369,7 +405,7 @@ function addTrussesAndRods(st: Structure, cat: Catalog, rng: () => number, log: 
     log.push(`${a.id}: truss, ${tr.webs.length} diagonals, ${tr.D} mm deep`);
   }
   for (const a of st.arms) {
-    if (rng() >= ROD_P) continue;
+    if (rng() >= p.rodP) continue;
     const rod = rodFor(st, a, cat, rng);
     if (!rod) continue;
     a.rod = rod;
@@ -488,6 +524,23 @@ function addBeamSplices(st: Structure, p: Params, rng: () => number, log: string
     a.splice = ok[Math.floor(pick * ok.length)];
     log.push(`${a.id}: beam splice at ${a.splice} mm`);
   });
+}
+
+// A brace flatter than 45° has a long gusset on the beam, longer than the
+// room addBeamSplices() keeps for it. Build the plates and drop a splice that
+// goes through a brace gusset of its beam. Checked after the pick, so the
+// splices that were clear keep their place, and the seeds their look.
+function dropSplicesOnGussets(st: Structure, p: Params, log: string[]) {
+  const arms = st.arms.filter((a) => a.splice !== undefined && a.braces.length);
+  if (!arms.length) return;
+  const byId = new Map(parts(st, 'plates', p.seg).map((q) => [q.id, q]));
+  for (const a of arms) {
+    const sp = byId.get(`${a.id}-splice`)?.boxes ?? [];
+    const hit = a.braces.some((_, k) => (byId.get(`${braceId(a, k)}-to-conn`)?.boxes ?? []).some((g) => sp.some((b) => overlap(b, g))));
+    if (!hit) continue;
+    a.splice = undefined;
+    log.push(`${a.id}: no beam splice, it would go through a brace gusset`);
+  }
 }
 
 // a real test specimen: one column and its beams, all given (specimen.ts)
@@ -800,10 +853,9 @@ function size(st: Structure, m: Model, res: Forces[], cat: Catalog, p: Params, c
 // Details that don't change the topology. They come from their own random
 // draws, so a seed keeps its structure and only gets the details on top.
 
-// A column splice, on about 6 structures in 10: one level for all the
-// columns, between 30 and 70 % of the height, well clear of anything that
-// lands on a column there.
-const SPLICE_P = 0.6;
+// A column splice, on about 6 structures in 10 (p.colSpliceP): one level for
+// all the columns, between 30 and 70 % of the height, well clear of anything
+// that lands on a column there.
 const SPLICE_GAP = 50; // mm, free height kept above and below the splice plates
 // A brace of an arm: its geo, from its column to the arm, and its connection
 // at both ends. S is the column shaft at the foot of the brace. parts() builds
@@ -826,8 +878,8 @@ function braceGeo(st: Structure, a: Arm, b: Brace, k: number, S: Geo) {
 }
 
 // The splice and the other heights that were free, nearest first
-function pickSplice(st: Structure, rng: () => number): { sp: Splice; alts: number[] } | undefined {
-  if (rng() >= SPLICE_P || st.H < 2000) return undefined;
+function pickSplice(st: Structure, p: Params, rng: () => number): { sp: Splice; alts: number[] } | undefined {
+  if (rng() >= p.colSpliceP || st.H < 2000) return undefined;
   const kind = rng() < 0.5 ? 'bearing' : 'flange';
   // the height the plates take, around the cut
   const [below, above] = kind === 'bearing' ? [0, BEARING_T] : [SPLICE_HALF, SPLICE_HALF];
@@ -1265,7 +1317,7 @@ export function generate(p0: Partial<Params>, cat: Catalog, detail: Detail = 'bo
   if (ok) {
     const keep = { ratio, alpha, amp, col: st.col, arms: st.arms.map((a) => ({ sec: a.sec, braces: a.braces })), secs: st.secs.map((s) => s.sec) };
     const n = log.length;
-    if (addTrussesAndRods(st, cat, mulberry32(p.seed * 2654435 + 5), log)) {
+    if (addTrussesAndRods(st, p, cat, mulberry32(p.seed * 2654435 + 5), log)) {
       let good = true;
       for (let k = 0; k < 4 && good; k++) {
         const f = again();
@@ -1307,7 +1359,7 @@ export function generate(p0: Partial<Params>, cat: Catalog, detail: Detail = 'bo
   const det = mulberry32(p.seed * 15485863 + 3);
   const b = det();
   st.base = b < 0.5 ? 'none' : b < 0.8 ? 'flange' : 'all';
-  const pick = ok ? pickSplice(st, det) : undefined;
+  const pick = ok ? pickSplice(st, p, det) : undefined;
   st.splice = pick && { ...pick.sp }; // a copy: sizeTop changes it
   if (pick && st.splice) {
     const before = { ratio, alpha, amp };
@@ -1343,7 +1395,10 @@ export function generate(p0: Partial<Params>, cat: Catalog, detail: Detail = 'bo
     }
   }
   // splices in the bay beams: geometry only, from a draw of their own
-  if (ok) addBeamSplices(st, p, mulberry32(p.seed * 32452843 + 11), log);
+  if (ok) {
+    addBeamSplices(st, p, mulberry32(p.seed * 32452843 + 11), log);
+    dropSplicesOnGussets(st, p, log);
+  }
   log.push(alphaLog(alpha, amp));
   log.push(`${sized} sizing passes, final max ratio ${ratio.toFixed(2)} (limit ${LIMIT})`);
   const t2 = performance.now();

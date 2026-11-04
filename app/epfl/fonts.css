@@ -1,0 +1,62 @@
+/* ============================================================
+   EPFL Design System — Suisse Int'l webfonts
+   Served by https://enac-it-fonts.epfl.ch (EPFL ENAC IT4R) to *.epfl.ch
+   sites only: EPFL's Swiss Typefaces licence covers @font-face use on the
+   epfl.ch domain. A local dev server (http://localhost:<port>,
+   http://127.0.0.1:<port>) gets the fonts too, from the EPFL network or
+   VPN only. Anywhere else (file://, github.io, another domain, off VPN)
+   the server answers 403 and text renders in the --font-sans fallback,
+   Arial. That is expected: never copy the font files into a project to
+   "fix" it.
+
+   tokens/colors_and_type.css @imports this file, so css/epfl.css loads it.
+   Need only the font (no tokens)? Import this file alone and set
+   font-family yourself: "Suisse Int'l", then Arial as the fallback.
+
+   Served faces: 400, 400 italic, 500, 600, 600 italic, 700. There is no
+   Light (300) or Medium italic webfont yet; the browser uses the nearest
+   served face (300 → 400, 500 italic → 400 italic).
+   ============================================================ */
+
+@font-face {
+  font-family: "Suisse Int'l";
+  src: url("https://enac-it-fonts.epfl.ch/SuisseIntl-Regular-WebS.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Suisse Int'l";
+  src: url("https://enac-it-fonts.epfl.ch/SuisseIntl-RegularItalic-WebS.woff2") format("woff2");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Suisse Int'l";
+  src: url("https://enac-it-fonts.epfl.ch/SuisseIntl-Medium-WebS.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Suisse Int'l";
+  src: url("https://enac-it-fonts.epfl.ch/SuisseIntl-SemiBold-WebS.woff2") format("woff2");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Suisse Int'l";
+  src: url("https://enac-it-fonts.epfl.ch/SuisseIntl-SemiBoldItalic-WebS.woff2") format("woff2");
+  font-weight: 600;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Suisse Int'l";
+  src: url("https://enac-it-fonts.epfl.ch/SuisseIntl-Bold-WebS.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}

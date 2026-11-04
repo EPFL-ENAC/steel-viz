@@ -2,7 +2,7 @@
 // link opens the same structure. Also the catalogs, and what the dev server
 // says about this checkout.
 import { reactive, ref, watch } from 'vue';
-import { DEFAULTS as GEN, type Result } from '../generate.ts';
+import { DEFAULTS as GEN, type Params, type Result } from '../generate.ts';
 import { loadCatalog, type Catalog, type Family } from '../sections.ts';
 import { VIEWS } from '../steel.ts';
 import aiscI from '../sections/aisc-sections.csv?raw';
@@ -16,23 +16,58 @@ import euL from '../sections/angle-european-sections.csv?raw';
 
 const DEFAULTS = {
   seed: 5,
+  // structure
   form: 'mix',
   arms: 8,
   height: 2500,
   load: 100,
   family: 'aisc' as Family,
   shapes: 'some', // channels, double angles and tees: none, some or all (see SHAPE_P)
-  detail: 'bolts',
+  // layout (see Params in generate.ts)
+  storeys: 0, // 0: the seed picks
+  span: GEN.spanK,
+  bracing: 'auto',
+  armLmin: GEN.armL[0],
+  armLmax: GEN.armL[1],
+  armZmin: GEN.armZ[0],
+  armZmax: GEN.armZ[1],
+  conn: 'auto',
+  // details: the chance of each one
+  braces: GEN.braceP,
+  secondaries: GEN.secondaryP,
+  posts: GEN.postP,
+  splices: GEN.beamSpliceP,
+  trusses: GEN.trussK, // times the usual chance
+  rods: GEN.rodP,
+  colSplice: GEN.colSpliceP,
+  // view
+  viewer: '3d', // 3d, svg or both
+  compare: 0, // 1: this branch and the base branch side by side (dev server only)
   view: 'iso', // '' when the angle is free
   az: VIEWS.iso[0],
   el: Math.round(VIEWS.iso[1]),
-  weights: 'two',
-  viewer: '3d', // 3d, svg, both, or diff (vs main, dev server only)
+  weights: '', // '' (auto): one in WebGL, two in the SVG
+  detail: 'bolts',
   size: 0, // px, 0 for full size
-  duration: 6, // s, the length of the build animation, 0 for none
+  // animation
+  duration: 0, // s, the whole build. 0: no animation, a change draws at once
+  speed: 1, // how fast one part comes in (see timeline in steel.ts)
   theme: '', // '' follows the system
 };
 export type Settings = typeof DEFAULTS;
+export type Key = keyof Settings;
+
+// the keys of each section of the rail: what it counts as changed, and resets
+export const GROUPS = {
+  structure: ['form', 'arms', 'height', 'load', 'family', 'shapes'],
+  layout: ['storeys', 'span', 'bracing', 'armLmin', 'armLmax', 'armZmin', 'armZmax', 'conn'],
+  details: ['braces', 'secondaries', 'posts', 'splices', 'trusses', 'rods', 'colSplice'],
+  view: ['viewer', 'compare', 'view', 'az', 'el', 'weights', 'detail', 'size'],
+  animation: ['duration', 'speed'],
+} satisfies Record<string, Key[]>;
+// the keys that change the structure
+export const BUILD_KEYS: Key[] = ['seed', ...GROUPS.structure, ...GROUPS.layout, ...GROUPS.details];
+
 
 function fromHash(): Settings {
   const s = { ...DEFAULTS };
@@ -41,10 +76,17 @@ function fromHash(): Settings {
     const d = (DEFAULTS as any)[k];
     (s as any)[k] = typeof d === 'number' ? (v !== '' && Number.isFinite(Number(v)) ? Number(v) : d) : v;
   }
+  // an old link: "vs main" was a viewer
+  if ((s.viewer as string) === 'diff') Object.assign(s, { viewer: 'svg', compare: 1 });
   return s;
 }
 
 export const s = reactive(fromHash());
+
+export const changed = (keys: Key[]) => keys.filter((k) => s[k] !== DEFAULTS[k]).length;
+export const reset = (keys: Key[]) => {
+  for (const k of keys) (s as any)[k] = DEFAULTS[k];
+};
 
 let timer = 0;
 watch(s, () => {
@@ -71,7 +113,14 @@ export function setView(name: string) {
 
 // the shapes setting (none, some, all in the hash) as shapeP
 const SHAPE_P: Record<string, number> = { none: 0, some: GEN.shapeP, all: 1 };
-export const params = () => ({ seed: s.seed || 1, form: s.form, arms: s.arms, height: s.height, load: s.load, shapeP: SHAPE_P[s.shapes] ?? GEN.shapeP, fy: s.family === 'eu' ? 355 : 345 });
+export const params = (): Partial<Params> => ({
+  seed: s.seed || 1, form: s.form as Params['form'], arms: s.arms, height: s.height, load: s.load,
+  shapeP: SHAPE_P[s.shapes] ?? GEN.shapeP, fy: s.family === 'eu' ? 355 : 345,
+  storeys: s.storeys as Params['storeys'], spanK: s.span, bracing: s.bracing as Params['bracing'],
+  armL: [s.armLmin, s.armLmax], armZ: [s.armZmin, s.armZmax], conn: s.conn as Params['conn'],
+  braceP: s.braces, secondaryP: s.secondaries, postP: s.posts, beamSpliceP: s.splices,
+  trussK: s.trusses, rodP: s.rods, colSpliceP: s.colSplice,
+});
 
 const TABLES: Record<Family, [string, string, string, string]> = { aisc: [aiscI, aiscHss, aiscC, aiscL], eu: [euI, euHss, euC, euL] };
 const cats: Partial<Record<Family, Catalog>> = {};
@@ -91,5 +140,5 @@ fetch('/__dev/info')
   .catch(() => null)
   .then((d) => {
     dev.value = d;
-    if (!d && s.viewer === 'diff') s.viewer = '3d';
+    if (!d) s.compare = 0;
   });

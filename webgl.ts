@@ -28,13 +28,21 @@ const THIN = 1; // px
 const THICK = 2.25; // px
 
 export type Colors = { bg: string; fg: string; accent: string };
+// what the view shows, in world mm: the point in the middle, and half the
+// height it shows. Two viewers with the same frame line up, even when their
+// structures are a bit different (vs main).
+export type Frame = { target: V; half: number };
 export type Viewer = {
   show(parts: Part[]): void; // a new structure
   view(az: number, el: number): void;
-  build(speed?: number): void; // play the build animation (speed 2: twice as fast)
+  // play the build animation. speed: how fast one part comes in (2: twice as
+  // fast). duration: the whole build lasts this long, ms (see timeline)
+  build(speed?: number, duration?: number): void;
   setWeights(two: boolean): void;
   setColors(c: Colors): void;
   reset(): void; // zoom and pan back to the whole structure
+  frame(): Frame | null; // null: no zoom or pan by hand, it fits the structure
+  setFrame(f: Frame | null): void; // null: fit the structure. Never calls onFrame.
   stats(): { faces: number; bolts: number; lines: number };
   canvas: HTMLCanvasElement;
 };
@@ -127,11 +135,13 @@ type Piece = { part: Part; group: Group; fill: Mesh; lines?: LineSegments2; base
 
 // onTurn: the user turned the view (done: the drag is over). onHover: the
 // part under the mouse (null: none), and the mouse in client px. Only for a
-// mouse with no button down, and not during the build animation.
+// mouse with no button down, and not during the build animation. onFrame: the
+// user zoomed or moved the view, or double clicked to fit it.
 export function createViewer(
   host: HTMLElement,
   onTurn: (az: number, el: number, done: boolean) => void,
   onHover?: (part: Part | null, x: number, y: number) => void,
+  onFrame?: (f: Frame | null) => void,
 ): Viewer {
   const renderer = new WebGLRenderer({ antialias: true });
   // sized by hand in device pixels (see resize), so pixel ratio 1 here
@@ -368,10 +378,10 @@ export function createViewer(
     reset();
   };
 
-  const build = (speed = 1) => {
+  const build = (speed = 1, duration?: number) => {
     stopAnim();
     setHover(null);
-    const slots = timeline(pieces.map((p) => p.part), speed);
+    const slots = timeline(pieces.map((p) => p.part), { speed, duration });
     const { r, up } = camera(az, el);
     // the direction each part comes from, in the screen plane, as in hlr.ts
     const dirs = pieces.map((p) => {
@@ -415,6 +425,7 @@ export function createViewer(
       const d = Math.hypot(a.x - b.x, a.y - b.y);
       if (pinch) zoomBy(d / pinch);
       pinch = d;
+      onFrame?.(current());
       return;
     }
     if (!drag) return;
@@ -425,6 +436,7 @@ export function createViewer(
       fitted = false;
       place();
       redraw();
+      onFrame?.(current());
       return;
     }
     const [dx, dy] = [e.clientX - drag.x, e.clientY - drag.y];
@@ -464,8 +476,12 @@ export function createViewer(
     place();
     redraw();
     hoverSoon(); // something else may be under the mouse now
+    onFrame?.(current());
   }, { passive: false });
-  canvas.addEventListener('dblclick', () => reset());
+  canvas.addEventListener('dblclick', () => {
+    reset();
+    onFrame?.(null);
+  });
 
   // ---- the part under the mouse: the id pass, rendered for one pixel only
   const pickRT = new WebGLRenderTarget(1, 1);
@@ -539,6 +555,15 @@ export function createViewer(
     place();
     redraw();
   };
+  const current = (): Frame | null => (fitted ? null : { target: centre.clone().add(pan).toArray() as V, half: (radius * 1.1) / zoom });
+  const setFrame = (f: Frame | null) => {
+    if (!f) return void (pieces.length ? reset() : (fitted = true));
+    zoom = (radius * 1.1) / f.half;
+    pan.copy(new Vector3(...f.target).sub(centre));
+    fitted = false;
+    place();
+    redraw();
+  };
   const view = (a: number, e: number) => {
     [az, el] = [a, e];
     place();
@@ -552,6 +577,8 @@ export function createViewer(
     view,
     build,
     reset,
+    frame: current,
+    setFrame,
     setWeights(t) {
       two = t;
       for (const p of pieces) lineStyle(p);
