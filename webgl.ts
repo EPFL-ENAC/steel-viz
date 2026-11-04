@@ -31,7 +31,9 @@ export type Colors = { bg: string; fg: string; accent: string };
 export type Viewer = {
   show(parts: Part[]): void; // a new structure
   view(az: number, el: number): void;
-  build(speed?: number): void; // play the build animation (speed 2: twice as fast)
+  // play the build animation. speed: how fast one part comes in (2: twice as
+  // fast). duration: the whole build lasts this long, ms (see timeline)
+  build(speed?: number, duration?: number): void;
   setWeights(two: boolean): void;
   setColors(c: Colors): void;
   reset(): void; // zoom and pan back to the whole structure
@@ -368,10 +370,10 @@ export function createViewer(
     reset();
   };
 
-  const build = (speed = 1) => {
+  const build = (speed = 1, duration?: number) => {
     stopAnim();
     setHover(null);
-    const slots = timeline(pieces.map((p) => p.part), speed);
+    const slots = timeline(pieces.map((p) => p.part), { speed, duration });
     const { r, up } = camera(az, el);
     // the direction each part comes from, in the screen plane, as in hlr.ts
     const dirs = pieces.map((p) => {

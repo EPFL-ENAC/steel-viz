@@ -55,7 +55,63 @@ const GAP = { big: 150, plate: 50 };
 // when the last part lands, in ms
 export const buildEnd = (slots: Map<number, Slot>) => Math.max(0, ...[...slots.values()].map((s) => s.land));
 
-export function timeline(parts: Part[], speed = 1): Map<number, Slot> {
+// speed: how fast one part comes in (2: twice as fast). duration: the whole
+// build lasts this long, in ms. Then the start times are stretched or pressed
+// to fit, and each part keeps its own time to come in: a short build with slow
+// parts has many parts in the air at once. The order stays the same, but a part
+// can start before the part it stands on has landed.
+export type TimelineOpts = { speed?: number; duration?: number };
+export function timeline(parts: Part[], o: number | TimelineOpts = 1): Map<number, Slot> {
+  const { speed = 1, duration } = typeof o === 'number' ? { speed: o } : o;
+  const out = sequence(parts, speed);
+  return duration === undefined ? out : fit(parts, out, duration);
+}
+
+// Fit the slots in `duration`. Each part has an anchor: its own start, or for
+// bolts the start of their member (they start when it lands, also after the
+// fit). The anchors are scaled by f, the rest of the slot moves with them.
+// f is the largest scale that lands every part by `duration`. A duration
+// shorter than shortestBuild() gives f = 0: all parts start at once, and the
+// build lasts shortestBuild().
+function fit(parts: Part[], slots: Map<number, Slot>, duration: number): Map<number, Slot> {
+  const anchor = anchors(parts, slots);
+  let f = Infinity;
+  for (const [step, sl] of slots) {
+    const a = anchor.get(step)!;
+    if (a > 0) f = Math.min(f, (duration - (sl.land - a)) / a);
+  }
+  if (f === Infinity) return slots; // everything starts at 0
+  f = Math.max(0, f);
+  const out = new Map<number, Slot>();
+  for (const [step, sl] of slots) {
+    const a = anchor.get(step)!;
+    const start = a * f + (sl.start - a);
+    out.set(step, { start, dur: sl.dur, land: start + sl.dur });
+  }
+  return out;
+}
+
+function anchors(parts: Part[], slots: Map<number, Slot>): Map<number, number> {
+  const stepOf = new Map(parts.map((p) => [p.id, p.step]));
+  const out = new Map<number, number>();
+  for (const p of parts) {
+    const sl = slots.get(p.step);
+    if (!sl) continue;
+    const m = p.kind === 'bolts' ? slots.get(stepOf.get(p.supports[0]) ?? -1) : undefined;
+    out.set(p.step, m ? m.start : sl.start);
+  }
+  return out;
+}
+
+// the shortest build at this speed, in ms: every part starts at once, and
+// the slowest one (with its bolts) sets the end
+export function shortestBuild(parts: Part[], speed = 1): number {
+  const slots = sequence(parts, speed);
+  const anchor = anchors(parts, slots);
+  return Math.max(0, ...[...slots].map(([step, sl]) => sl.land - anchor.get(step)!));
+}
+
+function sequence(parts: Part[], speed: number): Map<number, Slot> {
   const out = new Map<number, Slot>();
   const byId = new Map(parts.map((p) => [p.id, p]));
   const k = 1 / speed;
@@ -796,7 +852,8 @@ export type RenderOpts = {
   maxStep?: number; // draw only the parts up to this build step
   animate?: boolean;
   stepMs?: number; // painter only: ms between two steps
-  speed?: number; // exact renderer: speed of the build animation (default 1)
+  speed?: number; // exact renderer: how fast one part comes in (default 1)
+  duration?: number; // exact renderer: the whole build lasts this long, ms (see timeline)
   bolts?: boolean;
 };
 

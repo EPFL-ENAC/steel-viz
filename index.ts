@@ -4,5 +4,5 @@
 // The section tables are not in the package: pass their CSV text to loadCatalog().
 export { DEFAULTS, floating, generate, type Detail, type Form, type MemberCheck, type Params, type Result } from './generate.ts';
 export { loadCatalog, type Catalog, type Family, type Section } from './sections.ts';
-export { BOLT_MS, CRANES, DETAIL, VIEWS, camera, forSize, render, timeline, type Part, type PartInfo, type RenderOpts, type Slot } from './steel.ts';
+export { BOLT_MS, CRANES, DETAIL, VIEWS, buildEnd, camera, forSize, render, shortestBuild, timeline, type Part, type PartInfo, type RenderOpts, type Slot, type TimelineOpts } from './steel.ts';
 export { findSection, fromHubConnection, toSpecimen, type SectionRef, type Specimen, type SpecimenBeam } from './specimen.ts';
