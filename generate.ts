@@ -9,7 +9,7 @@
 // (checks.ts), with the sway effects from its buckling factor alphaCr.
 // A real test specimen (specimen.ts) skips all the random draws: its column
 // and beams are given, the solver only checks it.
-import { add, cross, len, mul, norm, sub, type V } from './vec.ts';
+import { add, cross, dot, len, mul, norm, sub, type V } from './vec.ts';
 import { buckling, solve, type Elem, type FNode, type Solved } from './solver.ts';
 import { memberRatio } from './checks.ts';
 import type { Catalog, Section } from './sections.ts';
@@ -19,6 +19,7 @@ import {
 } from './steel.ts';
 import { overlap, own } from './clash.ts';
 import { BEAM_CONNS, findSection, type Specimen } from './specimen.ts';
+import { actuator, block, clevis, hingeSize, link } from './rig.ts';
 
 export type Detail = 'members' | 'plates' | 'bolts';
 export type Params = {
@@ -126,10 +127,11 @@ type Splice = { z: number; sec: Section; kind: 'bearing' | 'flange' };
 // base: the gussets on the base plates, none, on the flange faces, or on all four faces
 type Base = 'none' | 'flange' | 'all';
 // id: the specimen id. continuity: false leaves out the continuity plates.
+// load: what the actuators of a specimen push (see specimenRig).
 // minA: the lightest area sizing may pick for a member (raised when alphaCr is too low).
 export type Structure = {
   form: Form | 'specimen'; id?: string; H: number; col: Section; cols: Col[]; arms: Arm[]; secs: Secondary[]; splice?: Splice; base?: Base; continuity?: boolean;
-  minA?: Record<string, number>;
+  load?: 'beam' | 'column'; minA?: Record<string, number>;
 };
 const colId = (i: number) => (i ? `column${i + 1}` : 'column');
 const baseId = (i: number) => (i ? `base${i + 1}` : 'base');
@@ -553,6 +555,8 @@ function specimen(spec: Specimen, cat: Catalog): Structure {
   const H = spec.column.height;
   const bad = (msg: string) => new Error(`${spec.id}: ${msg}`);
   if (!(H > 0)) throw bad(`the column height must be above 0, not ${JSON.stringify(H)}`);
+  const load = spec.load ?? 'beam';
+  if (load !== 'beam' && load !== 'column') throw bad(`load must be beam or column, not ${JSON.stringify(spec.load)}`);
   const col = findSection(spec.column.section, cat);
   const arms: Arm[] = (spec.beams ?? []).map((b, i) => {
     const id = `beam${i + 1}`;
@@ -571,7 +575,105 @@ function specimen(spec: Specimen, cat: Catalog): Structure {
   for (const a of arms)
     for (const o of arms)
       if (a !== o && a.bearing === o.bearing && a.z - a.sec.d < o.z && o.z - o.sec.d < a.z) throw bad(`${a.id} and ${o.id} are on the same face at the same height`);
-  return { form: 'specimen', id: spec.id, H, col, cols: [{ x: [0, 0, 0] }], arms, secs: [], base: 'none', continuity: spec.continuity };
+  return { form: 'specimen', id: spec.id, H, col, cols: [{ x: [0, 0, 0] }], arms, secs: [], base: 'none', continuity: spec.continuity, load };
+}
+
+// ------------------------------------------------------------- test rig
+// A specimen stands in a test rig, drawn light (kind 'rig', see rig.ts). A
+// pin on a floor block holds the column foot. A loading head sits on the end
+// plate at the column top. All pins turn about the axis normal to the plane
+// of the first beam (x for a column alone). The far side is opposite to the
+// first beam.
+// - beam loaded: a pinned link holds the head to a reaction post on the far
+//   side. A vertical actuator pushes each beam tip, from a floor block.
+// - column loaded: an actuator pushes the head, from a reaction wall on the
+//   far side. Each beam tip stands on a pinned link to a floor block.
+// The pin of the link (or actuator) on the head is the top pin. holdSpecimen
+// holds the solver nodes the same way.
+const r5 = (x: number) => Math.round(x / 5) * 5;
+// the end plates on the column of a specimen
+const endT = (s: Section) => Math.max(25, Math.round(s.tf));
+// the horizontal direction at right angles to h
+const across = (h: V): V => [Math.round(h[1]), -Math.round(h[0]), 0];
+const firstDir = (st: Structure): V => (st.arms.length ? hdir(st.arms[0].bearing) : [0, 1, 0]);
+
+// below: the blocks and the foot pin, put down before the column. above: the
+// head, the links and the actuators, put on last.
+function specimenRig(st: Structure): { below: Part[]; above: Part[] } {
+  const { col, H } = st;
+  const o = { step: 0 };
+  const up: V = [0, 0, -1]; // the blocks come up from the floor
+  const A = across(firstDir(st));
+  const tp = endT(col);
+  // the foot pin, its tongue under the end plate, on a floor block
+  const Dc = Math.min(120, Math.max(50, r5(0.3 * Math.min(col.bf, col.d))));
+  const reach = hingeSize(Dc).reach;
+  const zf = -tp - reach;
+  const foot = Math.max(600, r50(2.5 * Math.max(col.bf, col.d)));
+  const floor = zf - 400;
+  // the actuators and links: their pin diameter, smaller for a narrow beam flange
+  const Da = Math.min(80, Math.max(40, r5(0.2 * Math.min(col.bf, col.d))));
+  const tips = st.arms.map((a) => {
+    const h = hdir(a.bearing);
+    const D = Math.max(20, Math.min(Da, 5 * Math.floor((a.sec.bf - 2) / 10)));
+    const t = a.L - 1.3 * D - 30; // the pin plate ends 30 mm before the tip
+    const P = add(start(st, a), mul(h, t));
+    const zb = a.z - a.sec.d;
+    const size = Math.max(300, Math.min(600, 2 * (t - foot / 2 - 50)));
+    const top = Math.max(floor + 100, Math.min(floor + 400, zb - (2 * hingeSize(D).reach + 4 * D) - 100));
+    return { id: a.id, h, D, t, P, zb, size, top };
+  });
+  // the far side: the post (or wall) stands past the beam tips there
+  const beam = st.load !== 'column';
+  const s = mul(firstDir(st), -1);
+  const sx = Math.abs(s[0]) > 0.5;
+  const hs = (sx ? col.bf : col.d) / 2 + 15; // the head face, from the column axis
+  const [depth, wide] = beam ? [400, 500] : [600, 1000];
+  // far enough that a 45° view sees the beam tip next to the post, not behind it
+  const far = Math.max(hs + 1200, ...tips.filter((k) => dot(k.h, s) > 0.5).map((k) => k.t + Math.max(k.size / 2 + 300, wide / 2 + 150)));
+  const hh = Math.max(250, r50(2.6 * Da + 80));
+  const zl = H + tp + hh / 2;
+  const wallTop = zl + 400;
+  const wall = beam ? 'post' : 'wall';
+  const below = [
+    block('foot-block', [0, 0, zf - 200], [foot, foot, 400], { ...o, from: up }),
+    block(wall, add(mul(s, far + depth / 2), [0, 0, (floor + wallTop) / 2]), sx ? [depth, wide, wallTop - floor] : [wide, depth, wallTop - floor],
+      { ...o, from: up, type: beam ? 'Reaction post' : 'Reaction wall' }),
+    ...tips.map((k) => block(`${k.id}-block`, [k.P[0], k.P[1], (floor + k.top) / 2], [k.size, k.size, k.top - floor], { ...o, from: up })),
+    clevis('foot-pin', [0, 0, zf], [0, 0, 1], A, Dc, reach, { ...o, supports: ['foot-block'] }),
+  ];
+  const [from, to]: V[] = [add(mul(s, far), [0, 0, zl]), add(mul(s, hs), [0, 0, zl])];
+  const tops = { ...o, supports: [wall, 'head'] };
+  const above = [
+    block('head', [0, 0, H + tp + hh / 2], [col.bf + 30, col.d + 30, hh], { ...o, supports: ['column-cap'], type: 'Loading head' }),
+    beam ? link('top-link', from, to, A, Da, tops) : actuator('top-actuator', from, to, A, Da, tops),
+    ...tips.map((k) => {
+      const [p0, p1]: V[] = [[k.P[0], k.P[1], k.top], [k.P[0], k.P[1], k.zb]];
+      const ko = { ...o, supports: [`${k.id}-block`, k.id] };
+      return beam ? actuator(`${k.id}-actuator`, p0, p1, across(k.h), k.D, ko) : link(`${k.id}-link`, p0, p1, across(k.h), k.D, ko);
+    }),
+  ];
+  return { below, above };
+}
+
+// The solver supports of a specimen in its rig. The foot pin holds all but
+// the turn about the pin axis. Beam loaded: the link holds the top in plan
+// (the tip actuators bring the load, they don't hold). Column loaded: the
+// top is held out of plane only (the top actuator brings the load), and the
+// tip links hold the beam tips up.
+function holdSpecimen(st: Structure, nodes: FNode[]) {
+  const at = (x: V) => nodes.find((n) => Math.hypot(...sub(n.x, x)) < 1);
+  const hold = (x: V, dofs: number[]) => {
+    const n = at(x);
+    if (n) n.fixed = [0, 1, 2, 3, 4, 5].map((d) => dofs.includes(d));
+  };
+  const onX = Math.abs(across(firstDir(st))[0]) > 0.5; // the pin axis is x (else y)
+  const c = st.cols[0].x;
+  hold(c, [0, 1, 2, onX ? 4 : 3, 5]);
+  if (st.load === 'column') {
+    hold(add(c, [0, 0, st.H]), [onX ? 0 : 1]);
+    for (const a of st.arms) hold(add(start(st, a), mul(hdir(a.bearing), a.L)), [2]);
+  } else hold(add(c, [0, 0, st.H]), [0, 1]);
 }
 
 // ------------------------------------------------------------- analysis
@@ -674,6 +776,7 @@ function model(st: Structure, p: Params): Model {
     const p0 = add(start(st, a), mul(h, s.a));
     chain(s.id, [p0, add(p0, mul(side, s.L))], s.sec, PINNED.includes(s.conn), w(s.sec) + p.load / 2);
   }
+  if (st.form === 'specimen') holdSpecimen(st, nodes);
   // a column is one member from the base to the splice, then to the top
   const lengths = new Map<string, number>([['column', sp ? sp.z : st.H], ['column-top', sp ? st.H - sp.z : 0]]);
   elems.forEach((e, i) => {
@@ -1019,10 +1122,26 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
     const info: PartInfo = { type, of: on };
     if (plates && ps.length) extras.push({ after: on, part: { id, step: 0, supports: [on], kind: 'plate', from, faces: ps.flatMap((q) => q.faces), boxes: ps.map((q) => q.box), dots: [], info } });
   };
+  // a specimen stands in its test rig, not on a base plate
+  const rig = st.form === 'specimen' ? specimenRig(st) : undefined;
   // each column: its lower shaft and, above a splice, its upper shaft
   const cols = st.cols.map((c, ci) => {
     const at = (z: number) => add(c.x, [0, 0, z]);
     const lo = geo(colId(ci), st.col, c.x, at(sp ? sp.z : st.H), false);
+    const col = (g: Geo, type: string, member: string): PartInfo => ({ type, sec: g.sec, L: len(sub(g.p1, g.p0)), member });
+    if (rig) {
+      // the rig under the column, then the column with an end plate on each end
+      out.push(...rig.below);
+      const tp = endT(st.col);
+      const end = (id: string, z: number, on: string): Part => {
+        const f = flat(at(z), [1, 0, 0], [0, 1, 0], tp, rect(st.col.bf + 30, st.col.d + 30));
+        return { id, step: step++, supports: [on], kind: 'plate', from: [0, 0, -1], faces: f.faces, boxes: [f.box], dots: [], info: { type: 'End plate', of: lo.id } };
+      };
+      out.push(end(`${lo.id}-foot`, -tp / 2, 'foot-pin'));
+      out.push({ id: lo.id, step: step++, supports: [`${lo.id}-foot`], kind: 'column', from: [0, 0, 1], faces: memberFaces(lo, seg), boxes: memberBoxes(lo), dots: [], info: col(lo, 'Column', 'column') });
+      out.push(end(`${lo.id}-cap`, st.H + tp / 2, lo.id));
+      return { lo, hi: lo };
+    }
     const centre = add(c.x, [0, 0, -tb / 2]);
     out.push({
       id: baseId(ci), step: step++, supports: [], kind: 'base', from: [0, 0, -1], info: { type: 'Base plate', of: lo.id },
@@ -1030,7 +1149,6 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
       boxes: [boxOf(centre, [0, 1, 0], [0, 0, 1], st.col.bf + 150, st.col.d + 150, tb)],
       dots: bolts ? [-1, 1].flatMap((sx) => [-1, 1].map((sy) => ({ p: add(c.x, [sx * (st.col.bf / 2 + 40), sy * (st.col.d / 2 + 40), 1]), n: [0, 0, 1] as V }))) : [],
     });
-    const col = (g: Geo, type: string, member: string): PartInfo => ({ type, sec: g.sec, L: len(sub(g.p1, g.p0)), member });
     out.push({ id: lo.id, step: step++, supports: [baseId(ci)], kind: 'column', from: [0, 0, 1], faces: memberFaces(lo, seg), boxes: memberBoxes(lo), dots: [], info: col(lo, 'Column', 'column') });
     if (!sp) return { lo, hi: lo };
     const hi = geo(`${colId(ci)}-top`, sp.sec, at(sp.z + (sp.kind === 'bearing' ? BEARING_T : 0)), at(st.H), false);
@@ -1202,6 +1320,7 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
     res.push(q);
     res.push(...kept.filter((k) => extras.find((e) => e.part === k)!.after === q.id));
   }
+  if (rig) res.push(...rig.above);
   res.forEach((q, i) => (q.step = i));
   return res;
 }
@@ -1223,9 +1342,9 @@ function details(
   st.cols.forEach((c, ci) => {
     const { lo, hi } = cols[ci];
     const id = colId(ci);
-    // cap plate
+    // cap plate (a specimen has an end plate there, see parts)
     const cap = add(hi.p1, [0, 0, 10]);
-    extra(`${id}-cap`, hi.id, [flat(cap, X, Y, 20, rect(hi.sec.bf + 30, hi.sec.d + 30))], down, 'Cap plate');
+    if (st.form !== 'specimen') extra(`${id}-cap`, hi.id, [flat(cap, X, Y, 20, rect(hi.sec.bf + 30, hi.sec.d + 30))], down, 'Cap plate');
     // continuity plates, at the flange levels of each moment beam on a flange face
     const levels: number[] = [];
     // each beam end on a column: column, connection, bearing, top of steel, section

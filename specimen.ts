@@ -27,6 +27,9 @@ export type Specimen = {
   column: { section: SectionRef; height: number };
   beams: SpecimenBeam[]; // [] gives a column alone
   continuity?: boolean; // plates across the column at the beam flanges (default true)
+  // what the actuators push (default beam): the beam tips, or the column top
+  // (then the beam tips stand on links). See specimenRig in generate.ts.
+  load?: 'beam' | 'column';
   notes?: string[]; // what we draw differently from the real test, copied into the log
 };
 

@@ -7,7 +7,7 @@ import { floating } from './generate.ts';
 import { clashes } from './clash.ts';
 import { render } from './steel.ts';
 import { renderHLR } from './hlr.ts';
-import { actuator, block, clevis, crosshead, hingeSize, rigMember, rigSection, roller } from './rig.ts';
+import { actuator, block, clevis, crosshead, hingeSize, link, rigMember, rigSection, roller } from './rig.ts';
 
 const cat = loadCatalog('aisc', ...readTables('aisc'));
 const X: [number, number, number] = [1, 0, 0];
@@ -16,7 +16,8 @@ const D = 60;
 const reach = hingeSize(D).reach;
 
 // a block on the floor, a clevis on it, a post on the clevis, an actuator
-// from a wall to the post, a roller and a crosshead next to it
+// from a wall to the post, a link from the post to an anchor, a roller and a
+// crosshead next to it
 function smallRig() {
   const sec = rigSection(cat, 300);
   const top = 400 + reach;
@@ -26,6 +27,8 @@ function smallRig() {
     rigMember('post', sec, [0, 0, top], [0, 0, top + 2000], { step: 2, supports: ['foot'] }),
     block('wall', [0, -2500, 1500], [800, 600, 3000], { step: 0 }),
     actuator('jack', [0, -2200, top + 1800], [0, -sec.d / 2, top + 1800], X, D, { step: 3, supports: ['wall', 'post'] }),
+    block('anchor', [0, 2500, 1500], [800, 600, 3000], { step: 0 }),
+    link('tie', [0, 2200, top + 1000], [0, sec.d / 2, top + 1000], X, D, { step: 3, supports: ['anchor', 'post'] }),
     roller('roll', [2000, 0, 300], X, 80, 400, { step: 0 }),
     crosshead('head', [-2000, 0, 3000], X, 1500, 0, sec, { step: 0 }),
   ];
@@ -62,6 +65,7 @@ test('the renderers draw the rig with its own class', () => {
 test('a joint or an actuator too short for its pins is an error', () => {
   assert.throws(() => clevis('c', [0, 0, 0], Z, X, D, reach - 10, { step: 0 }), /needs/);
   assert.throws(() => actuator('a', [0, 0, 0], [0, 0, 2 * reach], X, D, { step: 0 }), /too short/);
+  assert.throws(() => link('l', [0, 0, 0], [0, 0, 2 * reach + D], X, D, { step: 0 }), /too short/);
 });
 
 test('rigSection: the lightest I deep enough', () => {

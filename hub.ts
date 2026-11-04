@@ -66,9 +66,11 @@ export function fromHubConnection(rec: HubRecord): Specimen {
   const { text, value, num, unsupported } = fields(rec, id);
   const type = text('specimen_type');
   if (!type) throw new Error(`${id}: specimen_type is missing`);
-  const sub = /^(Exterior|Interior)\b.*\bSubassembly$/i.exec(type);
+  // "Interior - Column Loaded - Subassembly": the column top is pushed, the beam tips held
+  const sub = /^(Exterior|Interior)\b.*\b(Beam|Column) Loaded\b.*\bSubassembly$/i.exec(type);
   if (!sub) throw unsupported('specimen_type');
   const interior = sub[1].toLowerCase() === 'interior';
+  const load = sub[2].toLowerCase() as 'beam' | 'column';
 
   const column = section(rec.section_c, num('d_c'), num('b_cf'), num('t_cf'), num('t_cw'));
   const beam = section(rec.section_b, num('d_b'), num('b_bf'), num('t_bf'), num('t_bw'));
@@ -89,7 +91,7 @@ export function fromHubConnection(rec: HubRecord): Specimen {
   const beams: SpecimenBeam[] = (interior ? [0, 180] as const : [0] as const).map((bearing) => ({
     section: beam, bearing, length: interior ? lb / 2 : lb, connection,
   }));
-  return { id, column: { section: column, height }, beams, continuity: tcp > 0, notes };
+  return { id, column: { section: column, height }, beams, continuity: tcp > 0, load, notes };
 }
 
 // ------------------------------------------------------------- any record

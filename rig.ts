@@ -117,6 +117,22 @@ export function actuator(id: string, from: V, to: V, axis: V, D: number, o: RigO
   return rigPart(id, s, { from: u, ...o }, 'Actuator');
 }
 
+// A pinned link: a pin joint on each mount face and a round bar between them.
+// It holds the two faces along the bar only. axis: the pin axis of both joints.
+export function link(id: string, from: V, to: V, axis: V, D: number, o: RigOpts): Part {
+  const L = len(sub(to, from));
+  const u = norm(sub(to, from));
+  const ax = norm(axis);
+  const r = hingeSize(D).reach;
+  if (L < 2 * r + 2 * D) throw new Error(`link ${id}: ${Math.round(L)} mm is too short for its pins`);
+  const s = join(
+    hinge(from, u, ax, D, r),
+    hinge(to, mul(u, -1), ax, D, r),
+    bar(rodSection('link', 1.4 * D), add(from, mul(u, r)), sub(to, mul(u, r))),
+  );
+  return rigPart(id, s, { from: u, ...o }, 'Link');
+}
+
 // A frame member of the rig: an I section from p0 to p1. w: its depth
 // direction (default: vertical for a beam, y for a column).
 export function rigMember(id: string, sec: Section, p0: V, p1: V, o: RigOpts, w?: V): Part {

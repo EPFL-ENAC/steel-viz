@@ -108,11 +108,18 @@ A setting can give a mechanism (the status says so), never a clash or a floating
 
 Parts must not go through each other. A secondary beam is coped (its flanges cut back) where it meets the flanges of its arm, and its plate fits between those flanges. A brace stays above the arms under it on the same face of its column, and is long enough that its two gussets don't touch. `clash.ts` checks this with boxes, and `geometry.test.ts` runs it on every form, 240 structures, and on 72 more with every member in its other shape (`shapeP` 1).
 
-It can also draw a real test of RESSLab Hub instead of a seed: a specimen. For now it draws a beam-to-column subassembly (the test of one connection): one column on a base plate, with one or two beams. That's what the `connection` table of the hub describes, 99 of its 100 tests.
+It can also draw a real test of RESSLab Hub instead of a seed: a specimen. For now it draws a beam-to-column subassembly (the test of one connection): one column with one or two beams, in its test rig. That's what the `connection` table of the hub describes, 99 of its 100 tests.
 
-The sections are the real ones, so there is no fix loop and no sizing. The solver runs once, and the log gives `alphaCr` and the max ratio under `--load`, only as information. The cap plate and the continuity plates are drawn. Splices, foot gussets, trusses, rods and posts are not.
+The sections are the real ones, so there is no fix loop and no sizing. The solver runs once, and the log gives `alphaCr` and the max ratio under `--load`, only as information. The end plates and the continuity plates are drawn. Splices, foot gussets, trusses, rods and posts are not.
 
-`specimen.ts` reads two kinds of JSON file. The first one is a record of the hub `connection` table, as the hub API gives it (numbers, `null`) or as a row of `connections.csv` (strings, `NA`). A file with a `specimen_type` is a hub record. The two files in `specimens/` are hub records (resslab-hub-data is public domain). The second one is our own `Specimen`, for a test that is not in the hub:
+The test rig is drawn with lighter lines (parts of kind `rig`, built with `rig.ts`). The column has an end plate on each end. A pin on a floor block holds its foot. A loading head sits on the top end plate. All the pins turn about the same axis, at right angles to the plane of the first beam.
+
+- Beam loaded (the default): a pinned link holds the head to a reaction post. A vertical actuator pushes each beam tip, from a floor block.
+- Column loaded: an actuator pushes the head, from a reaction wall. Each beam tip stands on a pinned link to a floor block.
+
+The pin of the link (or of the actuator) on the head is the top pin of the column. The solver holds the nodes the same way, but an actuator only brings the load, it holds nothing. So a column loaded test with no beam, or with a beam on a shear tab, is a mechanism.
+
+`hub.ts` reads two kinds of JSON file. The first one is a record of the hub `connection` table, as the hub API gives it (numbers, `null`) or as a row of `connections.csv` (strings, `NA`). A file with a `specimen_type` is a hub record. The two files in `specimens/` are hub records (resslab-hub-data is public domain). The second one is our own `Specimen`, for a test that is not in the hub:
 
 ```json
 {
@@ -133,12 +140,14 @@ The sections are the real ones, so there is no fix loop and no sizing. The solve
 - `at`: the height of the beam centre line above the column foot. By default, half the column height.
 - `connection`: one of the kinds of "Beam end connections" above that fit a column (`shear_tab`, `end_plate`, `flange_plates`, `welded`, `clip_angles`, `seated`, `stiffened_seat`, `tee`, `end_plate_stiffened`). A beam alone on a pinned kind (a shear tab, clip angles, a seat, a tee) is a mechanism: the log says so, and the drawing still comes out.
 - `continuity: false` leaves out the continuity plates. `beams: []` gives a column alone.
+- `load`: `beam` (the default) or `column`, what the actuators push (see the rig above).
 
 From a hub record:
 
 - The sections come from the numbers (`d_c b_cf t_cf t_cw`, `d_b b_bf t_bf t_bw`), not from the names. The names are free text (`build up H section`) and don't link to the section tables.
 - An exterior test has one beam of length `l_b`. An interior test has two, one on each flange, `l_b / 2` each (there `l_b` is the whole span). The beams are at half the column height `h_c`.
 - `t_cp` 0 means no continuity plates.
+- `specimen_type` gives the load: "Interior - Column Loaded - Subassembly" is column loaded.
 - The connection is the closest one we can draw:
 
 | hub | drawn as | not drawn yet |
@@ -208,7 +217,9 @@ Files:
 - `solver.ts`: 3D frame solver (6 DOF per node, pinned ends, finds mechanisms), and the buckling analysis (`alphaCr`).
 - `checks.ts`: the member checks (AISC 360-22 E3, F2, F6, H1-1).
 - `generate.ts`: topology, the fix loop, trusses and rods, posts and beam splices, and the sizing. Also the specimen path (`buildSpecimen`).
-- `specimen.ts`, `specimens/`: a real test as input (the `Specimen` type, the section lookup, the hub record reader), and two hub records as examples and test data.
+- `specimen.ts`, `specimens/`: a real test as input (the `Specimen` type, the section lookup), and two hub records as examples and test data.
+- `hub.ts`: reads a record of the hub test tables as a `Specimen`. `hub-count.ts` runs it on every row of resslab-hub-data and counts what we can draw (`node hub-count.ts [folder]`).
+- `rig.ts`: the test rig parts (reaction blocks, pins, links, actuators, rollers, rig frame members).
 - `steel.ts`: geometry (profiles, copes, plates, clevis, bolts), camera and the painter renderer.
 - `clash.ts`: do two parts go through each other (each part as a few boxes).
 - `score.ts`, `pick.ts`: the logo score, and the scan over many seeds.
