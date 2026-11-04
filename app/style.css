@@ -34,7 +34,7 @@ body {
 .sections { flex: 1; }
 .foot { position: sticky; bottom: 0; display: grid; gap: var(--space-1); padding: var(--space-2) var(--space-3); background: var(--bg); border-top: var(--border-w) solid var(--border); }
 
-/* a section: details, the summary carries the title and the "n changed" badge */
+/* a section: details, the summary carries the title and the "n changed" dot */
 .section { border-bottom: var(--border-w) solid var(--border); }
 .section summary {
   display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3);
@@ -50,7 +50,9 @@ body {
 }
 .section[open] > summary::before { transform: rotate(45deg); }
 .section summary:hover { color: var(--primary); }
-.section summary .epfl-badge { text-transform: none; letter-spacing: 0; font-size: var(--fs-xs); font-weight: var(--w-normal); }
+/* settings not on their default: the EPFL red dot (7 x 6 px), then the count */
+.section summary .changed { display: inline-flex; align-items: center; gap: 0.25rem; font-size: var(--fs-xs); font-weight: var(--w-normal); letter-spacing: 0; color: var(--fg-muted); font-variant-numeric: tabular-nums; }
+.section summary .changed::before { content: ''; width: 0.4375rem; height: 0.375rem; background: var(--primary); }
 .section summary:focus-visible { outline-offset: -0.125rem; }
 .section .body { display: grid; gap: var(--space-3); padding: var(--space-1) var(--space-3) var(--space-3); min-width: 0; }
 .section .reset { display: flex; justify-content: flex-end; }
@@ -168,3 +170,5 @@ input[type="range"]:hover::-moz-range-thumb { background: var(--primary); }
 
 /* runtime errors of the generator, click to hide */
 .error { position: fixed; left: 0; right: 0; bottom: 0; margin: 0; padding: var(--space-2) var(--space-3); max-height: 30vh; overflow: auto; background: var(--epfl-red-dark); color: var(--epfl-white); font-family: var(--font-mono); font-size: var(--fs-xs); white-space: pre-wrap; z-index: 9; cursor: pointer; }
+
+.sr-only { position: absolute; width: 0.0625rem; height: 0.0625rem; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }

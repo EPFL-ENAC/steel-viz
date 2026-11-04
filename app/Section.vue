@@ -1,6 +1,6 @@
 <!--
   A section of the rail: a details element with its title, how many of its
-  settings differ from the default, and a Reset for them. The open state is
+  settings differ from the default (a small red dot and the count), and a Reset for them. The open state is
   kept in this browser (localStorage, when it works).
 -->
 <script setup lang="ts">
@@ -29,7 +29,7 @@ const n = computed(() => (props.keys ? changed(props.keys) : 0));
   <details class="section" :open="isOpen" @toggle="isOpen = ($event.target as HTMLDetailsElement).open">
     <summary>
       <span class="title">{{ title }}</span>
-      <span v-if="n" class="epfl-badge epfl-badge-primary">{{ n }} changed</span>
+      <span v-if="n" class="changed" :title="`${n} changed`"><span class="sr-only">, {{ n }} changed</span><span aria-hidden="true">{{ n }}</span></span>
     </summary>
     <div class="body">
       <slot />
