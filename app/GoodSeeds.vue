@@ -46,9 +46,8 @@ function open(seed: number) {
 </script>
 
 <template>
-  <fieldset>
-    <legend>Good seeds</legend>
-    <div class="actions"><button type="button" @click="find">Find good seeds</button></div>
+  <div class="stack">
+    <div class="actions"><button type="button" class="epfl-btn epfl-btn-secondary epfl-btn-sm" @click="find">Find good seeds</button></div>
     <p class="note">{{ note }}</p>
     <div class="picks">
       <button
@@ -64,5 +63,5 @@ function open(seed: number) {
         <span>{{ b.form }} {{ b.seed }}, {{ b.score.toFixed(2) }}</span>
       </button>
     </div>
-  </fieldset>
+  </div>
 </template>

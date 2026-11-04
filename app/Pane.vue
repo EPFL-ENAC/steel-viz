@@ -61,7 +61,6 @@ const paint = () => viewer?.setColors({ bg: css('--bg', '#ffffff'), fg: css('--f
 function draw(animate = false, fast = false) {
   const b = props.built;
   if (!b) return;
-  animate &&= s.duration > 0;
   const E = props.engine;
   const a = anim(E, b.r.parts);
   const t0 = performance.now();
