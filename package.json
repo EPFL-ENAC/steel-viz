@@ -31,30 +31,10 @@
     "test": "node --test",
     "type-check": "tsc"
   },
-  "peerDependencies": {
-    "three": ">=0.187.0",
-    "three-edge-projection": ">=0.0.11",
-    "three-mesh-bvh": ">=0.9.17"
-  },
-  "peerDependenciesMeta": {
-    "three": {
-      "optional": true
-    },
-    "three-edge-projection": {
-      "optional": true
-    },
-    "three-mesh-bvh": {
-      "optional": true
-    }
-  },
   "devDependencies": {
     "@types/node": "24.19.2",
-    "@types/three": "0.187.0",
     "@vitejs/plugin-vue": "^6.0.10",
     "esbuild": "0.25.12",
-    "three": "0.187.0",
-    "three-edge-projection": "github:gkjohnson/three-edge-projection#v0.0.11",
-    "three-mesh-bvh": "0.9.17",
     "typescript": "7.0.2",
     "vite": "^8.3.5",
     "vue": "^3.5.44"

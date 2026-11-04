@@ -12,5 +12,5 @@
     "types": []
   },
   "include": [],
-  "files": ["index.ts", "3d.ts", "three-edge-projection.d.ts"]
+  "files": ["index.ts", "3d.ts"]
 }
