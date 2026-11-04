@@ -15,7 +15,7 @@ import { memberRatio } from './checks.ts';
 import type { Catalog, Section } from './sections.ts';
 import {
   box3, boxOf, flat, geo, hardware, memberBoxes, memberFaces, resolve, splicePlates, stiffener, supportFace, BEARING_T, EDGE, PINNED, SETBACK, SPLICE_HALF,
-  type ConnType, type Geo, type P2, type Part, type Plate,
+  type ConnType, type Geo, type P2, type Part, type PartInfo, type Plate,
 } from './steel.ts';
 import { overlap } from './clash.ts';
 import { BEAM_CONNS, findSection, type Specimen } from './specimen.ts';
@@ -898,8 +898,9 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
   const sp = st.splice;
   // the details added at the end: each goes right after the part it stands on
   const extras: { after: string; part: Part }[] = [];
-  const extra = (id: string, on: string, ps: Plate[], from: V) => {
-    if (plates && ps.length) extras.push({ after: on, part: { id, step: 0, supports: [on], kind: 'plate', from, faces: ps.flatMap((q) => q.faces), boxes: ps.map((q) => q.box), dots: [] } });
+  const extra = (id: string, on: string, ps: Plate[], from: V, type: string) => {
+    const info: PartInfo = { type, of: on };
+    if (plates && ps.length) extras.push({ after: on, part: { id, step: 0, supports: [on], kind: 'plate', from, faces: ps.flatMap((q) => q.faces), boxes: ps.map((q) => q.box), dots: [], info } });
   };
   // each column: its lower shaft and, above a splice, its upper shaft
   const cols = st.cols.map((c, ci) => {
@@ -907,20 +908,21 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
     const lo = geo(colId(ci), st.col, c.x, at(sp ? sp.z : st.H), false);
     const centre = add(c.x, [0, 0, -tb / 2]);
     out.push({
-      id: baseId(ci), step: step++, supports: [], kind: 'base', from: [0, 0, -1],
+      id: baseId(ci), step: step++, supports: [], kind: 'base', from: [0, 0, -1], info: { type: 'Base plate', of: lo.id },
       faces: box3(centre, [0, 1, 0], [0, 0, 1], st.col.bf + 150, st.col.d + 150, tb),
       boxes: [boxOf(centre, [0, 1, 0], [0, 0, 1], st.col.bf + 150, st.col.d + 150, tb)],
       dots: bolts ? [-1, 1].flatMap((sx) => [-1, 1].map((sy) => ({ p: add(c.x, [sx * (st.col.bf / 2 + 40), sy * (st.col.d / 2 + 40), 1]), n: [0, 0, 1] as V }))) : [],
     });
-    out.push({ id: lo.id, step: step++, supports: [baseId(ci)], kind: 'column', from: [0, 0, 1], faces: memberFaces(lo, seg), boxes: memberBoxes(lo), dots: [] });
+    const col = (g: Geo, type: string, member: string): PartInfo => ({ type, sec: g.sec, L: len(sub(g.p1, g.p0)), member });
+    out.push({ id: lo.id, step: step++, supports: [baseId(ci)], kind: 'column', from: [0, 0, 1], faces: memberFaces(lo, seg), boxes: memberBoxes(lo), dots: [], info: col(lo, 'Column', 'column') });
     if (!sp) return { lo, hi: lo };
     const hi = geo(`${colId(ci)}-top`, sp.sec, at(sp.z + (sp.kind === 'bearing' ? BEARING_T : 0)), at(st.H), false);
     const sid = `${colId(ci)}-splice`;
     const k = splicePlates(lo, hi, sp.kind);
     // without the plates, the upper shaft stands on the lower one
-    if (plates) out.push({ id: sid, step: step++, supports: [lo.id], kind: 'plate', from: [0, 0, 1], faces: k.faces, boxes: k.boxes, dots: [] });
-    out.push({ id: hi.id, step: step++, supports: [plates ? sid : lo.id], kind: 'column', from: [0, 0, 1], faces: memberFaces(hi, seg), boxes: memberBoxes(hi), dots: [] });
-    if (bolts) out.push({ id: `${sid}-bolts`, step: step++, supports: [hi.id, sid], kind: 'bolts', faces: [], dots: k.dots });
+    if (plates) out.push({ id: sid, step: step++, supports: [lo.id], kind: 'plate', from: [0, 0, 1], faces: k.faces, boxes: k.boxes, dots: [], info: { type: `Column splice, ${sp.kind}`, of: lo.id } });
+    out.push({ id: hi.id, step: step++, supports: [plates ? sid : lo.id], kind: 'column', from: [0, 0, 1], faces: memberFaces(hi, seg), boxes: memberBoxes(hi), dots: [], info: col(hi, 'Column, upper shaft', 'column-top') });
+    if (bolts) out.push({ id: `${sid}-bolts`, step: step++, supports: [hi.id, sid], kind: 'bolts', faces: [], dots: k.dots, info: { type: 'Bolts', of: sid } });
     return { lo, hi };
   });
   // the shaft of column ci at height z
@@ -928,23 +930,25 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
 
   // one member and its end connections, in build order: plates, member, bolts
   type End = { S: Geo; sId: string; conn: ConnType; at: 'from' | 'to' };
-  // from: the direction the member (and its plates) come from
-  const member = (g: Geo, ends: End[], from: V) => {
+  // from: the direction the member (and its plates) come from. type and
+  // who: its PartInfo type and its id in the solver model.
+  const member = (g: Geo, ends: End[], from: V, type: string, who: string) => {
     const rs = ends.map((e) => resolve(g, e.S, e.at));
     g.copes = rs.flatMap((r) => (r.cope ? [r.cope] : []));
     const hws = ends.map((e, i) => ({ e, hw: hardware(g, e.conn, rs[i]) }));
     const supports: string[] = [];
     for (const { e, hw } of hws) {
       if (plates && hw.faces.length) {
-        out.push({ id: `${g.id}-${e.at}-conn`, step: step++, supports: [e.sId], kind: 'plate', from, faces: hw.faces, boxes: hw.boxes, dots: [] });
+        out.push({ id: `${g.id}-${e.at}-conn`, step: step++, supports: [e.sId], kind: 'plate', from, faces: hw.faces, boxes: hw.boxes, dots: [], info: { type: 'Connection', of: g.id, conn: [e.conn] } });
         supports.push(`${g.id}-${e.at}-conn`);
       } else supports.push(e.sId);
     }
     const Lg = len(sub(g.p1, g.p0));
     const cuts = hws.flatMap(({ e, hw }) => hw.reach.map((x) => (e.at === 'from' ? x : Lg - x)));
-    out.push({ id: g.id, step: step++, supports, kind: 'member', from, faces: memberFaces(g, seg, cuts), boxes: memberBoxes(g), dots: [] });
+    const info: PartInfo = { type, sec: g.sec, L: Lg, conn: ends.map((e) => e.conn), member: who };
+    out.push({ id: g.id, step: step++, supports, kind: 'member', from, faces: memberFaces(g, seg, cuts), boxes: memberBoxes(g), dots: [], info });
     const dots = hws.flatMap(({ hw }) => hw.dots);
-    if (bolts && dots.length) out.push({ id: `${g.id}-bolts`, step: step++, supports: [g.id, ...supports], kind: 'bolts', faces: [], dots });
+    if (bolts && dots.length) out.push({ id: `${g.id}-bolts`, step: step++, supports: [g.id, ...supports], kind: 'bolts', faces: [], dots, info: { type: 'Bolts', of: g.id, conn: ends.map((e) => e.conn) } });
   };
 
   const armGeo = new Map<string, Geo>();
@@ -957,18 +961,19 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
     const along = sec.d + 4 * EDGE;
     const bid = `${postId(a)}-base`;
     const bc = add(T, [0, 0, 10]);
-    if (plates) out.push({ id: bid, step: step++, supports: [P.id], kind: 'plate', from: up, faces: box3(bc, up, u, across, 20, along), boxes: [boxOf(bc, up, u, across, 20, along)], dots: [] });
+    if (plates) out.push({ id: bid, step: step++, supports: [P.id], kind: 'plate', from: up, faces: box3(bc, up, u, across, 20, along), boxes: [boxOf(bc, up, u, across, 20, along)], dots: [], info: { type: 'Post base plate', of: postId(a) } });
     // the web along the beam, so the flanges sit across it
     const pg = geo(postId(a), sec, add(T, [0, 0, 20]), add(T, [0, 0, h - 16]), false);
     pg.w = u;
     pg.v = cross(u, pg.u);
-    out.push({ id: pg.id, step: step++, supports: [plates ? bid : P.id], kind: 'member', from: up, faces: memberFaces(pg, seg), boxes: memberBoxes(pg), dots: [] });
+    const info: PartInfo = { type: 'Post', sec, L: len(sub(pg.p1, pg.p0)), member: postId(a) };
+    out.push({ id: pg.id, step: step++, supports: [plates ? bid : P.id], kind: 'member', from: up, faces: memberFaces(pg, seg), boxes: memberBoxes(pg), dots: [], info });
     const cc = add(T, [0, 0, h - 8]);
-    if (plates) out.push({ id: `${postId(a)}-cap`, step: step++, supports: [pg.id], kind: 'plate', from: up, faces: box3(cc, up, u, sec.bf + 20, 16, sec.d + 20), boxes: [boxOf(cc, up, u, sec.bf + 20, 16, sec.d + 20)], dots: [] });
+    if (plates) out.push({ id: `${postId(a)}-cap`, step: step++, supports: [pg.id], kind: 'plate', from: up, faces: box3(cc, up, u, sec.bf + 20, 16, sec.d + 20), boxes: [boxOf(cc, up, u, sec.bf + 20, 16, sec.d + 20)], dots: [], info: { type: 'Post cap plate', of: postId(a) } });
     const gauge = Math.max(50, P.sec.bf - 2 * EDGE);
     const v = cross(up, u);
     const dots = [-1, 1].flatMap((su) => [-1, 1].map((sv) => ({ p: add(add(add(T, mul(u, su * (sec.d / 2 + EDGE))), mul(v, (sv * gauge) / 2)), [0, 0, 21]), n: up })));
-    if (bolts) out.push({ id: `${postId(a)}-bolts`, step: step++, supports: [pg.id, bid], kind: 'bolts', faces: [], dots });
+    if (bolts) out.push({ id: `${postId(a)}-bolts`, step: step++, supports: [pg.id, bid], kind: 'bolts', faces: [], dots, info: { type: 'Bolts', of: postId(a) } });
   };
   for (const a of st.arms) {
     const h = hdir(a.bearing);
@@ -984,10 +989,11 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
       ends.push({ S: Sj, sId: Sj.id, conn: a.conn2!, at: 'to' });
     }
     const g = geo(a.id, a.sec, p0, p1, true);
+    const beam = a.to === undefined ? 'Cantilever beam' : 'Bay beam';
     // an arm slides in along its axis, a bay beam is lowered between its columns
     if (a.splice === undefined) {
       armGeo.set(a.id, g);
-      member(g, ends, a.to === undefined ? h : [0, 0, 1]);
+      member(g, ends, a.to === undefined ? h : [0, 0, 1], beam, a.id);
     } else {
       // two pieces, each on its column, then the splice plates on both
       const cut = add(o, mul(h, a.splice));
@@ -995,12 +1001,12 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
       const g2 = geo(farId(a), a.sec, cut, p1, true);
       armGeo.set(g1.id, g1);
       armGeo.set(g2.id, g2);
-      member(g1, [ends[0]], [0, 0, 1]);
-      member(g2, [ends[1]], [0, 0, 1]);
+      member(g1, [ends[0]], [0, 0, 1], `${beam}, near piece`, a.id);
+      member(g2, [ends[1]], [0, 0, 1], `${beam}, far piece`, a.id);
       const sid = `${a.id}-splice`;
       const k = splicePlates(g1, g2, 'flange');
-      if (plates) out.push({ id: sid, step: step++, supports: [g1.id, g2.id], kind: 'plate', from: [0, 0, 1], faces: k.faces, boxes: k.boxes, dots: [] });
-      if (bolts) out.push({ id: `${sid}-bolts`, step: step++, supports: [g2.id, sid], kind: 'bolts', faces: [], dots: k.dots });
+      if (plates) out.push({ id: sid, step: step++, supports: [g1.id, g2.id], kind: 'plate', from: [0, 0, 1], faces: k.faces, boxes: k.boxes, dots: [], info: { type: 'Beam splice', of: a.id } });
+      if (bolts) out.push({ id: `${sid}-bolts`, step: step++, supports: [g2.id, sid], kind: 'bolts', faces: [], dots: k.dots, info: { type: 'Bolts', of: sid } });
     }
     if (a.post) post(a, add(o, mul(h, a.post.a)), pieceAt(armGeo, a, a.post.a));
     a.braces.forEach((b, k) => {
@@ -1010,7 +1016,7 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
       member(bg, [
         { S: Sb, sId: Sb.id, conn, at: 'from' },
         { S: P, sId: P.id, conn, at: 'to' },
-      ], a.to === undefined ? hb : [h[1], -h[0], 0]); // from outside, level; in a bay, from the side
+      ], a.to === undefined ? hb : [h[1], -h[0], 0], 'Brace', braceId(a, k)); // from outside, level; in a bay, from the side
     });
     const tr = a.truss;
     if (tr) {
@@ -1027,7 +1033,7 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
       }
       const cg = geo(chordId(a), tr.chord, add(oc, mul(h, supportFace(Sc, h) + SETBACK[tr.conn])), c1, true);
       armGeo.set(cg.id, cg);
-      member(cg, cEnds, a.to === undefined ? h : [0, 0, 1]);
+      member(cg, cEnds, a.to === undefined ? h : [0, 0, 1], 'Truss bottom chord', chordId(a));
       const web: ConnType = tr.low ? 'gusset_small' : 'gusset';
       tr.webs.forEach((wb, k) => {
         const B = add(oc, mul(h, wb.b));
@@ -1038,7 +1044,7 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
         member(wg, [
           { S: cg, sId: cg.id, conn: web, at: 'from' },
           { S: g, sId: a.id, conn: web, at: 'to' },
-        ], [h[1], -h[0], 0]);
+        ], [h[1], -h[0], 0], 'Truss diagonal', webId(a, k));
       });
     }
     if (a.rod) {
@@ -1053,7 +1059,7 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
       member(rg, [
         { S: Sr, sId: Sr.id, conn: 'clevis', at: 'from' },
         { S: g, sId: a.id, conn: 'clevis', at: 'to' },
-      ], h);
+      ], h, 'Tension rod', rodId(a));
     }
   }
   for (const s of st.secs) {
@@ -1062,7 +1068,7 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
     const side = mul(ag.v, s.side);
     const at = add(start(st, a), mul(hdir(a.bearing), s.a));
     const g = geo(s.id, s.sec, add(at, mul(side, supportFace(ag, side) + SETBACK[s.conn])), add(at, mul(side, s.L)), true);
-    member(g, [{ S: ag, sId: ag.id, conn: s.conn, at: 'from' }], side);
+    member(g, [{ S: ag, sId: ag.id, conn: s.conn, at: 'from' }], side, 'Secondary beam', s.id);
   }
   details(st, cols, armGeo, colAt, extra);
 
@@ -1093,7 +1099,7 @@ const pieceAt = (armGeo: Map<string, Geo>, a: Arm, t: number): Geo =>
 const MOMENT: ConnType[] = ['end_plate', 'flange_plates', 'welded'];
 function details(
   st: Structure, cols: { lo: Geo; hi: Geo }[], armGeo: Map<string, Geo>, colAt: (ci: number, z: number) => Geo,
-  extra: (id: string, on: string, ps: Plate[], from: V) => void,
+  extra: (id: string, on: string, ps: Plate[], from: V, type: string) => void,
 ) {
   const [X, Y, Z]: V[] = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
   const down: V = [0, 0, -1];
@@ -1102,7 +1108,7 @@ function details(
     const id = colId(ci);
     // cap plate
     const cap = add(hi.p1, [0, 0, 10]);
-    extra(`${id}-cap`, hi.id, [flat(cap, X, Y, 20, rect(hi.sec.bf + 30, hi.sec.d + 30))], down);
+    extra(`${id}-cap`, hi.id, [flat(cap, X, Y, 20, rect(hi.sec.bf + 30, hi.sec.d + 30))], down, 'Cap plate');
     // continuity plates, at the flange levels of each moment beam on a flange face
     const levels: number[] = [];
     // each beam end on a column: column, connection, bearing, top of steel, section
@@ -1120,7 +1126,7 @@ function details(
       const o = add(c.x, [0, 0, z]);
       const t = Math.max(10, Math.round(S.sec.tf));
       // one part per side of the web: a beam that frames into the web there leaves no room
-      for (const s of [-1, 1]) extra(`${id}-stiffener${k + 1}${s < 0 ? 'w' : 'e'}`, S.id, [stiffener(S.sec, o, mul(X, s), Y, t)], mul(X, s));
+      for (const s of [-1, 1]) extra(`${id}-stiffener${k + 1}${s < 0 ? 'w' : 'e'}`, S.id, [stiffener(S.sec, o, mul(X, s), Y, t)], mul(X, s), 'Continuity plate');
     });
     // gussets at the foot: on the two flange faces, or on all four faces
     if (st.base && st.base !== 'none') {
@@ -1131,7 +1137,7 @@ function details(
         for (const s of [-1, 1])
           ps.push(flat(add(c.x, [s * tw / 2, 0, 0]), mul(X, s), Z, 12, [[0, 0], [L, 0], [L, 30], [L - 70, 180], [0, 180]]));
       }
-      extra(`${id}-gussets`, lo.id, ps, down);
+      extra(`${id}-gussets`, lo.id, ps, down, 'Base gussets');
     }
   });
   // bearing stiffeners in a beam, over the point where a brace pushes on it
@@ -1142,7 +1148,7 @@ function details(
       const t = b.end ? a.L - b.a : b.a;
       const P = pieceAt(armGeo, a, t);
       const o = add(add(start(st, a), mul(h, t)), [0, 0, -a.sec.d / 2]);
-      for (const s of [-1, 1]) extra(`${a.id}-stiffener${k ? k + 1 : ''}${s < 0 ? 'a' : 'b'}`, P.id, [stiffener(a.sec, o, mul(P.v, s), Z, 10)], mul(P.v, s));
+      for (const s of [-1, 1]) extra(`${a.id}-stiffener${k ? k + 1 : ''}${s < 0 ? 'a' : 'b'}`, P.id, [stiffener(a.sec, o, mul(P.v, s), Z, 10)], mul(P.v, s), 'Stiffener, under a brace');
     });
     // and at each node of a truss, in both chords
     const tr = a.truss;
@@ -1153,9 +1159,9 @@ function details(
         const ob = add(add(start(st, a), mul(h, wb.b)), [0, 0, -tr.D - tr.chord.d / 2]);
         for (const s of [-1, 1]) {
           const sd = s < 0 ? 'a' : 'b';
-          extra(`${webId(a, k)}-stiffener-t${sd}`, a.id, [stiffener(a.sec, ot, mul(g.v, s), Z, 10)], mul(g.v, s));
+          extra(`${webId(a, k)}-stiffener-t${sd}`, a.id, [stiffener(a.sec, ot, mul(g.v, s), Z, 10)], mul(g.v, s), 'Stiffener, truss node');
           // a tee has no bottom flange to hold a stiffener
-          if (tr.chord.kind === 'I') extra(`${webId(a, k)}-stiffener-b${sd}`, cg.id, [stiffener(tr.chord, ob, mul(cg.v, s), Z, 10)], mul(cg.v, s));
+          if (tr.chord.kind === 'I') extra(`${webId(a, k)}-stiffener-b${sd}`, cg.id, [stiffener(tr.chord, ob, mul(cg.v, s), Z, 10)], mul(cg.v, s), 'Stiffener, truss node');
         }
       });
     }
@@ -1169,6 +1175,26 @@ export function floating(ps: Part[]): string[] {
   return ps.flatMap((p) => p.supports.filter((s) => !((step.get(s) ?? Infinity) < p.step)).map((s) => `${p.id} before ${s}`));
 }
 
+// The check of one member in the final structure: its worst forces (N and
+// N·mm, the moments with the sway factor), its ratio (limit LIMIT) and its
+// length in the solver model.
+export type MemberCheck = { ratio: number; N: number; Nc: number; My: number; Mz: number; L: number };
+
+// One more solve of the final structure, for Result.members. Nothing changes
+// in the structure: no fix, no sizing, no random draw.
+function checks(st: Structure, p: Params): Record<string, MemberCheck> {
+  const m = model(st, p);
+  const r = solve(m.nodes, m.elems);
+  if (!r.ok) return {};
+  const out: Record<string, MemberCheck> = {};
+  for (const [who, f] of worstOf(m, stability(m, r).forces)) {
+    const sec = sectionOf(st, who);
+    const L = m.len.get(who);
+    if (sec && L !== undefined) out[who] = { ...f, ratio: ratioOf(sec, f, p.fy, L), L };
+  }
+  return out;
+}
+
 export type Result = {
   st: Structure;
   parts: Part[];
@@ -1179,6 +1205,7 @@ export type Result = {
   solves: number;
   ms: { topology: number; solve: number; geometry: number };
   nodes: number;
+  members: Record<string, MemberCheck>; // by solver id (PartInfo.member), empty for a mechanism
 };
 
 export function generate(p0: Partial<Params>, cat: Catalog, detail: Detail = 'bolts'): Result {
@@ -1322,7 +1349,8 @@ export function generate(p0: Partial<Params>, cat: Catalog, detail: Detail = 'bo
   const t2 = performance.now();
   const ps = parts(st, detail, p.seg);
   const t3 = performance.now();
-  return { st, parts: ps, ok, log, ratio, alpha, solves, ms: { topology: t1 - t0, solve: t2 - t1, geometry: t3 - t2 }, nodes: m.nodes.length };
+  const members = ok ? checks(st, p) : {};
+  return { st, parts: ps, ok, log, ratio, alpha, solves, ms: { topology: t1 - t0, solve: t2 - t1, geometry: t3 - t2 }, nodes: m.nodes.length, members };
 }
 
 // A real specimen: no random draw, no fix and no sizing. The solver checks
@@ -1348,5 +1376,6 @@ function buildSpecimen(p: Params, spec: Specimen, cat: Catalog, detail: Detail):
   const t2 = performance.now();
   const ps = parts(st, detail, p.seg);
   const t3 = performance.now();
-  return { st, parts: ps, ok: r.ok, log, ratio, alpha, solves: 1, ms: { topology: t1 - t0, solve: t2 - t1, geometry: t3 - t2 }, nodes: m.nodes.length };
+  const members = r.ok ? checks(st, p) : {};
+  return { st, parts: ps, ok: r.ok, log, ratio, alpha, solves: 1, ms: { topology: t1 - t0, solve: t2 - t1, geometry: t3 - t2 }, nodes: m.nodes.length, members };
 }

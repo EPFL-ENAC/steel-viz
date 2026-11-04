@@ -119,3 +119,18 @@ test('shapeP 1 and shapeP 0', () => {
         assert.deepEqual(shapes(generate({ seed, form, shapeP: 0 }, cat).st).filter((k) => / (2L|C|T)$/.test(k)), [], at);
       }
 });
+
+// the tooltip of the playground: every part says what it is, and every
+// member has its forces and its ratio, the same max ratio as the log
+test('every part has its info, every member its check', () => {
+  for (const name of names)
+    for (const form of forms)
+      for (let seed = 1; seed <= 40; seed++) {
+        const r = make(name, form, seed);
+        const at = `${name} ${form} seed ${seed}`;
+        assert.deepEqual(r.parts.filter((p) => !p.info?.type).map((p) => p.id), [], at);
+        assert.deepEqual(r.parts.filter((p) => p.info?.member && !r.members[p.info.member]).map((p) => p.id), [], at);
+        const max = Math.max(...Object.values(r.members).map((m) => m.ratio));
+        assert.ok(Math.abs(max - r.ratio) < 1e-6, `${at}: max ratio ${max} in members, ${r.ratio} in the log`);
+      }
+});
