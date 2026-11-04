@@ -653,7 +653,7 @@ export function splicePlates(lo: Geo, hi: Geo, kind: 'bearing' | 'flange'): { fa
   return { faces, boxes, dots };
 }
 
-export type BeamConn = 'shear_tab' | 'end_plate' | 'flange_plates' | 'welded' | 'clip_angles' | 'seated' | 'stiffened_seat' | 'tee';
+export type BeamConn = 'shear_tab' | 'end_plate' | 'flange_plates' | 'welded' | 'clip_angles' | 'seated' | 'stiffened_seat' | 'tee' | 'end_plate_stiffened';
 export type ConnType = BeamConn | 'gusset' | 'gusset_small' | 'gusset_lap' | 'clevis';
 // where a beam end lands: on a column flange, on a column web, on the web of a beam
 export type Fit = 'flange' | 'web' | 'beam';
@@ -849,6 +849,23 @@ function endPlate(g: Geo, r: Resolved, hw: Hardware) {
       hw.dots.push({ p: add(add(add(q, mul(inward, 1)), mul(g.v, (s * gauge) / 2)), mul(g.w, dw)), n: inward });
 }
 
+// The extended end plate with a stiffener above the top flange and below
+// the bottom flange, in the web plane, welded to the plate and the flange.
+// Each is a triangle with its inner corner cut, so the flange weld goes
+// through.
+const RIB = { L: 155, H: 85, t: 10, cut: 15 };
+function endPlateStiffened(g: Geo, r: Resolved, hw: Hardware) {
+  endPlate(g, r, hw);
+  const { L, H, t, cut } = RIB;
+  for (const [depth, sy] of [[0, -1], [g.d, 1]] as const) {
+    const o = add(r.p, mul(g.w, wAt(g, depth)));
+    const rib = flat(o, r.inward, g.w, t, [[0, sy * cut], [cut, 0], [L, 0], [0, sy * H]]);
+    hw.faces.push(...rib.faces);
+    hw.boxes.push(rib.box);
+  }
+  hw.reach.push(L);
+}
+
 function flangePlates(g: Geo, r: Resolved, hw: Hardware) {
   const { p, inward, gap } = r;
   const t = 16;
@@ -982,6 +999,7 @@ export const CONNS: Record<ConnType, ConnSpec> = {
   welded: { label: 'welded', pinned: false, setback: 0, fits: ['flange', 'web', 'beam'], draw: () => {} },
   clip_angles: { label: 'clip angles', pinned: true, setback: 13, fits: ['flange', 'web', 'beam'], replaces: 'shear_tab', draw: clipAngles },
   tee: { label: 'tee', pinned: true, setback: 13, fits: ['flange', 'web', 'beam'], replaces: 'shear_tab', draw: tee },
+  end_plate_stiffened: { label: 'stiffened end plate', pinned: false, setback: 25, fits: ['flange', 'web'], past: [90, 90], replaces: 'end_plate', draw: endPlateStiffened },
   seated: { label: 'seated', pinned: true, setback: 13, fits: ['flange', 'web'], past: [SEAT.B, TOP.B], replaces: 'shear_tab', draw: seated },
   stiffened_seat: { label: 'stiffened seat', pinned: true, setback: 13, fits: ['flange', 'web'], past: [SEAT.plate + SEAT.H, TOP.B], replaces: 'shear_tab', draw: stiffenedSeat },
   gusset: { label: 'gusset', pinned: true, setback: 195, draw: (g, r, hw) => gusset(g, r, hw, false) },
