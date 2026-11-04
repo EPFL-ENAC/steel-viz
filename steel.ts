@@ -653,7 +653,7 @@ export function splicePlates(lo: Geo, hi: Geo, kind: 'bearing' | 'flange'): { fa
   return { faces, boxes, dots };
 }
 
-export type BeamConn = 'shear_tab' | 'end_plate' | 'flange_plates' | 'welded' | 'clip_angles' | 'seated' | 'stiffened_seat';
+export type BeamConn = 'shear_tab' | 'end_plate' | 'flange_plates' | 'welded' | 'clip_angles' | 'seated' | 'stiffened_seat' | 'tee';
 export type ConnType = BeamConn | 'gusset' | 'gusset_small' | 'gusset_lap' | 'clevis';
 // where a beam end lands: on a column flange, on a column web, on the web of a beam
 export type Fit = 'flange' | 'web' | 'beam';
@@ -721,6 +721,36 @@ function clipAngles(g: Geo, r: Resolved, hw: Hardware) {
     for (const dw of rows) hw.dots.push({ p: add(add(add(o, mul(inward, t + 1)), mul(side, x + vb)), mul(g.w, dw)), n: inward });
   }
   for (const dw of rows) hw.dots.push({ p: add(add(o, mul(inward, A - EDGE)), mul(g.w, dw)), axis: g.v, half: x + t });
+}
+
+// Tee: a WT cut from an I, its flange on the support face, its stem on one
+// side of the beam web. One line of bolts through the stem and the web,
+// two lines in the flange into the face. On a channel the stem goes on the
+// side away from its flanges. The flange is no wider than the beam flange,
+// so it fits on a column web.
+function tee(g: Geo, r: Resolved, hw: Hardware) {
+  const { p, inward, gap } = r;
+  const [tf, ts, A] = [12, 10, 100]; // flange, stem, stem length from the face
+  const [lo, hi] = webWindow(g, r);
+  const { n, pitch } = boltLine(hi - lo, 6);
+  const h = (n - 1) * pitch + 2 * EDGE;
+  const o = add(add(p, mul(inward, -gap)), mul(g.w, wAt(g, (lo + hi) / 2))); // on the face, on the web plane
+  const rs = rects(g.sec);
+  const cv = (Math.min(...rs.map((x) => x[0])) + Math.max(...rs.map((x) => x[1]))) / 2;
+  const sd = cv > 1 ? -1 : 1;
+  const yc = sd * (g.tw / 2 + ts / 2); // the stem plane
+  const W = Math.min(140, g.sec.bf);
+  const [y0, y1] = [yc - W / 2, yc + W / 2];
+  hw.faces.push(...flat(o, inward, g.v, h, [[0, y0], [tf, y0], [tf, yc - ts / 2], [A, yc - ts / 2], [A, yc + ts / 2], [tf, yc + ts / 2], [tf, y1], [0, y1]]).faces);
+  const at = (x: number, y: number, dw = 0) => add(add(add(o, mul(inward, x)), mul(g.v, y)), mul(g.w, dw));
+  hw.boxes.push({ c: at(tf / 2, yc), ax: [inward, g.v, g.w], h: [tf / 2, W / 2, h / 2] });
+  hw.boxes.push({ c: at((tf + A) / 2, yc), ax: [inward, g.v, g.w], h: [(A - tf) / 2, ts / 2, h / 2] });
+  hw.reach.push(A - gap);
+  const gy = Math.max(ts / 2 + 22, W / 2 - 30); // the flange bolts, from the stem
+  for (const [dw] of grid(n, 1, pitch, 0)) {
+    hw.dots.push({ p: at(A - EDGE, (sd * ts) / 2, dw), axis: g.v, half: (g.tw + ts) / 2 });
+    for (const y of [yc - gy, yc + gy]) hw.dots.push({ p: at(tf + 1, y, dw), n: inward });
+  }
 }
 
 // Seated connections: the beam sits on a seat under its bottom flange, and
@@ -951,6 +981,7 @@ export const CONNS: Record<ConnType, ConnSpec> = {
   flange_plates: { label: 'flange plates', pinned: false, setback: 13, fits: ['flange', 'web'], draw: flangePlates },
   welded: { label: 'welded', pinned: false, setback: 0, fits: ['flange', 'web', 'beam'], draw: () => {} },
   clip_angles: { label: 'clip angles', pinned: true, setback: 13, fits: ['flange', 'web', 'beam'], replaces: 'shear_tab', draw: clipAngles },
+  tee: { label: 'tee', pinned: true, setback: 13, fits: ['flange', 'web', 'beam'], replaces: 'shear_tab', draw: tee },
   seated: { label: 'seated', pinned: true, setback: 13, fits: ['flange', 'web'], past: [SEAT.B, TOP.B], replaces: 'shear_tab', draw: seated },
   stiffened_seat: { label: 'stiffened seat', pinned: true, setback: 13, fits: ['flange', 'web'], past: [SEAT.plate + SEAT.H, TOP.B], replaces: 'shear_tab', draw: stiffenedSeat },
   gusset: { label: 'gusset', pinned: true, setback: 195, draw: (g, r, hw) => gusset(g, r, hw, false) },
