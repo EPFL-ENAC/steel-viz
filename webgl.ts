@@ -22,7 +22,8 @@ const DEEP = 50; // mm: a jump in depth bigger than this makes an outline
 const THIN = 1; // px
 const THICK = 2.25; // px
 
-export type Colors = { bg: string; fg: string; accent: string };
+// rig: the lines of the test rig (default: half way between fg and bg)
+export type Colors = { bg: string; fg: string; accent: string; rig?: string };
 // what the view shows, in world mm: the point in the middle, and half the
 // height it shows. Two viewers with the same frame line up, even when their
 // structures are a bit different (vs main).
@@ -233,6 +234,9 @@ export function createViewer(
 
   let colors: Colors = { bg: '#ffffff', fg: '#212121', accent: '#e30713' };
   let [bg, fg, accent] = [rgb(colors.bg), rgb(colors.fg), rgb(colors.accent)];
+  // the lines of the test rig: colors.rig, or half way between fg and bg
+  const rigOf = (c: Colors): RGB => (c.rig ? rgb(c.rig) : [0, 1, 2].map((i) => (rgb(c.fg)[i] + rgb(c.bg)[i]) / 2) as RGB);
+  let rig = rigOf(colors);
   let two = true;
   let pieces: Piece[] = [];
   let shown: Part[] = []; // the parts of show(), in the order of their ids
@@ -743,7 +747,7 @@ export function createViewer(
   let hovered: Part | null = null;
   function lineStyle(p: Piece) {
     const on = p.part === hovered;
-    p.color = on || p.part.accent ? accent : fg;
+    p.color = on || p.part.accent ? accent : p.part.kind === 'rig' ? rig : fg;
     p.width = (two ? THIN : 1.6) * (on ? 2 : 1);
   }
   const setHover = (part: Part | null, x = 0, y = 0) => {
@@ -837,6 +841,7 @@ export function createViewer(
     setColors(c) {
       colors = c;
       [bg, fg, accent] = [rgb(c.bg), rgb(c.fg), rgb(c.accent)];
+      rig = rigOf(c);
       for (const p of pieces) lineStyle(p);
       redraw();
     },

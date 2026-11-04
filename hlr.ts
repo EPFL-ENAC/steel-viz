@@ -500,6 +500,8 @@ export function renderHLR(parts: Part[], o: RenderOpts): { svg: string; faces: n
   const css =
     `.steel path{fill:none;stroke:currentColor;stroke-width:${sw};stroke-linecap:round;stroke-linejoin:round}` +
     `.steel .o{stroke-width:${ow}}.steel .b{fill:currentColor;stroke:none}.steel .r{fill:none}.steel .a{color:var(--accent,#e30713)}` +
+    // the test rig: grey, and its outline no heavier than its other lines
+    `.steel .g{color:var(--rig,#9e9e9e)}.steel .g path{stroke-width:${sw}}` +
     (o.animate
       ? `.steel .f{animation:fly .6s cubic-bezier(.2,.7,.25,1) both}` +
         `@keyframes fly{from{opacity:0;transform:translate(var(--dx),var(--dy))}15%{opacity:1}}` +
@@ -541,8 +543,8 @@ export function renderHLR(parts: Part[], o: RenderOpts): { svg: string; faces: n
     // a member that points at the camera comes from above instead
     if (l < 0.3) [ux, uy] = [0, -1];
     else [ux, uy] = [ux / l, uy / l];
-    // plates and the base only slide a little, members come from outside
-    const t = p.kind === 'plate' || p.kind === 'base' ? 0.06 * (x1 - x0) : away(pi, ux, uy);
+    // plates, the base and the rig only slide a little, members come from outside
+    const t = p.kind === 'plate' || p.kind === 'base' || p.kind === 'rig' ? 0.06 * (x1 - x0) : away(pi, ux, uy);
     return `--dx:${f(ux * t)}px;--dy:${f(uy * t)}px;animation-delay:${ms(sl.start)};animation-duration:${ms(sl.dur)}`;
   };
   const hidden = (pi: number) => [...outs[pi].until].map(([s, list]) => `<path class="h" style="animation-delay:${ms(landAt(s))}" d="${list.join('')}"/>`);
@@ -560,7 +562,7 @@ export function renderHLR(parts: Part[], o: RenderOpts): { svg: string; faces: n
     const { vis, edge } = lines[pi];
     if (!vis && !edge && !until.size && !fills.length) continue;
     nDots += fills.length;
-    const acc = p.accent ? 'a' : '';
+    const acc = p.accent ? 'a' : p.kind === 'rig' ? 'g' : '';
     if (o.animate && p.kind === 'bolts') {
       // one group per bolt, each line goes with the nearest head
       const start = slots.get(p.step)!.start;

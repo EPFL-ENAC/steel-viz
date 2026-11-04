@@ -28,7 +28,7 @@ const conns = (cs: string[]) => [...new Set(cs)].map((c) => CONN[c] ?? CONNS[c a
 
 export function describe(part: Part, r: Result): Tip {
   const info = part.info ?? { type: part.kind ?? 'part' };
-  const tip: Tip = { title: info.type, id: part.id, rows: [] };
+  const tip: Tip = { title: part.kind === 'rig' ? `${info.type} (test rig)` : info.type, id: part.id, rows: [] };
   const row = (k: string, v: string) => tip.rows.push([k, v]);
   // the part this one belongs to, by its type and id
   if (info.of) {

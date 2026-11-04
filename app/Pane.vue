@@ -56,7 +56,7 @@ const labels = computed(() => {
 const two = (gl: boolean) => (s.weights ? s.weights === 'two' : !gl);
 
 const css = (k: string, d: string) => getComputedStyle(document.documentElement).getPropertyValue(k).trim() || d;
-const paint = () => viewer?.setColors({ bg: css('--bg', '#ffffff'), fg: css('--fg', '#212121'), accent: css('--primary', '#ff0000') });
+const paint = () => viewer?.setColors({ bg: css('--bg', '#ffffff'), fg: css('--fg', '#212121'), accent: css('--primary', '#ff0000'), rig: css('--fg-muted', '#9e9e9e') });
 
 // fast: the painter's trick, while the angle moves
 function draw(animate = false, fast = false) {
