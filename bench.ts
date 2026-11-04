@@ -19,11 +19,12 @@
 // fills the corner between the brace end and the rig faces.
 //
 // ------------------------------------------------------------- column tests
-// The `columns` table: one column on a floor block. See buildColumn.
+// The `columns` and `hss_columns` tables: one column on a floor block, or
+// lying on two rollers (3pb). See buildColumn.
 import type { V } from './vec.ts';
 import type { Catalog, Section } from './sections.ts';
 import { boxOf, flat, geo, memberBoxes, memberFaces, type P2, type Part } from './steel.ts';
-import { actuator, block, clevis, crosshead, hingeSize, rigMember, rigSection, seat, type RigOpts } from './rig.ts';
+import { actuator, block, clevis, crosshead, hingeSize, rigMember, rigSection, roller, seat, type RigOpts } from './rig.ts';
 import { findSection, type BraceSpecimen, type ColumnSpecimen } from './specimen.ts';
 import type { Detail, Params, Result, Structure } from './generate.ts';
 
@@ -358,16 +359,25 @@ export function buildBrace(p: Params, spec: BraceSpecimen, cat: Catalog, detail:
 }
 
 // ------------------------------------------------------------- column tests
-const COLUMN_ENDS: ColumnSpecimen['ends'][] = ['fixed-free', 'fixed-fixed', 'fixed-flexible'];
+const COLUMN_ENDS: ColumnSpecimen['ends'][] = ['fixed-free', 'fixed-fixed', 'fixed-flexible', '3pb'];
 
-// One column test. The column axis is on z, from z = 0 to its length (the end
-// plates are outside it). The column is turned by `angle` in plan, its web
-// `angle` away from y: the push is always along y, so the rig stays square
-// to the axes. Under the foot plate a floor block. On the top plate the
-// loading head, pushed by an actuator from a reaction wall at -y. Above the
-// head the vertical actuators, hung from a crosshead across x: one in the
-// middle, or for fixed-fixed two side by side along y (from a spreader beam
-// under the crosshead), so the head can't turn.
+// What the two column rigs share: the section, its sizes once turned, the
+// rig sizes, and the parts in build order (as for the braces: a part on
+// others gets the next step, a part on the floor step 0).
+type ColumnBench = {
+  p: Params; spec: ColumnSpecimen; sec: Section; L: number; detail: Detail; log: string[];
+  a: number; // the angle in radians
+  across: number; along: number; // the half sizes of the turned section, across the push and along it
+  m: number; // how far an end plate goes past the section
+  plateT: (given: number | undefined, what: string) => number;
+  Da: number; hz: ReturnType<typeof hingeSize>; reach: number; R: Section;
+  add: (pt: Part) => Part;
+  ro: (supports: string[], type?: string) => RigOpts;
+  ground: (type?: string) => RigOpts;
+};
+
+// One column test: standing (see standing), or for 3pb lying on two rollers
+// (see lying).
 export function buildColumn(p: Params, spec: ColumnSpecimen, cat: Catalog, detail: Detail): Result {
   const t0 = performance.now();
   const sec = findSection(spec.section, cat);
@@ -378,24 +388,65 @@ export function buildColumn(p: Params, spec: ColumnSpecimen, cat: Catalog, detai
   const log = [...(spec.notes ?? [])];
   const a = (spec.angle * Math.PI) / 180;
   const [sa, ca] = [Math.abs(Math.sin(a)), Math.abs(Math.cos(a))];
+  const big = Math.max(sec.d, sec.bf);
+  const parts: Part[] = [];
+  let step = 1;
+  const b: ColumnBench = {
+    p, spec, sec, L, detail, log, a,
+    across: sa * sec.d / 2 + ca * sec.bf / 2,
+    along: ca * sec.d / 2 + sa * sec.bf / 2,
+    m: clamp(r5(0.25 * big), 60, 150),
+    plateT: (given, what) => {
+      if (given !== undefined && given > 0) return given;
+      const t = Math.max(25, Math.round(1.5 * sec.tf));
+      log.push(`${what} thickness not given, drawn ${t} mm`);
+      return t;
+    },
+    // the actuator pins, the length of an actuator, the crosshead section
+    Da: clamp(r5(0.2 * big), 40, 80),
+    hz: hingeSize(clamp(r5(0.2 * big), 40, 80)),
+    reach: Math.max(1000, 14 * clamp(r5(0.2 * big), 40, 80)),
+    R: rigSection(cat, Math.max(300, Math.min(600, 0.5 * big + 150))),
+    add: (pt) => {
+      pt.step = pt.supports.length ? step++ : 0;
+      parts.push(pt);
+      return pt;
+    },
+    ro: (supports, type) => ({ step: 0, supports, ...(type ? { type } : {}) }),
+    ground: (type) => ({ step: 0, supports: [], from: [0, 0, -1], ...(type ? { type } : {}) }),
+  };
+  const t1 = performance.now();
+  if (spec.ends === '3pb') lying(b);
+  else standing(b);
+
+  log.push(`column test ${spec.ends}, pushed at ${spec.angle}° from the web${spec.axial === false ? ', no axial load' : ''}, not solved (only drawn)`);
+  const st: Structure = {
+    form: 'specimen', id: spec.id, H: Math.round(L), col: sec, cols: [], arms: [], secs: [],
+    columnTest: { ends: spec.ends, L, angle: spec.angle },
+  };
+  return { st, parts: forDetail(parts, detail), ok: true, log, ratio: 0, alpha: Infinity, solves: 0, ms: { topology: t1 - t0, solve: 0, geometry: performance.now() - t1 }, nodes: 0, members: {} };
+}
+
+// The column standing. Its axis is on z, from z = 0 to its length (the end
+// plates are outside it). The column is turned by `angle` in plan, its web
+// `angle` away from y: the push is always along y, so the rig stays square
+// to the axes. Under the foot plate a floor block. On the top plate the
+// loading head, pushed by an actuator from a reaction wall at -y. Above the
+// head the vertical actuators, hung from a crosshead across x: one in the
+// middle, or for fixed-fixed two side by side along y (from a spreader beam
+// under the crosshead), so the head can't turn. With no axial load, no
+// vertical actuator, except the two of fixed-fixed.
+function standing(b: ColumnBench) {
+  const { p, spec, sec, L, detail, a, m, Da, hz, reach, R, add, ro, ground } = b;
+  const [ex, ey] = [b.across, b.along];
 
   // the end plates: square to the axes, past the section by m on each side
   // (the bolts go there)
-  const [ex, ey] = [sa * sec.d / 2 + ca * sec.bf / 2, ca * sec.d / 2 + sa * sec.bf / 2];
-  const m = clamp(r5(0.25 * Math.max(sec.d, sec.bf)), 60, 150);
   const [px, py] = [2 * ex + 2 * m, 2 * ey + 2 * m];
-  const thick = (given: number | undefined, what: string) => {
-    if (given !== undefined && given > 0) return given;
-    const t = Math.max(25, Math.round(1.5 * sec.tf));
-    log.push(`${what} end plate thickness not given, drawn ${t} mm`);
-    return t;
-  };
-  const [tt, tb] = [thick(spec.plates?.top, 'top'), thick(spec.plates?.bottom, 'bottom')];
+  const [tt, tb] = [b.plateT(spec.plates?.top, 'top end plate'), b.plateT(spec.plates?.bottom, 'bottom end plate')];
   const zh = L + tt; // the top of the top plate, where the head sits
 
-  // the rig sizes: the actuator pins, the head, the floor
-  const Da = clamp(r5(0.2 * Math.max(sec.d, sec.bf)), 40, 80);
-  const hz = hingeSize(Da);
+  // the head and the floor
   const two = spec.ends === 'fixed-fixed';
   const e = two ? r5(Math.max(hz.side / 2 + 30, ey)) : 0; // the vertical actuators, from the axis along y
   const hh = Math.max(250, r5(2.6 * Da + 80)); // the head height
@@ -403,21 +454,7 @@ export function buildColumn(p: Params, spec: ColumnSpecimen, cat: Catalog, detai
   const hy = Math.max(ey + m / 2 - 25, two ? e + hz.side / 2 + 20 : hz.side / 2 + 20);
   const zf = -tb - 400; // the floor
   const Wb = r5(Math.max(px, py) + 300); // the floor block
-  const reach = Math.max(1000, 14 * Da); // the length of an actuator
-  const R = rigSection(cat, Math.max(300, Math.min(600, 0.5 * Math.max(sec.d, sec.bf) + 150)));
-  const t1 = performance.now();
 
-  // the parts, in build order (as for the braces: a part on others gets the
-  // next step, a part on the floor step 0)
-  const parts: Part[] = [];
-  let step = 1;
-  const add = (pt: Part) => {
-    pt.step = pt.supports.length ? step++ : 0;
-    parts.push(pt);
-    return pt;
-  };
-  const ro = (supports: string[], type?: string): RigOpts => ({ step: 0, supports, ...(type ? { type } : {}) });
-  const ground = (type?: string): RigOpts => ({ step: 0, supports: [], from: [0, 0, -1], ...(type ? { type } : {}) });
   // an end plate centred at height z, its bolts on the face toward n
   const bolts = (z: number, n: number) => {
     if (detail !== 'bolts') return [];
@@ -446,6 +483,8 @@ export function buildColumn(p: Params, spec: ColumnSpecimen, cat: Catalog, detai
   add(actuator('rig-actuator', [0, y0, zc], [0, -hy, zc], X, Da, ro(['rig-wall', 'rig-head'])));
 
   // the axial load: the crosshead posts clear the floor block and the wall
+  if (spec.axial === false && !two) return;
+  if (spec.axial === false) b.log.push('no axial load: the two vertical actuators only hold the top straight');
   const top = zh + hh + reach + (two ? R.d : 0); // the crosshead beam bottom
   const span = r5(Math.max(Wb, 600, 2 * hx + 200) + R.d + 200);
   add(crosshead('rig-crosshead', [0, 0, top], X, span, zf, R, ground()));
@@ -455,11 +494,62 @@ export function buildColumn(p: Params, spec: ColumnSpecimen, cat: Catalog, detai
     for (const [k, s] of [[1, -1], [2, 1]])
       add(actuator(`rig-axial${k === 1 ? '' : k}`, [0, s * e, top - R.d], [0, s * e, zh + hh], X, Da, ro(['rig-spreader', 'rig-head'])));
   } else add(actuator('rig-axial', [0, 0, top], [0, 0, zh + hh], X, Da, ro(['rig-crosshead', 'rig-head'])));
+}
 
-  log.push(`column test ${spec.ends}, pushed at ${spec.angle}° from the web, not solved (only drawn)`);
-  const st: Structure = {
-    form: 'specimen', id: spec.id, H: Math.round(L), col: sec, cols: [], arms: [], secs: [],
-    columnTest: { ends: spec.ends, L, angle: spec.angle },
-  };
-  return { st, parts: forDetail(parts, detail), ok: true, log, ratio: 0, alpha: Infinity, solves: 0, ms: { topology: t1 - t0, solve: 0, geometry: performance.now() - t1 }, nodes: 0, members: {} };
+// The column lying (3pb, three-point bending). Its axis is on x, its bottom
+// on z = 0, the rollers under it at x = ±length / 2. It goes past each
+// roller a little. It is turned by `angle` about its axis: the push is
+// always down (-z), at mid span, from an actuator hung from a crosshead
+// across y, on a loading block. The pins turn about y, in the bending plane.
+// The axial load: an end plate at each end, a pin on a reaction block at -x,
+// an actuator from a reaction wall at +x.
+function lying(b: ColumnBench) {
+  const { p, spec, sec, L, a, m, Da, hz, reach, R, add, ro, ground } = b;
+  const [ey, ez] = [b.across, b.along];
+  const big = Math.max(sec.d, sec.bf);
+  const zc = ez; // the column axis
+  const o = r5(clamp(0.3 * big, 50, 200)); // past each roller
+  const xe = L / 2 + o; // the column ends
+
+  // the rollers on their floor blocks
+  const Dr = clamp(r5(0.25 * big), 40, 120);
+  const rl = r5(2 * ey + 100); // the roller length
+  const zf = -2 * Dr - 400; // the floor
+  const bx = r5(1.5 * Dr + 100);
+  for (const [k, s] of [['', -1], ['2', 1]] as const) {
+    add(block(`rig-floor${k}`, [(s * L) / 2, 0, zf + 200], [bx, rl + 100, 400], ground()));
+    add(roller(`rig-roller${k}`, [(s * L) / 2, 0, 0], Y, Dr, rl, ro([`rig-floor${k}`])));
+  }
+  const g = geo('column', sec, [-xe, 0, zc], [xe, 0, zc], false);
+  g.w = [0, Math.sin(a), Math.cos(a)];
+  g.v = [0, g.w[2], -g.w[1]]; // cross(w, u), u = x
+  add({ id: 'column', step: 0, supports: ['rig-roller', 'rig-roller2'], kind: 'column', from: Z, faces: memberFaces(g, p.seg), boxes: memberBoxes(g), dots: [], info: { type: 'Column', sec, L: 2 * xe } });
+
+  // the push: a loading block on top at mid span, the actuator above it
+  const hs = Math.max(150, r5(1.5 * Da + 60));
+  const zs = 2 * ez + hs; // the loading block top
+  const [sx, sy] = [r5(Math.max(hz.side + 60, 0.5 * big)), r5(Math.max(2 * ey + 60, hz.width + 60))];
+  add(block('rig-saddle', [0, 0, 2 * ez + hs / 2], [sx, sy, hs], ro(['column'], 'Loading block')));
+  const top = zs + reach; // the crosshead beam bottom
+  const span = r5(Math.max(rl + 200, sy + 200, 600) + R.d + 200);
+  add(crosshead('rig-crosshead', [0, 0, top], Y, span, zf, R, ground()));
+  add(actuator('rig-actuator', [0, 0, top], [0, 0, zs], Y, Da, ro(['rig-crosshead', 'rig-saddle'])));
+
+  // the axial load, along x at the column axis
+  if (spec.axial === false) return;
+  const tp = [b.plateT(spec.plates?.bottom, 'end plate at -x'), b.plateT(spec.plates?.top, 'end plate at +x')];
+  const [py, pz] = [2 * ey + 2 * m, 2 * ez + 2 * m];
+  const zt = zc + Math.max(pz / 2, hz.side / 2) + 100; // the block tops
+  const Wb = r5(Math.max(600, py + 200));
+  for (const [k, s] of [['', -1], ['2', 1]] as const) {
+    const t = tp[k ? 1 : 0];
+    const f = flat([s * (xe + t / 2), 0, zc], Y, Z, t, rect(py, pz));
+    add({ id: `column-end${k}`, step: 0, supports: ['column'], kind: 'plate', from: [s, 0, 0], faces: f.faces, boxes: [f.box], dots: [], info: { type: 'End plate', of: 'column' } });
+  }
+  const xa = -xe - tp[0] - hz.reach; // the reaction block face
+  add(block('rig-block', [xa - 200, 0, (zf + zt) / 2], [400, Wb, zt - zf], ground()));
+  add(clevis('rig-pin', [xa, 0, zc], X, Y, Da, hz.reach, ro(['rig-block'])));
+  const xw = xe + tp[1] + reach; // the reaction wall face
+  add(block('rig-wall', [xw + 200, 0, (zf + zt) / 2], [400, Wb, zt - zf], ground('Reaction wall')));
+  add(actuator('rig-axial', [xw, 0, zc], [xe + tp[1], 0, zc], Y, Da, ro(['rig-wall', 'column-end2'])));
 }

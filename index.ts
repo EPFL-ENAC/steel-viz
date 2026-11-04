@@ -8,4 +8,4 @@ export { loadCatalog, type Catalog, type Family, type Section } from './sections
 export { BOLT_MS, CRANES, DETAIL, VIEWS, buildEnd, camera, forSize, render, shortestBuild, timeline, type Part, type PartInfo, type RenderOpts, type Slot, type TimelineOpts } from './steel.ts';
 export { renderHLR } from './hlr.ts';
 export { findSection, type BraceSpecimen, type ColumnSpecimen, type ConnSpecimen, type SectionRef, type Specimen, type SpecimenBeam } from './specimen.ts';
-export { fromHubBrace, fromHubColumn, fromHubConnection, toSpecimen, type HubRecord } from './hub.ts';
+export { fromHubBrace, fromHubColumn, fromHubConnection, fromHubHssColumn, toSpecimen, type HubRecord } from './hub.ts';

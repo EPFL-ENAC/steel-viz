@@ -197,6 +197,39 @@ export function fromHubColumn(rec: HubRecord): ColumnSpecimen {
   return { test: 'column', id, section, length, ends, angle, plates: { top: plate('t_top_plate'), bottom: plate('t_bottom_plate') }, notes };
 }
 
+// ------------------------------------------------------------- hss columns
+const HSS_ENDS: Record<string, ColumnSpecimen['ends']> = { CF: 'fixed-free', DC: 'fixed-fixed', '3PB': '3pb' };
+
+// one record of the hub `hss_columns` table: one square or rectangular tube.
+// CF: a cantilever. DC: both ends fixed. 3PB: lying on two rollers.
+// length__mm depends on stiffness_coefficient (k, the end moment over the
+// chord rotation is k EI / length). k 3: length__mm is from the point of zero
+// moment to the end, so a DC column or a 3PB span is twice as long. k 6: it
+// is the whole DC column (or 3PB span).
+export function fromHubHssColumn(rec: HubRecord): ColumnSpecimen {
+  const id = String(rec.id ?? rec.test_id ?? 'hss').trim();
+  const { text, value, num, unsupported } = fields(rec, id);
+  const notes: string[] = [];
+  const [d, bf, tf, tw] = [num('depth__mm'), num('width__mm'), num('flange_thickness__mm'), num('web_thickness__mm')];
+  const name = String(rec.tube_section ?? '').trim();
+  const section: SectionRef = { id: /^[A-Za-z]{1,4}[\s-]?\d/.test(name) ? name : `HSS ${d}x${bf}x${tf}`, shape: 'RHS', d, bf, tf, tw };
+  const cfg = text('test_configuration');
+  if (!cfg) throw new Error(`${id}: test_configuration is missing`);
+  const ends = HSS_ENDS[cfg];
+  if (!ends) throw unsupported('test_configuration');
+  const k = value('stiffness_coefficient');
+  if (!Number.isFinite(k)) throw new Error(`${id}: stiffness_coefficient is missing`);
+  if (cfg === 'CF' ? k !== 3 : k !== 3 && k !== 6) throw unsupported('stiffness_coefficient');
+  const L = num('length__mm');
+  const length = cfg !== 'CF' && k === 3 ? 2 * L : L;
+  if (length !== L) notes.push(`stiffness_coefficient 3: length__mm ${L} is half the ${cfg === 'DC' ? 'column' : 'span'}, drawn ${length} mm`);
+  if (!Number.isFinite(value('loading_angle'))) throw new Error(`${id}: loading_angle is missing`);
+  const angle = value('loading_angle');
+  // no axial load only when the ratio is 0 all along
+  const axial = !(value('axial_load_ratio') === 0 && text('axial_load_sequence') !== 'Varying');
+  return { test: 'column', id, section, length, ends, angle, axial, notes };
+}
+
 // ------------------------------------------------------------- any record
 // a JSON object: our own Specimen, or a hub record (the reader is picked from
 // a field only its table has)
@@ -206,9 +239,10 @@ export function toSpecimen(json: unknown): Specimen {
   if ('specimen_type' in o) return fromHubConnection(o);
   if ('brace_angle' in o) return fromHubBrace(o);
   if ('axis_of_bending' in o) return fromHubColumn(o);
+  if ('test_configuration' in o) return fromHubHssColumn(o);
   if (o.test === 'brace') return o as BraceSpecimen;
   if (o.test === 'column') return o as ColumnSpecimen;
   if (o.test !== undefined && o.test !== 'connection') throw new Error(`test "${String(o.test)}" is not known (connection, brace or column)`);
   if ('column' in o) return { beams: [], ...(o as Partial<ConnSpecimen>) } as ConnSpecimen;
-  throw new Error('not a specimen: no "column" or "test" (a Specimen), no "specimen_type", "brace_angle" or "axis_of_bending" (a hub record)');
+  throw new Error('not a specimen: no "column" or "test" (a Specimen), no "specimen_type", "brace_angle", "axis_of_bending" or "test_configuration" (a hub record)');
 }

@@ -21,6 +21,7 @@ export const HUB_TABLES: Record<string, string> = {
   connections: 'connections/connections.csv',
   braces: 'braces/steel_braces.csv',
   columns: 'columns/steel_columns.csv',
+  hss_columns: 'hss_columns/hss_columns.csv',
 };
 
 export function findHubData(dir?: string): string | undefined {

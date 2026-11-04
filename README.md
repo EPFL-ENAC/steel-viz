@@ -108,11 +108,12 @@ A setting can give a mechanism (the status says so), never a clash or a floating
 
 Parts must not go through each other. A secondary beam is coped (its flanges cut back) where it meets the flanges of its arm, and its plate fits between those flanges. A brace stays above the arms under it on the same face of its column, and is long enough that its two gussets don't touch. `clash.ts` checks this with boxes, and `geometry.test.ts` runs it on every form, 240 structures, and on 72 more with every member in its other shape (`shapeP` 1).
 
-It can also draw a real test of RESSLab Hub instead of a seed: a specimen. For now it draws three kinds of test, each one in its test rig:
+It can also draw a real test of RESSLab Hub instead of a seed: a specimen. For now it draws four kinds of test, each one in its test rig:
 
 - A beam-to-column subassembly (the test of one connection): one column with one or two beams. That's the `connection` table of the hub, 99 of its 100 tests.
 - A brace test: one brace, alone or in a test frame. That's the `braces` table, 279 of its 294 tests. See "Brace tests" below.
 - A column test: one column, pushed sideways at its top under an axial load. That's the `columns` table, all its 153 tests. See "Column tests" below.
+- An HSS column test: one square or rectangular tube, standing like a column test, or lying on two rollers and pushed at mid span. That's the `hss_columns` table, all its 284 tests. See "HSS column tests" below.
 
 The sections are the real ones, so there is no fix loop and no sizing. The solver runs once, and the log gives `alphaCr` and the max ratio under `--load`, only as information. The end plates and the continuity plates are drawn. Splices, foot gussets, trusses, rods and posts are not.
 
@@ -123,7 +124,7 @@ The test rig is drawn with lighter lines (parts of kind `rig`, built with `rig.t
 
 The pin of the link (or of the actuator) on the head is the top pin of the column. The solver holds the nodes the same way, but an actuator only brings the load, it holds nothing. So a column loaded test with no beam, or with a beam on a shear tab, is a mechanism.
 
-`hub.ts` reads two kinds of JSON file. The first one is a record of a hub table, as the hub API gives it (numbers, `null`) or as a row of its CSV file (strings, `NA`). A field says which table: `specimen_type` for `connection`, `brace_angle` for `braces`, `axis_of_bending` for `columns`. The files in `specimens/` are hub records (resslab-hub-data is public domain). The second one is our own `Specimen`, for a test that is not in the hub:
+`hub.ts` reads two kinds of JSON file. The first one is a record of a hub table, as the hub API gives it (numbers, `null`) or as a row of its CSV file (strings, `NA`). A field says which table: `specimen_type` for `connection`, `brace_angle` for `braces`, `axis_of_bending` for `columns`, `test_configuration` for `hss_columns`. The files in `specimens/` are hub records (resslab-hub-data is public domain). The second one is our own `Specimen`, for a test that is not in the hub:
 
 ```json
 {
@@ -222,6 +223,21 @@ A column test of our own, as JSON (`angle` in degrees, between the push and the 
 
 `column.test.ts` covers the two hub files of `specimens/` (`Elkady_and_Lignos_C1` Fixed-Fixed, `Elkady_and_Lignos_C6` Fixed-Flexible and Bi-axial), every end type at four angles, the end plates and the errors.
 
+### HSS column tests
+
+A record of the hub `hss_columns` table (it has a `test_configuration`) is also a column test, of a tube. `bench.ts` draws it, with no solve.
+
+- The tube is an RHS from `depth__mm`, `width__mm` and `flange_thickness__mm` (the wall). The id is `tube_section`. All 284 rows are square or rectangular tubes, so no round tube (CHS) for now.
+- `test_configuration` CF (cantilever): the rig of a Fixed-Free column. DC (double curvature): the rig of a Fixed-Fixed column. 3PB (three-point bending): the tube lies on two rollers, and an actuator pushes it down at mid span, from a crosshead. For the axial load, an end plate at each end: a pin on a reaction block at one end, an actuator from a reaction wall at the other.
+- `length__mm` is read with `stiffness_coefficient` k (the end moment over the chord rotation is k EI / L). k 3: `length__mm` goes from the point of zero moment to the end. So a CF column is `length__mm` high, but a DC column or a 3PB span is twice `length__mm`, and the log says so. k 6: `length__mm` is the whole DC column (or 3PB span). Another k throws an error. The dictionary doesn't say this, it's our reading of the hub images and of the numbers.
+- `loading_angle` turns the tube under the push (0°: the push along the depth).
+- `axial_load_ratio` 0, with a `Constant` sequence: no axial load, so no axial actuator. A DC column keeps its two vertical actuators: they hold the top straight.
+- The table has no end plate. They are drawn `max(25, 1.5 t)` thick, and the log says so.
+
+A 3PB test of our own: `"ends": "3pb"`, `length` between the rollers, `"axial": false` for no axial load. `plates.bottom` is the plate at the pin end, `plates.top` at the actuator end.
+
+`hss.test.ts` covers the two hub files of `specimens/` (`Kuwada_et_al_2015__DT16-LD24-A45-ny03` CF at 45°, `Yamada_et_al_2012__No-14` 3PB with an axial load), 3PB at four angles with and without the axial load, the length rule, and the errors.
+
 The output is an SVG line drawing with the hidden lines removed. The SVG can also build itself step by step, as an animation.
 
 Two renderers:
@@ -270,8 +286,8 @@ Files:
 - `sections/`, `tables.ts`: the CSV tables (see `sections/README.md`), and how Node reads them.
 - `solver.ts`: 3D frame solver (6 DOF per node, pinned ends, finds mechanisms), and the buckling analysis (`alphaCr`).
 - `checks.ts`: the member checks (AISC 360-22 E3, F2, F6, H1-1).
-- `generate.ts`: topology, the fix loop, trusses and rods, posts and beam splices, and the sizing. Also the specimen path (`buildSpecimen`), and it sends a brace test or a column test to `bench.ts`.
-- `bench.ts`: a brace test or a column test in its rig (`buildBrace`, `buildColumn`).
+- `generate.ts`: topology, the fix loop, trusses and rods, posts and beam splices, and the sizing. Also the specimen path (`buildSpecimen`), and it sends a brace test or a column test (also HSS) to `bench.ts`.
+- `bench.ts`: a brace test or a column test in its rig (`buildBrace`, `buildColumn`: standing, or lying for 3PB).
 - `specimen.ts`, `specimens/`: a real test as input (the `Specimen` type, the section lookup), and hub records as examples and test data.
 - `hub.ts`: reads a record of the hub test tables as a `Specimen`. `hub-count.ts` runs it on every row of resslab-hub-data and counts what we can draw (`node hub-count.ts [folder]`).
 - `rig.ts`: the test rig parts (reaction blocks, pins, links, actuators, rollers, rig frame members).
@@ -299,7 +315,7 @@ The repo is also the package `@epfl-enac/steel-viz`. It is not on npm. The hub t
 
 It has two entries:
 
-- `@epfl-enac/steel-viz`: the light entry. `generate`, `loadCatalog`, the exact drawing `renderHLR`, the painter `render`, `timeline`, `camera`, `VIEWS`, and the specimen input (`toSpecimen`, `fromHubConnection`, `fromHubBrace`, `fromHubColumn`). It loads no package. `package.test.ts` checks it. Use it for the loading animation and the SVG drawings.
+- `@epfl-enac/steel-viz`: the light entry. `generate`, `loadCatalog`, the exact drawing `renderHLR`, the painter `render`, `timeline`, `camera`, `VIEWS`, and the specimen input (`toSpecimen`, `fromHubConnection`, `fromHubBrace`, `fromHubColumn`, `fromHubHssColumn`). It loads no package. `package.test.ts` checks it. Use it for the loading animation and the SVG drawings.
 - `@epfl-enac/steel-viz/3d`: `createViewer` (the WebGL view). It loads no package either, but it is bigger. Import it with a dynamic `import()`, only on the page that needs it, so it stays out of the main bundle.
 
 The package has no section table. The hub has the same CSV files (ours are copies of them), so it passes their text to `loadCatalog()`:
@@ -315,7 +331,7 @@ const [az, el] = VIEWS.iso;
 const { svg } = render(parts, { az, el, animate: true }); // an SVG that builds itself with CSS
 ```
 
-For the EU family, pass `european-sections.csv` and `hss-european-sections.csv` with `'eu'`. A test of the hub goes through `toSpecimen(record)` (or `fromHubConnection`, `fromHubBrace`, `fromHubColumn`), then `generate({ specimen }, catalog)`.
+For the EU family, pass `european-sections.csv` and `hss-european-sections.csv` with `'eu'`. A test of the hub goes through `toSpecimen(record)` (or `fromHubConnection`, `fromHubBrace`, `fromHubColumn`, `fromHubHssColumn`), then `generate({ specimen }, catalog)`.
 
 The hub has no channel or angle table, so this catalog has no channels and no double angles: the braces and the secondary beams keep their tube and I sections. The tees still come, because they are made from the I table. To get the same drawing as here, also pass the channel and angle CSV files of `sections/` (`loadCatalog('aisc', iCsv, hssCsv, channelCsv, angleCsv)`). For no other shape at all, pass `shapeP: 0` to `generate()`.
 

@@ -5,8 +5,9 @@
 //   to buildSpecimen in generate.ts.
 // - brace: one brace, alone or in a test frame (the `braces` table). It goes
 //   to buildBrace in bench.ts.
-// - column: one column, standing on a floor block, pushed at its top (the
-//   `columns` table). It goes to buildColumn in bench.ts.
+// - column: one column, standing on a floor block, pushed at its top, or
+//   lying on two rollers and pushed at mid span (the `columns` and
+//   `hss_columns` tables). It goes to buildColumn in bench.ts.
 // hub.ts reads the records of the hub tables into these types.
 //
 // No three.js here: this file only needs the section formulas.
@@ -78,16 +79,21 @@ export type BraceSpecimen = {
 // - ends fixed-free: the top is free to turn (one vertical actuator).
 // - fixed-fixed: the top is held straight (two vertical actuators side by side).
 // - fixed-flexible: the top turns against a spring (drawn like fixed-free).
+// - 3pb (three-point bending): the column lies on two rollers `length`
+//   apart, an actuator pushes it down at mid span. The axial load comes from
+//   an actuator at one end, against a reaction block at the other end.
 // angle: between the push and the web (0: strong axis bending, 90: weak axis).
+// For a tube the web is the side along its depth d.
 export type ColumnSpecimen = {
   test: 'column';
   id: string;
   family?: Family;
   section: SectionRef;
-  length: number; // mm, between the end plates (l_c)
-  ends: 'fixed-free' | 'fixed-fixed' | 'fixed-flexible';
+  length: number; // mm, between the end plates (l_c), or for 3pb between the rollers
+  ends: 'fixed-free' | 'fixed-fixed' | 'fixed-flexible' | '3pb';
   angle: number; // degrees
-  plates?: { top?: number; bottom?: number }; // mm, the end plate thickness
+  axial?: boolean; // false: no axial load, so no axial actuator (default true)
+  plates?: { top?: number; bottom?: number }; // mm, the end plate thickness (3pb: bottom at the pin end, top at the actuator end)
   notes?: string[];
 };
 
