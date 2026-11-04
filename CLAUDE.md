@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Steel structures from a seed, drawn as technical line drawings (SVG with hidden lines removed), with a 3D view and a build animation. Read `README.md` first: it explains every part. `ROADMAP.md` lists what comes next.
 
-It comes from `resslab-hub` (`tools/steel-generator`, branch `feat/simulator-steel-structure`), moved here with its history in November 2026. RESSLab Hub uses it for its logo (RESSLab-Team/resslab-hub#263) through an exported SVG, not as a dependency. Later it may be a package for a loading animation and a view of each experiment. So keep the core (sections, generate, steel, the painter renderer) free of three.js: only `hlr.ts` and `webgl.ts` load it. `package.test.ts` checks it: the light entry `index.ts` must load no package and no Node API.
+It comes from `resslab-hub` (`tools/steel-generator`, branch `feat/simulator-steel-structure`), moved here with its history in November 2026. RESSLab Hub uses it for its logo (RESSLab-Team/resslab-hub#263) through an exported SVG, not as a dependency. Later it may be a package for a loading animation and a view of each experiment. So keep the core (sections, generate, steel, the painter renderer) free of three.js: only `hlr.ts` loads it (`webgl.ts` is plain WebGL2). `package.test.ts` checks it: the light entry `index.ts` and the viewer `webgl.ts` must load no package and no Node API.
 
 ## Commands
 
