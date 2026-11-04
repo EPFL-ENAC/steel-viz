@@ -8,6 +8,7 @@ import { clashes } from './clash.ts';
 import { readTables } from './tables.ts';
 import { findSection, type Specimen } from './specimen.ts';
 import { fromHubConnection, toSpecimen } from './hub.ts';
+import { geo, memberFaces } from './steel.ts';
 
 const cats = { aisc: loadCatalog('aisc', ...readTables('aisc')), eu: loadCatalog('eu', ...readTables('eu')) };
 const record = (id: string) => JSON.parse(readFileSync(new URL(`./specimens/${id}.json`, import.meta.url), 'utf8'));
@@ -186,4 +187,16 @@ test('a specimen that does not fit throws a clear error', () => {
   fails([{ ...beam, connection: 'gusset' }], /connection must be/);
   fails([{ ...beam, section: 'W36X150', bearing: 90 }], /does not fit between the column flanges/);
   assert.throws(() => generate({ specimen: { ...column([]), column: { section: 'W14X90', height: 0 } } }, cats.aisc), /column height/);
+});
+
+test('a round tube from its dimensions, drawn round', () => {
+  const s = findSection({ id: 'CHS 168.3x7.1', shape: 'CHS', d: 168.3, t: 7.1 }, cats.eu);
+  assert.deepEqual([s.kind, s.d, s.bf, s.tf], ['CHS', 168.3, 168.3, 7.1]);
+  assert.throws(() => findSection({ id: 'x', shape: 'CHS', d: 100, t: 50 }, cats.eu), /wall is too thick/);
+  assert.throws(() => findSection({ id: 'x', shape: 'CHS', d: 100, t: 0 }, cats.eu), /t must be a number above 0/);
+  // like a round bar: no edge along the tube, only its outline
+  const f = memberFaces(geo('t', s, [0, 0, 0], [0, 0, 3000], false), 1e9);
+  const sides = f.filter((x) => x.pts.length === 4);
+  assert.equal(sides.length, 16);
+  assert.ok(sides.every((x) => x.edges.length === 2));
 });

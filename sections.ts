@@ -3,17 +3,18 @@
 // ourselves: the AISC table's `a` and `iy` columns are not in mm, the EU one
 // is fine, so the safe path is the same formulas for both.
 
-// I: W, IPE, HE. RHS: square tube. ROD: round bar. C: channel. 2L: two equal
-// angles back to back, ANGLE_GAP apart. T: a tee, half an I.
-export type Kind = 'I' | 'RHS' | 'ROD' | 'C' | '2L' | 'T';
+// I: W, IPE, HE. RHS: square tube. ROD: round bar. CHS: round tube (no table
+// has one, only a specimen gives it). C: channel. 2L: two equal angles back to
+// back, ANGLE_GAP apart. T: a tee, half an I.
+export type Kind = 'I' | 'RHS' | 'ROD' | 'CHS' | 'C' | '2L' | 'T';
 
 export type Section = {
   id: string;
   kind: Kind;
   d: number; // depth (2L: the leg)
-  bf: number; // flange width (RHS: width, 2L: both legs and the gap)
-  tf: number; // flange thickness (RHS: wall, 2L: angle thickness)
-  tw: number; // web thickness (RHS: wall, 2L: angle thickness)
+  bf: number; // flange width (RHS: width, ROD and CHS: the diameter, 2L: both legs and the gap)
+  tf: number; // flange thickness (RHS and CHS: wall, 2L: angle thickness)
+  tw: number; // web thickness (RHS and CHS: wall, 2L: angle thickness)
   A: number;
   Is: number; // strong axis inertia (bending in the depth direction)
   Iw: number; // weak axis inertia
@@ -64,6 +65,15 @@ export function rodSection(id: string, D: number): Section {
   const A = (Math.PI * D * D) / 4;
   const I = (Math.PI * D ** 4) / 64;
   return { id, kind: 'ROD', d: D, bf: D, tf: D / 2, tw: D / 2, A, Is: I, Iw: I, J: 2 * I, Ws: D ** 3 / 6, Ww: D ** 3 / 6, rmin: D / 4 };
+}
+
+// a round tube: outside diameter D, wall t
+export function chsSection(id: string, D: number, t: number): Section {
+  const Di = D - 2 * t;
+  const A = (Math.PI * (D ** 2 - Di ** 2)) / 4;
+  const I = (Math.PI * (D ** 4 - Di ** 4)) / 64;
+  const W = (D ** 3 - Di ** 3) / 6;
+  return { id, kind: 'CHS', d: D, bf: D, tf: t, tw: t, A, Is: I, Iw: I, J: 2 * I, Ws: W, Ww: W, rmin: Math.sqrt(I / A) };
 }
 
 // A rectangle of a section, [v0, v1, w0, w1], in the member frame: v across,

@@ -134,7 +134,7 @@ The pin of the link (or of the actuator) on the head is the top pin of the colum
 }
 ```
 
-- `section`: a name from the table of `family` (`W14x82` and `HEB 300` work, written the hub way), a built-up name read as d x bf x tw x tf (`H-700x300x13x24`), or the dimensions in mm. With a name, the full table is used, also the deep W sections that the random generator never takes.
+- `section`: a name from the table of `family` (`W14x82` and `HEB 300` work, written the hub way), a built-up name read as d x bf x tw x tf (`H-700x300x13x24`), or the dimensions in mm (`{ "id", "d", "bf", "tf", "tw" }`, with `"shape": "RHS"` for a tube, or `{ "id", "shape": "CHS", "d", "t" }` for a round tube). With a name, the full table is used, also the deep W sections that the random generator never takes.
 - `bearing`: 0 and 180 put the beam on a column flange, 90 and 270 on the web.
 - `length`: from the column axis to the beam tip, in mm.
 - `at`: the height of the beam centre line above the column foot. By default, half the column height.
@@ -212,7 +212,7 @@ pnpm build                                            # the playground as a stat
 Files:
 
 - `vec.ts`: vector helpers.
-- `sections.ts`: section properties (I, tube, rod, channel, double angle, tee) from the CSV tables. The rods and the tees are made in code.
+- `sections.ts`: section properties (I, tube, rod, round tube, channel, double angle, tee) from the CSV tables. The rods and the tees are made in code. No table has a round tube (CHS): only a specimen gives one.
 - `sections/`, `tables.ts`: the CSV tables (see `sections/README.md`), and how Node reads them.
 - `solver.ts`: 3D frame solver (6 DOF per node, pinned ends, finds mechanisms), and the buckling analysis (`alphaCr`).
 - `checks.ts`: the member checks (AISC 360-22 E3, F2, F6, H1-1).

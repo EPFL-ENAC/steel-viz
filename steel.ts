@@ -201,7 +201,7 @@ export function profile(s: Section): P2[][] {
     case 'C': return profC(s.d, s.bf, s.tw, s.tf);
     case 'T': return profT(s.d, s.bf, s.tw, s.tf);
     case '2L': return prof2L(s.d, s.bf, s.tf);
-    case 'ROD': return profRound(s.d);
+    case 'ROD': case 'CHS': return profRound(s.d);
     default: return profRect(s.d, s.bf);
   }
 }
@@ -345,8 +345,8 @@ function piece(s: Section, f: Flanged, side: 'top' | 'bot', depth: number, split
 }
 
 export function memberFaces(g: Geo, seg: number, cuts: number[] = []): Face[] {
-  // a round bar has no edges along it, only its outline (the renderers find it)
-  if (g.sec.kind === 'ROD')
+  // a round bar or tube has no edges along it, only its outline (the renderers find it)
+  if (g.sec.kind === 'ROD' || g.sec.kind === 'CHS')
     return prism(g.p0, g.p1, g.polys, g.u, g.v, g.w, seg, g.sh, cuts).map((f) =>
       f.pts.length === 4 ? { ...f, edges: f.edges.filter(([i, j]) => !((i === 1 && j === 2) || (i === 3 && j === 0))) } : f);
   const f = flanged(g.sec);

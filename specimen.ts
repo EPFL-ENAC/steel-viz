@@ -5,13 +5,16 @@
 // 100 tests). hub.ts reads the records of the hub tables into these types.
 //
 // No three.js here: this file only needs the section formulas.
-import { iSection, rhsSection, type Catalog, type Family, type Section } from './sections.ts';
+import { chsSection, iSection, rhsSection, type Catalog, type Family, type Section } from './sections.ts';
 import { BEAM_CONN_KINDS, type ConnType } from './steel.ts';
 
 // A name from the section tables ('W14X82', 'HE 300 B', also written
 // 'W14x82', 'HEB 300'), a built-up name ('H-700x300x13x24': d x bf x tw x tf),
-// or the dimensions in mm.
-export type SectionRef = string | { id: string; shape?: 'I' | 'RHS'; d: number; bf: number; tf: number; tw: number };
+// or the dimensions in mm. A round tube (CHS) has a diameter d and a wall t.
+export type SectionRef =
+  | string
+  | { id: string; shape?: 'I' | 'RHS'; d: number; bf: number; tf: number; tw: number }
+  | { id: string; shape: 'CHS'; d: number; t: number };
 
 export type SpecimenBeam = {
   section: SectionRef;
@@ -47,6 +50,13 @@ const key = (s: string) => {
 const BUILT_UP = /^(?:BH|H|I)?[-\s]*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)$/i;
 
 export function findSection(ref: SectionRef, cat: Catalog): Section {
+  if (typeof ref !== 'string' && ref.shape === 'CHS') {
+    const { id, d, t } = ref;
+    for (const [k, v] of Object.entries({ d, t }))
+      if (!(typeof v === 'number' && v > 0)) throw new Error(`section ${id}: ${k} must be a number above 0, not ${JSON.stringify(v)}`);
+    if (2 * t >= d) throw new Error(`section ${id}: the wall is too thick for its size (d ${d}, t ${t})`);
+    return chsSection(id, d, t);
+  }
   if (typeof ref !== 'string') {
     const { id, d, bf, tf, tw } = ref;
     for (const [k, v] of Object.entries({ d, bf, tf, tw }))
