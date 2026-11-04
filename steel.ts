@@ -653,7 +653,7 @@ export function splicePlates(lo: Geo, hi: Geo, kind: 'bearing' | 'flange'): { fa
   return { faces, boxes, dots };
 }
 
-export type BeamConn = 'shear_tab' | 'end_plate' | 'flange_plates' | 'welded' | 'clip_angles';
+export type BeamConn = 'shear_tab' | 'end_plate' | 'flange_plates' | 'welded' | 'clip_angles' | 'seated' | 'stiffened_seat';
 export type ConnType = BeamConn | 'gusset' | 'gusset_small' | 'gusset_lap' | 'clevis';
 // where a beam end lands: on a column flange, on a column web, on the web of a beam
 export type Fit = 'flange' | 'web' | 'beam';
@@ -721,6 +721,72 @@ function clipAngles(g: Geo, r: Resolved, hw: Hardware) {
     for (const dw of rows) hw.dots.push({ p: add(add(add(o, mul(inward, t + 1)), mul(side, x + vb)), mul(g.w, dw)), n: inward });
   }
   for (const dw of rows) hw.dots.push({ p: add(add(o, mul(inward, A - EDGE)), mul(g.w, dw)), axis: g.v, half: x + t });
+}
+
+// Seated connections: the beam sits on a seat under its bottom flange, and
+// a small angle on its top flange holds it in place. Two bolts go down
+// through each flange. The seat is an angle bolted to the face, or (the
+// stiffened seat) a plate on a stiffener welded to the face. Both are as
+// wide as the flange. x runs along the member from the face, y down from
+// the flange face it touches.
+const SEAT = { A: 100, B: 150, t: 12, plate: 16, H: 200 }; // seat leg, face leg, angle, seat plate, stiffener
+const TOP = { A: 90, B: 90, t: 10 }; // the top angle
+function seatFrame(g: Geo, r: Resolved) {
+  const rs = rects(g.sec);
+  const cv = (Math.min(...rs.map((x) => x[0])) + Math.max(...rs.map((x) => x[1]))) / 2;
+  const face = add(add(r.p, mul(r.inward, -r.gap)), mul(g.v, cv)); // on the face, on the web plane
+  const W = g.sec.bf;
+  const gauge = Math.max(55, W - 2 * EDGE);
+  // a point x along, y down from the depth `depth` of g, z across
+  const at = (depth: number, x: number, y: number, z = 0) => add(add(add(face, mul(r.inward, x)), mul(g.w, wAt(g, depth) + y)), mul(g.v, z));
+  // an angle in the plane (inward, w), as wide as W: a leg along x (on
+  // the flange, y from 0 to sy*t) and a leg along y on the face
+  const angle = (hw: Hardware, depth: number, sy: 1 | -1, A: number, B: number, t: number) => {
+    hw.faces.push(...flat(at(depth, 0, 0), r.inward, g.w, W, [[0, 0], [A, 0], [A, sy * t], [t, sy * t], [t, sy * B], [0, sy * B]]).faces);
+    hw.boxes.push({ c: at(depth, A / 2, (sy * t) / 2), ax: [r.inward, g.w, g.v], h: [A / 2, t / 2, W / 2] });
+    hw.boxes.push({ c: at(depth, t / 2, (sy * (t + B)) / 2), ax: [r.inward, g.w, g.v], h: [t / 2, (B - t) / 2, W / 2] });
+  };
+  // two bolts across, down through the flange at `depth` and a plate t thick on its other side (sy)
+  const flangeBolts = (hw: Hardware, depth: number, sy: 1 | -1, x: number, t: number) => {
+    for (const z of [-gauge / 2, gauge / 2]) hw.dots.push({ p: at(depth, x, (sy * (t - g.sec.tf)) / 2, z), axis: g.w, half: (t + g.sec.tf) / 2 });
+  };
+  // two bolts across, into the face, on a face leg t thick
+  const faceBolts = (hw: Hardware, depth: number, y: number, t: number) => {
+    for (const z of [-gauge / 2, gauge / 2]) hw.dots.push({ p: at(depth, t + 1, y, z), n: r.inward });
+  };
+  return { at, angle, flangeBolts, faceBolts, W };
+}
+function topAngle(r: Resolved, hw: Hardware, f: ReturnType<typeof seatFrame>) {
+  const { A, B, t } = TOP;
+  f.angle(hw, 0, -1, A, B, t);
+  f.flangeBolts(hw, 0, -1, r.gap + EDGE, t);
+  f.faceBolts(hw, 0, -(B + t) / 2, t);
+  hw.reach.push(A - r.gap);
+}
+function seated(g: Geo, r: Resolved, hw: Hardware) {
+  const f = seatFrame(g, r);
+  const { A, B, t } = SEAT;
+  f.angle(hw, g.d, 1, A, B, t);
+  f.flangeBolts(hw, g.d, 1, r.gap + 45, t);
+  f.faceBolts(hw, g.d, B - 50, t);
+  hw.reach.push(A - r.gap);
+  topAngle(r, hw, f);
+}
+function stiffenedSeat(g: Geo, r: Resolved, hw: Hardware) {
+  const f = seatFrame(g, r);
+  const { A, plate: tp, H } = SEAT;
+  const ts = 14;
+  // the seat plate under the flange, on the face
+  hw.faces.push(...box3(f.at(g.d, A / 2, tp / 2), r.inward, g.w, f.W, A, tp));
+  hw.boxes.push({ c: f.at(g.d, A / 2, tp / 2), ax: [r.inward, g.w, g.v], h: [A / 2, tp / 2, f.W / 2] });
+  // the stiffener under it, in the web plane, narrow at the bottom
+  const L = A - 10;
+  const st = flat(f.at(g.d, 0, tp), r.inward, g.w, ts, [[0, 0], [L, 0], [L, 25], [35, H], [0, H]]);
+  hw.faces.push(...st.faces);
+  hw.boxes.push(st.box);
+  f.flangeBolts(hw, g.d, 1, r.gap + 45, tp);
+  hw.reach.push(A - r.gap);
+  topAngle(r, hw, f);
 }
 
 function endPlate(g: Geo, r: Resolved, hw: Hardware) {
@@ -885,6 +951,8 @@ export const CONNS: Record<ConnType, ConnSpec> = {
   flange_plates: { label: 'flange plates', pinned: false, setback: 13, fits: ['flange', 'web'], draw: flangePlates },
   welded: { label: 'welded', pinned: false, setback: 0, fits: ['flange', 'web', 'beam'], draw: () => {} },
   clip_angles: { label: 'clip angles', pinned: true, setback: 13, fits: ['flange', 'web', 'beam'], replaces: 'shear_tab', draw: clipAngles },
+  seated: { label: 'seated', pinned: true, setback: 13, fits: ['flange', 'web'], past: [SEAT.B, TOP.B], replaces: 'shear_tab', draw: seated },
+  stiffened_seat: { label: 'stiffened seat', pinned: true, setback: 13, fits: ['flange', 'web'], past: [SEAT.plate + SEAT.H, TOP.B], replaces: 'shear_tab', draw: stiffenedSeat },
   gusset: { label: 'gusset', pinned: true, setback: 195, draw: (g, r, hw) => gusset(g, r, hw, false) },
   gusset_small: { label: 'small gusset', pinned: true, setback: 130, draw: (g, r, hw) => gusset(g, r, hw, true) },
   gusset_lap: { label: 'lapped gusset', pinned: true, setback: 40, draw: gussetLap },
