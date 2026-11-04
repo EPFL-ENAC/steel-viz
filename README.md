@@ -280,4 +280,4 @@ To make a release (a human does it):
 
 The controls are in a rail of sections you can fold: structure, layout, details, view, animation, good seeds, analysis. A section says how many of its settings are not on their default, and has a button to reset them. The browser keeps which sections are open. The rail uses the EPFL design tokens and CSS, copied in `app/epfl/` (see its README). The dark theme is ours. On a phone, the drawing comes first and the rail under it.
 
-The build does not play on a change. "Play the build" plays it, and "Play on change" (off by default) plays it on every change. "Build time" (6 s by default) and "Part speed" (×0.25 to ×4) are the two knobs of `timeline()`. Under them, the rail says about how many parts are in the air at once.
+"Build time" is 0 by default: no animation, a change draws the new structure at once. Over 0, each change plays the build in that time, and "Play again" plays it once more. "Build time" and "Part speed" (×0.25 to ×4) are the two knobs of `timeline()`. Under them, the rail says about how many parts are in the air at once.

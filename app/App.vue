@@ -30,20 +30,20 @@ function build(animate: boolean) {
     error.value = String(e.stack ?? e);
   }
 }
-// a change shows the new structure at once. It plays the build only when
-// "play on change" is on.
-build(!!s.playOnChange);
-watch(() => BUILD_KEYS.map((k) => s[k]), () => build(!!s.playOnChange));
+// build time 0 (the default): a change shows the new structure at once.
+// Over 0: each change plays the build, in that time.
+const plays = computed(() => s.duration > 0);
+build(plays.value);
+watch(() => BUILD_KEYS.map((k) => s[k]), () => build(plays.value));
 watch(() => s.detail, () => build(false));
 
 const replay = ref(0);
-// with play on change: play again when the build time or the speed stops moving
+// play again when the build time or the speed stops moving (not when it goes to 0)
 let again = 0;
 watch(() => [s.duration, s.speed], () => {
   clearTimeout(again);
-  if (s.playOnChange) again = window.setTimeout(() => replay.value++, 300);
+  if (plays.value) again = window.setTimeout(() => replay.value++, 300);
 });
-const playOnChange = computed({ get: () => !!s.playOnChange, set: (v) => (s.playOnChange = v ? 1 : 0) });
 const compare = computed({ get: () => !!s.compare, set: (v) => (s.compare = v ? 1 : 0) });
 
 // ---- seed
@@ -54,7 +54,7 @@ const randomSeed = () => (s.seed = 1 + Math.floor(Math.random() * 9999));
 const speedLog = computed({ get: () => Math.log2(s.speed), set: (v) => (s.speed = Number((2 ** v).toFixed(3))) });
 const inAir = computed(() => {
   const parts = built.value?.r.parts;
-  if (!parts?.length) return 0;
+  if (!plays.value || !parts?.length) return 0;
   const ev: [number, number][] = [];
   for (const t of timeline(parts, anim(here, parts)).values()) ev.push([t.start, 1], [t.land, -1]);
   ev.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
@@ -186,13 +186,15 @@ async function copy(what: 'svg' | 'link') {
         </Section>
 
         <Section id="animation" title="Animation" :keys="GROUPS.animation" open>
-          <div class="actions">
-            <button type="button" class="epfl-btn epfl-btn-primary epfl-btn-sm" @click="replay++">Play the build</button>
-            <label class="epfl-check"><input v-model="playOnChange" type="checkbox"> Play on change</label>
-          </div>
-          <Slider id="duration" v-model="s.duration" label="Build time" :min="0.5" :max="30" :step="0.5" :out="`${s.duration} s`" />
-          <Slider id="speed" v-model="speedLog" label="Part speed" :min="-2" :max="2" :step="0.25" :out="`× ${s.speed.toFixed(2)}`" />
-          <p class="note">About {{ inAir }} {{ inAir === 1 ? 'part' : 'parts' }} in the air at once. A short build with slow parts brings many parts at the same time.</p>
+          <Slider id="duration" v-model="s.duration" label="Build time" :min="0" :max="30" :step="0.5" :out="plays ? `${s.duration} s` : 'Off'" />
+          <p v-if="!plays" class="note">Off: a change draws the structure at once. Set a build time to see it built on each change.</p>
+          <template v-else>
+            <Slider id="speed" v-model="speedLog" label="Part speed" :min="-2" :max="2" :step="0.25" :out="`× ${s.speed.toFixed(2)}`" />
+            <p class="note">About {{ inAir }} {{ inAir === 1 ? 'part' : 'parts' }} in the air at once. A short build with slow parts brings many parts at the same time.</p>
+            <div class="actions">
+              <button type="button" class="epfl-btn epfl-btn-primary epfl-btn-sm" @click="replay++">Play again</button>
+            </div>
+          </template>
         </Section>
 
         <Section id="seeds" title="Good seeds">

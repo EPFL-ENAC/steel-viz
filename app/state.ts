@@ -50,9 +50,8 @@ const DEFAULTS = {
   detail: 'bolts',
   size: 0, // px, 0 for full size
   // animation
-  duration: 6, // s, the whole build
+  duration: 0, // s, the whole build. 0: no animation, a change draws at once
   speed: 1, // how fast one part comes in (see timeline in steel.ts)
-  playOnChange: 0, // 1: play the build on each change
   theme: '', // '' follows the system
 };
 export type Settings = typeof DEFAULTS;
@@ -64,7 +63,7 @@ export const GROUPS = {
   layout: ['storeys', 'span', 'bracing', 'armLmin', 'armLmax', 'armZmin', 'armZmax', 'conn'],
   details: ['braces', 'secondaries', 'posts', 'splices', 'trusses', 'rods', 'colSplice'],
   view: ['viewer', 'compare', 'view', 'az', 'el', 'weights', 'detail', 'size'],
-  animation: ['duration', 'speed', 'playOnChange'],
+  animation: ['duration', 'speed'],
 } satisfies Record<string, Key[]>;
 // the keys that change the structure
 export const BUILD_KEYS: Key[] = ['seed', ...GROUPS.structure, ...GROUPS.layout, ...GROUPS.details];

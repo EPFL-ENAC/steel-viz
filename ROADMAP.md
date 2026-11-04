@@ -54,7 +54,7 @@ The specimen input draws the beam-to-column tests of the hub `connection` table.
 ## Playground
 
 - [x] Compare with main in 3D too, not only in SVG: two views side by side, they turn, zoom and move together.
-- [x] No build animation on a change by default. A Play button, build time and part speed.
+- [x] Build time 0 by default: no animation, a change draws at once. Build time and part speed as two knobs.
 - [x] One line weight in 3D by default (two in the SVG and the export).
 - [x] More look settings: storeys, span, bracing, arm bands, connections, detail chances (`Params`, the CLI flags, the Layout and Details sections).
 - [x] A rail of sections you can fold, on the EPFL design tokens.
