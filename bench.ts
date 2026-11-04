@@ -1,5 +1,10 @@
-// The brace tests (the `braces` table of RESSLab Hub): one brace in its test
-// rig, from a BraceSpecimen (specimen.ts). generate() sends them here.
+// The tests of RESSLab Hub that are not beam-to-column tests: one specimen
+// in its test rig, from a BraceSpecimen or a ColumnSpecimen (specimen.ts).
+// generate() sends them here. No solve: the specimen is only drawn (ok, no
+// ratio). No three.js here.
+//
+// ------------------------------------------------------------- brace tests
+// The `braces` table: one brace in its test rig.
 //
 // The brace is in the plane x = 0. Its bottom work point is at the origin,
 // its top work point `length` away, `angle` above the horizontal toward +y.
@@ -13,12 +18,13 @@
 // work points as the end details let them. Each end detail (a gusset, a seat)
 // fills the corner between the brace end and the rig faces.
 //
-// No solve: the brace is only drawn (ok, no ratio). No three.js here.
+// ------------------------------------------------------------- column tests
+// The `columns` table: one column on a floor block. See buildColumn.
 import type { V } from './vec.ts';
 import type { Catalog, Section } from './sections.ts';
 import { boxOf, flat, geo, memberBoxes, memberFaces, type P2, type Part } from './steel.ts';
-import { actuator, block, clevis, hingeSize, rigMember, rigSection, seat, type RigOpts } from './rig.ts';
-import { findSection, type BraceSpecimen } from './specimen.ts';
+import { actuator, block, clevis, crosshead, hingeSize, rigMember, rigSection, seat, type RigOpts } from './rig.ts';
+import { findSection, type BraceSpecimen, type ColumnSpecimen } from './specimen.ts';
 import type { Detail, Params, Result, Structure } from './generate.ts';
 
 // ------------------------------------------------------------- the plane
@@ -192,6 +198,15 @@ function endOf(spec: BraceSpecimen, sec: Section, sz: EndSize, bid: string, top:
   };
 }
 
+// the parts of the members detail: no plates (what stood on a plate stands
+// on what held it). The other details keep them all.
+function forDetail(parts: Part[], detail: Detail): Part[] {
+  if (detail !== 'members') return parts;
+  const gone = new Map(parts.filter((q) => q.kind === 'plate').map((q) => [q.id, q.supports]));
+  const keep = (ids: string[]): string[] => ids.flatMap((s) => (gone.has(s) ? keep(gone.get(s)!) : [s]));
+  return parts.filter((q) => !gone.has(q.id)).map((q) => ({ ...q, supports: [...new Set(keep(q.supports))] }));
+}
+
 // ------------------------------------------------------------- the test
 export function buildBrace(p: Params, spec: BraceSpecimen, cat: Catalog, detail: Detail): Result {
   const t0 = performance.now();
@@ -333,17 +348,118 @@ export function buildBrace(p: Params, spec: BraceSpecimen, cat: Catalog, detail:
   });
   after();
 
-  // the members detail: no plates (what stood on a plate stands on what held it)
-  let out = parts;
-  if (detail === 'members') {
-    const gone = new Map(parts.filter((q) => q.kind === 'plate').map((q) => [q.id, q.supports]));
-    const keep = (ids: string[]): string[] => ids.flatMap((s) => (gone.has(s) ? keep(gone.get(s)!) : [s]));
-    out = parts.filter((q) => !gone.has(q.id)).map((q) => ({ ...q, supports: [...new Set(keep(q.supports))] }));
-  }
+  const out = forDetail(parts, detail);
   log.push(`brace test ${frame}, ${spec.ends} ends, not solved (only drawn)`);
   const st: Structure = {
     form: 'specimen', id: spec.id, H: Math.round(W1[1]), col: sec, cols: [], arms: [], secs: [],
     brace: { frame, L, angle: spec.angle, ends: spec.ends },
   };
   return { st, parts: out, ok: true, log, ratio: 0, alpha: Infinity, solves: 0, ms: { topology: t1 - t0, solve: 0, geometry: performance.now() - t1 }, nodes: 0, members: {} };
+}
+
+// ------------------------------------------------------------- column tests
+const COLUMN_ENDS: ColumnSpecimen['ends'][] = ['fixed-free', 'fixed-fixed', 'fixed-flexible'];
+
+// One column test. The column axis is on z, from z = 0 to its length (the end
+// plates are outside it). The column is turned by `angle` in plan, its web
+// `angle` away from y: the push is always along y, so the rig stays square
+// to the axes. Under the foot plate a floor block. On the top plate the
+// loading head, pushed by an actuator from a reaction wall at -y. Above the
+// head the vertical actuators, hung from a crosshead across x: one in the
+// middle, or for fixed-fixed two side by side along y (from a spreader beam
+// under the crosshead), so the head can't turn.
+export function buildColumn(p: Params, spec: ColumnSpecimen, cat: Catalog, detail: Detail): Result {
+  const t0 = performance.now();
+  const sec = findSection(spec.section, cat);
+  const L = spec.length;
+  if (!(L > 0)) throw new Error(`${spec.id}: length must be a number above 0, not ${JSON.stringify(L)}`);
+  if (!COLUMN_ENDS.includes(spec.ends)) throw new Error(`${spec.id}: ends must be one of ${COLUMN_ENDS.join(', ')}, not ${JSON.stringify(spec.ends)}`);
+  if (!Number.isFinite(spec.angle)) throw new Error(`${spec.id}: angle must be a number, not ${JSON.stringify(spec.angle)}`);
+  const log = [...(spec.notes ?? [])];
+  const a = (spec.angle * Math.PI) / 180;
+  const [sa, ca] = [Math.abs(Math.sin(a)), Math.abs(Math.cos(a))];
+
+  // the end plates: square to the axes, past the section by m on each side
+  // (the bolts go there)
+  const [ex, ey] = [sa * sec.d / 2 + ca * sec.bf / 2, ca * sec.d / 2 + sa * sec.bf / 2];
+  const m = clamp(r5(0.25 * Math.max(sec.d, sec.bf)), 60, 150);
+  const [px, py] = [2 * ex + 2 * m, 2 * ey + 2 * m];
+  const thick = (given: number | undefined, what: string) => {
+    if (given !== undefined && given > 0) return given;
+    const t = Math.max(25, Math.round(1.5 * sec.tf));
+    log.push(`${what} end plate thickness not given, drawn ${t} mm`);
+    return t;
+  };
+  const [tt, tb] = [thick(spec.plates?.top, 'top'), thick(spec.plates?.bottom, 'bottom')];
+  const zh = L + tt; // the top of the top plate, where the head sits
+
+  // the rig sizes: the actuator pins, the head, the floor
+  const Da = clamp(r5(0.2 * Math.max(sec.d, sec.bf)), 40, 80);
+  const hz = hingeSize(Da);
+  const two = spec.ends === 'fixed-fixed';
+  const e = two ? r5(Math.max(hz.side / 2 + 30, ey)) : 0; // the vertical actuators, from the axis along y
+  const hh = Math.max(250, r5(2.6 * Da + 80)); // the head height
+  const hx = Math.max(ex + m / 2 - 25, hz.width / 2 + 20);
+  const hy = Math.max(ey + m / 2 - 25, two ? e + hz.side / 2 + 20 : hz.side / 2 + 20);
+  const zf = -tb - 400; // the floor
+  const Wb = r5(Math.max(px, py) + 300); // the floor block
+  const reach = Math.max(1000, 14 * Da); // the length of an actuator
+  const R = rigSection(cat, Math.max(300, Math.min(600, 0.5 * Math.max(sec.d, sec.bf) + 150)));
+  const t1 = performance.now();
+
+  // the parts, in build order (as for the braces: a part on others gets the
+  // next step, a part on the floor step 0)
+  const parts: Part[] = [];
+  let step = 1;
+  const add = (pt: Part) => {
+    pt.step = pt.supports.length ? step++ : 0;
+    parts.push(pt);
+    return pt;
+  };
+  const ro = (supports: string[], type?: string): RigOpts => ({ step: 0, supports, ...(type ? { type } : {}) });
+  const ground = (type?: string): RigOpts => ({ step: 0, supports: [], from: [0, 0, -1], ...(type ? { type } : {}) });
+  // an end plate centred at height z, its bolts on the face toward n
+  const bolts = (z: number, n: number) => {
+    if (detail !== 'bolts') return [];
+    const [bx, by] = [ex + m / 2, ey + m / 2];
+    const at: [number, number][] = [[-1, -1], [0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0]];
+    return at.map(([i, j]) => ({ p: [i * bx, j * by, z] as V, n: [0, 0, n] as V }));
+  };
+  const plate = (id: string, z: number, t: number, n: number, on: string) => {
+    const f = flat([0, 0, z], X, Y, t, rect(px, py));
+    return add({ id, step: 0, supports: [on], kind: 'plate', from: [0, 0, -1], faces: f.faces, boxes: [f.box], dots: bolts(z + (n * t) / 2, n), info: { type: 'End plate', of: 'column' } });
+  };
+
+  add(block('rig-floor', [0, 0, zf + 200], [Wb, Wb, 400], ground()));
+  plate('column-foot', -tb / 2, tb, 1, 'rig-floor');
+  const g = geo('column', sec, [0, 0, 0], [0, 0, L], false);
+  g.w = [Math.sin(a), Math.cos(a), 0];
+  g.v = [g.w[1], -g.w[0], 0]; // cross(w, u), u = z
+  add({ id: 'column', step: 0, supports: ['column-foot'], kind: 'column', from: Z, faces: memberFaces(g, p.seg), boxes: memberBoxes(g), dots: [], info: { type: 'Column', sec, L } });
+  plate('column-cap', L + tt / 2, tt, 1, 'column');
+  add(block('rig-head', [0, 0, zh + hh / 2], [2 * hx, 2 * hy, hh], ro(['column-cap'], 'Loading head')));
+
+  // the push: from the wall at -y to the head face, at mid head height
+  const zc = zh + hh / 2;
+  const y0 = -hy - reach;
+  add(block('rig-wall', [0, y0 - 200, (zf + zc + 400) / 2], [Math.max(600, 2 * hx + 200), 400, zc + 400 - zf], ground('Reaction wall')));
+  add(actuator('rig-actuator', [0, y0, zc], [0, -hy, zc], X, Da, ro(['rig-wall', 'rig-head'])));
+
+  // the axial load: the crosshead posts clear the floor block and the wall
+  const top = zh + hh + reach + (two ? R.d : 0); // the crosshead beam bottom
+  const span = r5(Math.max(Wb, 600, 2 * hx + 200) + R.d + 200);
+  add(crosshead('rig-crosshead', [0, 0, top], X, span, zf, R, ground()));
+  if (two) {
+    const zs = top - R.d / 2;
+    add(rigMember('rig-spreader', R, [0, -e - hz.side / 2 - 100, zs], [0, e + hz.side / 2 + 100, zs], ro(['rig-crosshead'], 'Spreader beam')));
+    for (const [k, s] of [[1, -1], [2, 1]])
+      add(actuator(`rig-axial${k === 1 ? '' : k}`, [0, s * e, top - R.d], [0, s * e, zh + hh], X, Da, ro(['rig-spreader', 'rig-head'])));
+  } else add(actuator('rig-axial', [0, 0, top], [0, 0, zh + hh], X, Da, ro(['rig-crosshead', 'rig-head'])));
+
+  log.push(`column test ${spec.ends}, pushed at ${spec.angle}° from the web, not solved (only drawn)`);
+  const st: Structure = {
+    form: 'specimen', id: spec.id, H: Math.round(L), col: sec, cols: [], arms: [], secs: [],
+    columnTest: { ends: spec.ends, L, angle: spec.angle },
+  };
+  return { st, parts: forDetail(parts, detail), ok: true, log, ratio: 0, alpha: Infinity, solves: 0, ms: { topology: t1 - t0, solve: 0, geometry: performance.now() - t1 }, nodes: 0, members: {} };
 }

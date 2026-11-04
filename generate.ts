@@ -18,8 +18,8 @@ import {
   type BeamConn, type ConnType, type Fit, type Geo, type P2, type Part, type PartInfo, type Plate,
 } from './steel.ts';
 import { overlap, own } from './clash.ts';
-import { BEAM_CONNS, findSection, type BraceSpecimen, type ConnSpecimen, type Specimen } from './specimen.ts';
-import { buildBrace } from './bench.ts';
+import { BEAM_CONNS, findSection, type BraceSpecimen, type ColumnSpecimen, type ConnSpecimen, type Specimen } from './specimen.ts';
+import { buildBrace, buildColumn } from './bench.ts';
 import { actuator, block, clevis, hingeSize, link } from './rig.ts';
 
 export type Detail = 'members' | 'plates' | 'bolts';
@@ -135,6 +135,8 @@ export type Structure = {
   load?: 'beam' | 'column'; minA?: Record<string, number>;
   // a brace test (bench.ts): col is the brace section, H the height of its top work point
   brace?: { frame: BraceSpecimen['frame']; L: number; angle: number; ends: BraceSpecimen['ends'] };
+  // a column test (bench.ts): col is the column section, H its length
+  columnTest?: { ends: ColumnSpecimen['ends']; L: number; angle: number };
 };
 const colId = (i: number) => (i ? `column${i + 1}` : 'column');
 const baseId = (i: number) => (i ? `base${i + 1}` : 'base');
@@ -1450,6 +1452,7 @@ export type Result = {
 export function generate(p0: Partial<Params>, cat: Catalog, detail: Detail = 'bolts'): Result {
   const p = { ...DEFAULTS, ...p0 };
   if (p.specimen?.test === 'brace') return buildBrace(p, p.specimen, cat, detail);
+  if (p.specimen?.test === 'column') return buildColumn(p, p.specimen, cat, detail);
   if (p.specimen) return buildSpecimen(p, p.specimen, cat, detail);
   const rng = mulberry32(p.seed * 7919 + 13);
   const t0 = performance.now();

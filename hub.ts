@@ -9,7 +9,7 @@
 //
 // No three.js and no Node API here: index.ts exports it.
 import type { ConnType } from './steel.ts';
-import type { BraceSpecimen, ConnSpecimen, SectionRef, Specimen, SpecimenBeam } from './specimen.ts';
+import type { BraceSpecimen, ColumnSpecimen, ConnSpecimen, SectionRef, Specimen, SpecimenBeam } from './specimen.ts';
 
 export type HubRecord = Record<string, unknown>;
 
@@ -41,7 +41,7 @@ function fields(rec: HubRecord, id: string) {
 }
 
 // the name when it looks like a section name, else the dimensions
-const section = (name: unknown, d: number, bf: number, tf: number, tw: number): SectionRef => {
+const sectionOf = (name: unknown, d: number, bf: number, tf: number, tw: number): SectionRef => {
   const n = typeof name === 'string' ? name.trim() : '';
   const named = /^[A-Za-z]{1,4}[\s-]?\d/.test(n);
   return { id: named ? n : `H ${d}x${bf}x${tw}x${tf}`, d, bf, tf, tw };
@@ -72,8 +72,8 @@ export function fromHubConnection(rec: HubRecord): ConnSpecimen {
   const interior = sub[1].toLowerCase() === 'interior';
   const load = sub[2].toLowerCase() as 'beam' | 'column';
 
-  const column = section(rec.section_c, num('d_c'), num('b_cf'), num('t_cf'), num('t_cw'));
-  const beam = section(rec.section_b, num('d_b'), num('b_bf'), num('t_bf'), num('t_bw'));
+  const column = sectionOf(rec.section_c, num('d_c'), num('b_cf'), num('t_cf'), num('t_cw'));
+  const beam = sectionOf(rec.section_b, num('d_b'), num('b_bf'), num('t_bf'), num('t_bw'));
   const height = num('h_c');
   // l_b: from the column axis to the beam tip for an exterior test, the whole span for an interior one
   const lb = num('l_b');
@@ -169,6 +169,34 @@ export function fromHubBrace(rec: HubRecord): BraceSpecimen {
   };
 }
 
+// ------------------------------------------------------------- columns
+const COLUMN_ENDS: Record<string, ColumnSpecimen['ends']> = { 'Fixed-Free': 'fixed-free', 'Fixed-Fixed': 'fixed-fixed', 'Fixed-Flexible': 'fixed-flexible' };
+const BENDING: Record<string, number> = { Strong: 0, Weak: 90, 'Bi-axial': 45 };
+
+// one record of the hub `columns` table (steel_columns.csv): one I column.
+// The section comes from the numbers (the name is often "Built Up S10").
+// Careful: h_c is the web height here, l_c the column length.
+export function fromHubColumn(rec: HubRecord): ColumnSpecimen {
+  const id = String(rec.id ?? rec.specimen_designation ?? 'column').trim();
+  const { text, value, num, unsupported } = fields(rec, id);
+  const notes: string[] = [];
+  const section = sectionOf(rec.section_c, num('d_c'), num('b_cf'), num('t_cf'), num('t_cw'));
+  const length = num('l_c');
+  const bc = text('boundary_condition');
+  if (!bc) throw new Error(`${id}: boundary_condition is missing`);
+  const ends = COLUMN_ENDS[bc];
+  if (!ends) throw unsupported('boundary_condition');
+  if (ends === 'fixed-flexible') notes.push('Fixed-Flexible: the spring that holds the top is not drawn, the top is drawn like Fixed-Free');
+  const ax = text('axis_of_bending');
+  if (!ax) throw new Error(`${id}: axis_of_bending is missing`);
+  const angle = BENDING[ax];
+  if (angle === undefined) throw unsupported('axis_of_bending');
+  if (ax === 'Bi-axial') notes.push('Bi-axial: the table has no loading angle, drawn at 45°');
+  if (/horizontal configuration/i.test(text('test_procedure'))) notes.push('tested lying down, drawn standing');
+  const plate = (f: string) => (value(f) > 0 ? mm(value(f)) : undefined);
+  return { test: 'column', id, section, length, ends, angle, plates: { top: plate('t_top_plate'), bottom: plate('t_bottom_plate') }, notes };
+}
+
 // ------------------------------------------------------------- any record
 // a JSON object: our own Specimen, or a hub record (the reader is picked from
 // a field only its table has)
@@ -177,8 +205,10 @@ export function toSpecimen(json: unknown): Specimen {
   const o = json as HubRecord;
   if ('specimen_type' in o) return fromHubConnection(o);
   if ('brace_angle' in o) return fromHubBrace(o);
+  if ('axis_of_bending' in o) return fromHubColumn(o);
   if (o.test === 'brace') return o as BraceSpecimen;
-  if (o.test !== undefined && o.test !== 'connection') throw new Error(`test "${String(o.test)}" is not known (connection or brace)`);
+  if (o.test === 'column') return o as ColumnSpecimen;
+  if (o.test !== undefined && o.test !== 'connection') throw new Error(`test "${String(o.test)}" is not known (connection, brace or column)`);
   if ('column' in o) return { beams: [], ...(o as Partial<ConnSpecimen>) } as ConnSpecimen;
-  throw new Error('not a specimen: no "column" or "test" (a Specimen), no "specimen_type" or "brace_angle" (a hub record)');
+  throw new Error('not a specimen: no "column" or "test" (a Specimen), no "specimen_type", "brace_angle" or "axis_of_bending" (a hub record)');
 }
