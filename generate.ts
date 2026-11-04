@@ -15,9 +15,9 @@ import { memberRatio } from './checks.ts';
 import type { Catalog, Section } from './sections.ts';
 import {
   box3, boxOf, flat, geo, hardware, memberBoxes, memberFaces, resolve, splicePlates, stiffener, supportFace, BEARING_T, BEAM_CONN_KINDS, CONNS, EDGE, PINNED, SETBACK, SPLICE_HALF,
-  type BeamConn, type ConnType, type Geo, type P2, type Part, type PartInfo, type Plate,
+  type BeamConn, type ConnType, type Fit, type Geo, type P2, type Part, type PartInfo, type Plate,
 } from './steel.ts';
-import { overlap } from './clash.ts';
+import { overlap, own } from './clash.ts';
 import { BEAM_CONNS, findSection, type Specimen } from './specimen.ts';
 
 export type Detail = 'members' | 'plates' | 'bolts';
@@ -31,6 +31,10 @@ export type Params = {
   secondaryP: number;
   postP: number; // the chance of a post, on each beam that can take one
   beamSpliceP: number; // the chance of a splice, on each long bay beam (less on a box)
+  // the chance that a beam end gets one of the newer kinds (clip angles,
+  // seats, tee, stiffened end plate), from a stream of its own. 0: only the
+  // kinds of before, so the same parts as before these kinds.
+  connKindsP: number;
   // the chance that a member gets a channel, angle or tee section: the braces
   // of an arm (double angles), a secondary beam (a channel), a truss bottom
   // chord (a tee). 0: only I, tubes and rods, as before these shapes.
@@ -52,7 +56,7 @@ export type Params = {
   specimen?: Specimen; // a real test: seed, form, arms, height, braceP and secondaryP are not used
 };
 export const DEFAULTS: Params = {
-  seed: 1, arms: 8, height: 2500, load: 100, fy: 345, braceP: 0.3, secondaryP: 0.35, postP: 0.3, beamSpliceP: 0.3, shapeP: 0.35,
+  seed: 1, arms: 8, height: 2500, load: 100, fy: 345, braceP: 0.3, secondaryP: 0.35, postP: 0.3, beamSpliceP: 0.3, connKindsP: 0.35, shapeP: 0.35,
   storeys: 0, spanK: 1, bracing: 'auto', armL: [0.3, 0.7], armZ: [0.35, 0.95], conn: 'auto', trussK: 1, rodP: 0.4, colSpliceP: 0.6,
   seg: 400, form: 'mix',
 };
@@ -881,6 +885,59 @@ function braceGeo(st: Structure, a: Arm, b: Brace, k: number, S: Geo) {
   return { g: geo(braceId(a, k), b.sec, add(B, mul(un, t0)), sub(C, mul(un, t1)), false), conn, hb };
 }
 
+// More kinds of beam end, from a stream of their own. Each end takes one
+// keyed draw, like shaped(): an arm end (key `arm3-from`, `arm3-to`) or a
+// secondary beam (its id). Under connKindsP, the end gets a kind that can
+// take the place of the one it has (`replaces` in CONNS) and fits where it
+// lands. Same pin or moment and same setback: the solver, the sections and
+// the lengths don't change, only the plates at the end. p.conn set by hand
+// wins: no change.
+// part: the id of its plates (a beam splice, picked later, renames the far piece)
+type Swap = { key: string; part: () => string; old: ConnType; set: (c: ConnType) => void };
+function moreKinds(st: Structure, p: Params, log: string[]): Swap[] {
+  if (p.connKindsP <= 0 || p.conn !== 'auto') return [];
+  const swaps: Swap[] = [];
+  const swap = (key: string, part: () => string, old: ConnType, fit: Fit, set: (c: ConnType) => void) => {
+    const rng = mulberry32(p.seed * 86028121 + fnv1a(key));
+    if (rng() >= p.connKindsP) return;
+    const ks = BEAM_CONN_KINDS.filter((k) => CONNS[k].replaces === old && CONNS[k].fits!.includes(fit));
+    if (!ks.length) return;
+    set(ks[Math.floor(rng() * ks.length)]);
+    swaps.push({ key, part, old, set });
+  };
+  for (const a of st.arms) {
+    // on a column: its flange or its web
+    const fit: Fit = a.bearing % 180 === 0 ? 'flange' : 'web';
+    swap(`${a.id}-from`, () => `${a.id}-from-conn`, a.conn, fit, (c) => (a.conn = c));
+    if (a.conn2) swap(`${a.id}-to`, () => `${a.splice === undefined ? a.id : farId(a)}-to-conn`, a.conn2, fit, (c) => (a.conn2 = c));
+  }
+  for (const s of st.secs) swap(s.id, () => `${s.id}-from-conn`, s.conn, 'beam', (c) => (s.conn = c));
+  if (swaps.length) log.push(`more connection kinds: ${swaps.map((w) => `${w.key} ${CONNS[kindOf(st, w)].label}`).join(', ')}`);
+  return swaps;
+}
+// the kind an end has now
+function kindOf(st: Structure, w: Swap): ConnType {
+  for (const a of st.arms) {
+    if (w.key === `${a.id}-from`) return a.conn;
+    if (w.key === `${a.id}-to`) return a.conn2!;
+  }
+  return st.secs.find((s) => s.id === w.key)!.conn;
+}
+// A new kind that goes through another part (a brace gusset, a rod, the
+// plates of a beam on the other face) goes back to the old one.
+function keepFits(st: Structure, p: Params, swaps: Swap[], log: string[]) {
+  const ps = parts(st, 'plates', p.seg);
+  for (const w of swaps) {
+    const id = w.part();
+    const mine = ps.find((q) => q.id === id);
+    const member = id.replace(/-(from|to)-conn$/, '');
+    const hit = mine?.boxes?.length && ps.some((q) => q !== mine && q.id !== member && !own(member, q.id) && q.boxes?.some((b) => mine.boxes!.some((a) => overlap(a, b))));
+    if (!hit) continue;
+    log.push(`${w.key}: ${CONNS[kindOf(st, w)].label} goes through another part, back to ${CONNS[w.old].label}`);
+    w.set(w.old);
+  }
+}
+
 // how far the plates of the two ends of a beam go past it, below and above
 const past = (...cs: (ConnType | undefined)[]): [number, number] =>
   [0, 1].map((i) => Math.max(16, ...cs.map((c) => (c ? CONNS[c].past?.[i] ?? 0 : 0)))) as [number, number];
@@ -1363,6 +1420,9 @@ export function generate(p0: Partial<Params>, cat: Catalog, detail: Detail = 'bo
       }
     }
   }
+  // more kinds of beam end, from a draw of their own (before the details:
+  // the column splice keeps clear of their plates)
+  const swaps = ok ? moreKinds(st, p, log) : [];
   // the details, from a draw of their own
   const det = mulberry32(p.seed * 15485863 + 3);
   const b = det();
@@ -1407,6 +1467,7 @@ export function generate(p0: Partial<Params>, cat: Catalog, detail: Detail = 'bo
     addBeamSplices(st, p, mulberry32(p.seed * 32452843 + 11), log);
     dropSplicesOnGussets(st, p, log);
   }
+  if (swaps.length) keepFits(st, p, swaps, log);
   log.push(alphaLog(alpha, amp));
   log.push(`${sized} sizing passes, final max ratio ${ratio.toFixed(2)} (limit ${LIMIT})`);
   const t2 = performance.now();

@@ -653,7 +653,7 @@ export function splicePlates(lo: Geo, hi: Geo, kind: 'bearing' | 'flange'): { fa
   return { faces, boxes, dots };
 }
 
-export type BeamConn = 'shear_tab' | 'end_plate' | 'flange_plates' | 'welded';
+export type BeamConn = 'shear_tab' | 'end_plate' | 'flange_plates' | 'welded' | 'clip_angles';
 export type ConnType = BeamConn | 'gusset' | 'gusset_small' | 'gusset_lap' | 'clevis';
 // where a beam end lands: on a column flange, on a column web, on the web of a beam
 export type Fit = 'flange' | 'web' | 'beam';
@@ -692,6 +692,35 @@ function plate(hw: Hardware, centre: V, ay: V, az: V, sx: number, sy: number, sz
 
 function shearTab(g: Geo, r: Resolved, hw: Hardware) {
   webPlate(g, r, 10, 115, 8, hw);
+}
+
+// Double clip angles: one angle on each side of the beam web. The web legs
+// are bolted through the web, one line of bolts through both. The other
+// legs lie on the support face, each bolted to it. The heels are on the
+// face, in the gap the beam leaves.
+function clipAngles(g: Geo, r: Resolved, hw: Hardware) {
+  const { p, inward, gap } = r;
+  const t = 10;
+  const [lo, hi] = webWindow(g, r);
+  const { n, pitch } = boltLine(hi - lo, 6);
+  const h = (n - 1) * pitch + 2 * EDGE;
+  const mid = wAt(g, (lo + hi) / 2);
+  const x = g.tw / 2;
+  const A = 90; // the web leg, from the face
+  const B = Math.min(90, (g.sec.bf + 30 - g.tw) / 2); // the leg on the face, no wider than the flange + 30
+  hw.reach.push(A - gap);
+  const o = add(add(p, mul(inward, -gap)), mul(g.w, mid)); // on the face, on the web plane
+  const rows = grid(n, 1, pitch, 0).map(([dw]) => dw);
+  const vb = Math.max(t + 25, B - 35); // the bolts in the face legs, from the web
+  for (const s of [-1, 1]) {
+    const side = mul(g.v, s);
+    // the angle: its L outline (along the member, across), as tall as the bolt group
+    hw.faces.push(...flat(o, inward, side, h, [[0, x], [A, x], [A, x + t], [t, x + t], [t, x + B], [0, x + B]]).faces);
+    hw.boxes.push(boxOf(add(add(o, mul(inward, A / 2)), mul(side, x + t / 2)), g.w, inward, t, h, A));
+    hw.boxes.push(boxOf(add(add(o, mul(inward, t / 2)), mul(side, x + (t + B) / 2)), g.w, inward, B - t, h, t));
+    for (const dw of rows) hw.dots.push({ p: add(add(add(o, mul(inward, t + 1)), mul(side, x + vb)), mul(g.w, dw)), n: inward });
+  }
+  for (const dw of rows) hw.dots.push({ p: add(add(o, mul(inward, A - EDGE)), mul(g.w, dw)), axis: g.v, half: x + t });
 }
 
 function endPlate(g: Geo, r: Resolved, hw: Hardware) {
@@ -855,6 +884,7 @@ export const CONNS: Record<ConnType, ConnSpec> = {
   end_plate: { label: 'end plate', pinned: false, setback: 25, fits: ['flange', 'web', 'beam'], past: [90, 90], draw: endPlate },
   flange_plates: { label: 'flange plates', pinned: false, setback: 13, fits: ['flange', 'web'], draw: flangePlates },
   welded: { label: 'welded', pinned: false, setback: 0, fits: ['flange', 'web', 'beam'], draw: () => {} },
+  clip_angles: { label: 'clip angles', pinned: true, setback: 13, fits: ['flange', 'web', 'beam'], replaces: 'shear_tab', draw: clipAngles },
   gusset: { label: 'gusset', pinned: true, setback: 195, draw: (g, r, hw) => gusset(g, r, hw, false) },
   gusset_small: { label: 'small gusset', pinned: true, setback: 130, draw: (g, r, hw) => gusset(g, r, hw, true) },
   gusset_lap: { label: 'lapped gusset', pinned: true, setback: 40, draw: gussetLap },

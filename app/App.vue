@@ -172,6 +172,7 @@ async function copy(what: 'svg' | 'link') {
           <Slider id="trusses" v-model="s.trusses" label="Trusses" :min="0" :max="2.5" :step="0.1" :out="`× ${s.trusses.toFixed(1)}`" />
           <Slider id="rods" v-model="s.rods" label="Tension rods" :min="0" :max="1" :step="0.05" :out="pct(s.rods)" />
           <Slider id="colSplice" v-model="s.colSplice" label="Column splice" :min="0" :max="1" :step="0.05" :out="pct(s.colSplice)" />
+          <Slider id="connKinds" v-model="s.connKinds" label="More connection kinds" :min="0" :max="1" :step="0.05" :out="pct(s.connKinds)" />
         </Section>
 
         <Section id="view" title="View" :keys="GROUPS.view" open>
