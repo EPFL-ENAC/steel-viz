@@ -1,16 +1,20 @@
-// Line drawing with exact hidden lines, from three-edge-projection.
+// Line drawing with exact hidden lines, in plain TypeScript (no package, so
+// it runs in Node and in the browser, from the light entry).
 //
-// The library finds the edges of each mesh (sharp edges and silhouettes),
-// then cuts each edge where a triangle
-// is in front of it. It projects along +Y, so we first turn the scene: X is
-// screen right, Y points to the camera, Z is screen down. And we give it
-// metres, not mm: it only looks for faces up to 1000 units in front of an
-// edge (its `heightOffset`), which is only 1 m in mm.
+// Every face is cut in triangles, seen from the camera: x to the right, y
+// down the screen, d the depth toward the camera, all in mm. The lines are
+// the triangle edges where the surface folds by FOLD degrees or more, where
+// it turns away from the camera (a silhouette, the outline of a round bar),
+// or where a face has no neighbour. A grid on the screen holds the
+// triangles. For each line we take the triangles of the cells it crosses,
+// and cut out the pieces that are inside a triangle on screen and behind its
+// plane. The rest is visible. A line that lies on a surface is not behind
+// it, so it stays.
 //
 // The build animation needs one more thing. A line hidden in the finished
 // drawing can be visible earlier, before the part in front of it arrives.
-// So for each hidden piece we find the part in front of it (a ray to the
-// camera), and draw the piece from its own step until that part lands.
+// So for each hidden piece we find the part in front of it (the grid again),
+// and draw the piece from its own step until that part lands.
 // Parts fly in from outside the frame (members along their axis, the
 // column from above), then their bolts pop in one by one.
 //
@@ -25,9 +29,6 @@
 //
 // Line widths are in mm at the drawing scale, or in px when `size` says
 // how many px wide the drawing will be shown (a logo, a favicon).
-import { BufferAttribute, BufferGeometry, DoubleSide, Mesh, MeshBasicMaterial, Ray, Vector3 } from 'three';
-import { MeshBVH } from 'three-mesh-bvh';
-import { ProjectionGenerator } from 'three-edge-projection/src/ProjectionGenerator.js';
 import { add, cross, dot, mul, norm, sub, type V } from './vec.ts';
 import { BOLT_MS, camera, forSize, timeline, type Face, type Part, type RenderOpts } from './steel.ts';
 import { triangles } from './triangles.ts';
@@ -37,6 +38,8 @@ const SOLID = 400; // px: up to this drawing size, bolt heads are solid
 const DEEP = 50; // mm: a jump in depth bigger than this makes an outline
 const SIDE = 1.5; // mm: how far beside (or past the end of) a line we look
 const FRONT = 5; // mm: a surface this much in front of a line end hides it
+const FOLD = 50; // degrees: a fold this sharp or more makes a line
+const EPS = 1e-3; // mm: a surface must be this much in front of a line to hide it
 
 // a hex head: its corners, and its faces
 function hexHead(b: V, nn: V, R: number): { corners: V[]; faces: Face[] } {
@@ -52,25 +55,266 @@ function hexHead(b: V, nn: V, R: number): { corners: V[]; faces: Face[] } {
   return { corners: [...lo, ...hi], faces };
 }
 
+// ------------------------------------------------------------- the lines
+// A point in view space is [x, d, y]: screen right, depth toward the camera,
+// screen down. A triangle list is 9 numbers per triangle.
+
+// The edges of one part that make a line: where two triangles fold by FOLD
+// or more, a silhouette, or an edge with one triangle (or three). Corners are
+// matched at 0.1 mm. The two tests only use the third corner of each
+// triangle, so the triangles don't need the same winding (ours don't).
+function edgesOf(tri: number[], out: V[][]) {
+  const ids = new Map<string, number>();
+  const id = (p: V) => {
+    const k = `${Math.round(p[0] * 10)},${Math.round(p[1] * 10)},${Math.round(p[2] * 10)}`;
+    let i = ids.get(k);
+    if (i === undefined) ids.set(k, (i = ids.size));
+    return i;
+  };
+  const map = new Map<number, { a: V; b: V; third: V[] }>();
+  for (let k = 0; k < tri.length; k += 9) {
+    const P: V[] = [0, 3, 6].map((o) => [tri[k + o], tri[k + o + 1], tri[k + o + 2]] as V);
+    const I = P.map(id);
+    if (I[0] === I[1] || I[1] === I[2] || I[2] === I[0]) continue;
+    for (let j = 0; j < 3; j++) {
+      const [u, w] = [I[j], I[(j + 1) % 3]];
+      const key = Math.min(u, w) * 2 ** 26 + Math.max(u, w);
+      let e = map.get(key);
+      if (!e) map.set(key, (e = { a: P[j], b: P[(j + 1) % 3], third: [] }));
+      e.third.push(P[(j + 2) % 3]);
+    }
+  }
+  const sharp = -Math.cos((FOLD * Math.PI) / 180);
+  for (const { a, b, third } of map.values()) {
+    const ev = sub(b, a);
+    if (Math.hypot(ev[0], ev[2]) < 1e-6) continue; // seen end on: a point
+    if (third.length === 2) {
+      // from the edge to the third corner, square to the edge
+      const [u1, u2] = third.map((t) => {
+        const w = sub(t, a);
+        return sub(w, mul(ev, dot(w, ev) / dot(ev, ev)));
+      });
+      const [l1, l2] = [Math.hypot(...u1), Math.hypot(...u2)];
+      const fold = dot(u1, u2) / (l1 * l2) >= sharp;
+      // on screen, on which side of the edge is the third corner (0: the face is seen edge on)
+      const el = Math.hypot(...ev);
+      const side = (t: V, l: number) => {
+        const s = ev[0] * (t[2] - a[2]) - ev[2] * (t[0] - a[0]);
+        return Math.abs(s) < 1e-9 * el * l ? 0 : Math.sign(s);
+      };
+      // both on the same side: the surface turns away, a silhouette
+      const [s1, s2] = [side(third[0], l1), side(third[1], l2)];
+      if (!fold && s1 === -s2) continue;
+    }
+    out.push([a, b]);
+  }
+}
+
+// All triangles seen on screen (not edge on), in a grid. Each triangle keeps
+// its 3 sides as lines (unit normal to the inside, so a point's distance to
+// the side is nx x + ny y + off), its plane (depth = pa x + pb y + pc), its
+// nearest depth and its part.
+type Scene = {
+  side: Float64Array; // 9 per triangle
+  plane: Float64Array; // 3 per triangle
+  dmax: Float64Array;
+  part: Int32Array;
+  box: [number, number, number, number]; // x0, y0, x1, y1 of all triangles
+  gx: number; gy: number; cw: number; ch: number;
+  cells: number[][];
+};
+
+function scene(per: number[][]): Scene {
+  let n = 0;
+  const box: Scene['box'] = [Infinity, Infinity, -Infinity, -Infinity];
+  for (const tri of per) {
+    n += tri.length / 9;
+    for (let k = 0; k < tri.length; k += 3) {
+      box[0] = Math.min(box[0], tri[k]); box[2] = Math.max(box[2], tri[k]);
+      box[1] = Math.min(box[1], tri[k + 2]); box[3] = Math.max(box[3], tri[k + 2]);
+    }
+  }
+  const side = new Float64Array(n * 9);
+  const plane = new Float64Array(n * 3);
+  const dmax = new Float64Array(n);
+  const part = new Int32Array(n);
+  const bbox = new Float64Array(n * 4);
+  let m = 0;
+  per.forEach((tri, pi) => {
+    for (let k = 0; k < tri.length; k += 9) {
+      let [x0, d0, y0, x1, d1, y1, x2, d2, y2] = tri.slice(k, k + 9);
+      let area = (x1 - x0) * (y2 - y0) - (y1 - y0) * (x2 - x0);
+      if (Math.abs(area) < 1e-6) continue; // seen edge on
+      if (area < 0) {
+        [x1, d1, y1, x2, d2, y2] = [x2, d2, y2, x1, d1, y1];
+        area = -area;
+      }
+      const pa = ((d1 - d0) * (y2 - y0) - (y1 - y0) * (d2 - d0)) / area;
+      const pb = ((x1 - x0) * (d2 - d0) - (d1 - d0) * (x2 - x0)) / area;
+      plane.set([pa, pb, d0 - pa * x0 - pb * y0], m * 3);
+      const xs = [x0, x1, x2];
+      const ys = [y0, y1, y2];
+      for (let s = 0; s < 3; s++) {
+        const [xi, yi, xj, yj] = [xs[s], ys[s], xs[(s + 1) % 3], ys[(s + 1) % 3]];
+        const l = Math.hypot(xj - xi, yj - yi);
+        const [nx, ny] = [-(yj - yi) / l, (xj - xi) / l];
+        side.set([nx, ny, -(nx * xi + ny * yi)], m * 9 + s * 3);
+      }
+      dmax[m] = Math.max(d0, d1, d2);
+      part[m] = pi;
+      bbox.set([Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)], m * 4);
+      m++;
+    }
+  });
+  // about one cell per triangle
+  const [W, H] = [Math.max(box[2] - box[0], 1), Math.max(box[3] - box[1], 1)];
+  const s = Math.sqrt((W * H) / Math.max(m, 1));
+  const gx = Math.min(512, Math.max(1, Math.ceil(W / s)));
+  const gy = Math.min(512, Math.max(1, Math.ceil(H / s)));
+  const [cw, ch] = [W / gx, H / gy];
+  const cells: number[][] = Array.from({ length: gx * gy }, () => []);
+  const sc: Scene = { side: side.subarray(0, m * 9), plane: plane.subarray(0, m * 3), dmax: dmax.subarray(0, m), part: part.subarray(0, m), box, gx, gy, cw, ch, cells };
+  for (let t = 0; t < m; t++) {
+    const [i0, j0] = cellOf(sc, bbox[t * 4], bbox[t * 4 + 1]);
+    const [i1, j1] = cellOf(sc, bbox[t * 4 + 2], bbox[t * 4 + 3]);
+    for (let j = j0; j <= j1; j++)
+      for (let i = i0; i <= i1; i++) {
+        // only the cells the triangle really covers: no side has the whole cell outside
+        if (i1 > i0 && j1 > j0) {
+          const [cx0, cy0] = [box[0] + i * cw, box[1] + j * ch];
+          let out = false;
+          for (let k = 0; k < 3 && !out; k++) {
+            const [nx, ny, off] = [side[t * 9 + k * 3], side[t * 9 + k * 3 + 1], side[t * 9 + k * 3 + 2]];
+            // the corner of the cell farthest inside this side
+            out = nx * (nx > 0 ? cx0 + cw : cx0) + ny * (ny > 0 ? cy0 + ch : cy0) + off < -1e-6;
+          }
+          if (out) continue;
+        }
+        cells[j * gx + i].push(t);
+      }
+  }
+  return sc;
+}
+
+function cellOf(sc: Scene, x: number, y: number): [number, number] {
+  const i = Math.floor((x - sc.box[0]) / sc.cw);
+  const j = Math.floor((y - sc.box[1]) / sc.ch);
+  return [Math.min(sc.gx - 1, Math.max(0, i)), Math.min(sc.gy - 1, Math.max(0, j))];
+}
+
+// the triangles of the cell under screen point (x, y) that contain it
+// a point on a side of a triangle (or 1e-6 mm outside it) is inside it
+function under(sc: Scene, x: number, y: number, each: (t: number, d: number) => void) {
+  if (x < sc.box[0] || x > sc.box[2] || y < sc.box[1] || y > sc.box[3]) return;
+  const [i, j] = cellOf(sc, x, y);
+  const { side, plane } = sc;
+  for (const t of sc.cells[j * sc.gx + i]) {
+    const o = t * 9;
+    if (side[o] * x + side[o + 1] * y + side[o + 2] < -1e-6) continue;
+    if (side[o + 3] * x + side[o + 4] * y + side[o + 5] < -1e-6) continue;
+    if (side[o + 6] * x + side[o + 7] * y + side[o + 8] < -1e-6) continue;
+    each(t, plane[t * 3] * x + plane[t * 3 + 1] * y + plane[t * 3 + 2]);
+  }
+}
+
+// Cut the line a-b: the pieces that some triangle hides, as [t0, t1] along
+// the line, sorted and merged. `stamp` marks the triangles already seen.
+function hide(sc: Scene, a: V, b: V, stamp: Int32Array, mark: number): [number, number][] {
+  const [ax, ad, ay] = a;
+  const [bx, bd, by] = b;
+  const [dx, dy] = [bx - ax, by - ay];
+  const l2 = Math.hypot(dx, dy);
+  const dmin = Math.min(ad, bd) + EPS;
+  const { side, plane, dmax, cells, box, cw, ch, gx } = sc;
+  const [i0, j0] = cellOf(sc, Math.min(ax, bx), Math.min(ay, by));
+  const [i1, j1] = cellOf(sc, Math.max(ax, bx), Math.max(ay, by));
+  const out: [number, number][] = [];
+  for (let j = j0; j <= j1; j++)
+    for (let i = i0; i <= i1; i++) {
+      if (i1 > i0 && j1 > j0) {
+        // does the line go through this cell? (its 4 corners not all on one side)
+        const [cx0, cy0] = [box[0] + i * cw - ax, box[1] + j * ch - ay];
+        const s = [dx * cy0 - dy * cx0, dx * (cy0 + ch) - dy * cx0, dx * cy0 - dy * (cx0 + cw), dx * (cy0 + ch) - dy * (cx0 + cw)];
+        const tol = 1e-6 * l2;
+        if (s.every((v) => v > tol) || s.every((v) => v < -tol)) continue;
+      }
+      for (const t of cells[j * gx + i]) {
+        if (stamp[t] === mark) continue;
+        stamp[t] = mark;
+        if (dmax[t] <= dmin) continue; // all of it behind the line
+        let lo = 0;
+        let hi = 1;
+        // f(t) > 0 between lo and hi, for f linear from f0 to f1
+        const clip = (f0: number, f1: number) => {
+          if (f0 <= 0 && f1 <= 0) hi = -1;
+          else if (f0 < 0) lo = Math.max(lo, f0 / (f0 - f1));
+          else if (f1 < 0) hi = Math.min(hi, f0 / (f0 - f1));
+        };
+        // inside the triangle on screen
+        for (let k = 0; k < 3 && lo < hi; k++) {
+          const o = t * 9 + k * 3;
+          clip(side[o] * ax + side[o + 1] * ay + side[o + 2] - 1e-6, side[o] * bx + side[o + 1] * by + side[o + 2] - 1e-6);
+        }
+        // and the plane in front of the line
+        const o = t * 3;
+        if (lo < hi) clip(plane[o] * ax + plane[o + 1] * ay + plane[o + 2] - ad - EPS, plane[o] * bx + plane[o + 1] * by + plane[o + 2] - bd - EPS);
+        if (hi > lo) out.push([lo, hi]);
+      }
+    }
+  out.sort((p, q) => p[0] - q[0]);
+  const gap = 1e-3 / Math.max(l2, 1e-9); // 1 µm on screen, along the line
+  const merged: [number, number][] = [];
+  for (const iv of out) {
+    const last = merged[merged.length - 1];
+    if (last && iv[0] <= last[1] + gap) last[1] = Math.max(last[1], iv[1]);
+    else merged.push(iv);
+  }
+  // a line through the corner of a triangle in front gets a hidden piece of
+  // almost no length: it would only cut the line in two
+  const tiny = 1e-2 / Math.max(l2, 1e-9); // 0.01 mm on screen
+  return merged.filter((iv) => iv[1] - iv[0] > tiny);
+}
+
+// the visible and the hidden pieces of the lines of each part, as
+// [x0, d0, y0, x1, d1, y1]
+function project(per: number[][], sc: Scene): { vis: number[][]; hid: number[][] }[] {
+  const stamp = new Int32Array(sc.dmax.length).fill(-1);
+  let mark = 0;
+  return per.map((tri) => {
+    const lines: V[][] = [];
+    edgesOf(tri, lines);
+    const vis: number[][] = [];
+    const hid: number[][] = [];
+    for (const [a, b] of lines) {
+      const at = (t: number) => [0, 1, 2].map((k) => a[k] + (b[k] - a[k]) * t);
+      const piece = (t0: number, t1: number) => [...at(t0), ...at(t1)];
+      let t = 0;
+      for (const [h0, h1] of hide(sc, a, b, stamp, mark++)) {
+        if (h0 > t) vis.push(piece(t, h0));
+        hid.push(piece(h0, h1));
+        t = Math.max(t, h1);
+      }
+      if (t < 1) vis.push(piece(t, 1));
+    }
+    return { vis, hid };
+  });
+}
+
+// ------------------------------------------------------------- the drawing
 export function renderHLR(parts: Part[], o: RenderOpts): { svg: string; faces: number; dots: number; ms: number } {
   const t0 = performance.now();
   const { c, r, up } = camera(o.az, o.el);
-  const M = 1e-3; // mm to m
-  const toView = (p: V): V => [dot(p, r) * M, dot(p, c) * M, -dot(p, up) * M];
+  const toView = (p: V): V => [dot(p, r), dot(p, c), -dot(p, up)];
   const scale = o.scale ?? 0.1;
   const R = o.bolt ?? 17;
   const f = (x: number) => (Math.round(x * 10) / 10).toString();
 
-  // one mesh per part; bolt heads are real solids
+  // the triangles of each part; bolt heads are real solids
   // less detail when the drawing is small
   const shown = forSize(parts, o.size).filter((p) => o.maxStep === undefined || p.step <= o.maxStep);
-  const meshes: Mesh[] = [];
-  const both = new MeshBasicMaterial({ side: DoubleSide });
   const heads: { part: number; corners: V[] }[] = [];
   let nFaces = 0;
-  const all: number[] = []; // every triangle, for the outline probes
-  const owner: number[] = []; // the part of each of them
-  shown.forEach((part, pi) => {
+  const per: number[][] = shown.map((part, pi) => {
     const faces = [...part.faces];
     if (o.bolts !== false)
       for (const dt of part.dots) {
@@ -85,45 +329,28 @@ export function renderHLR(parts: Part[], o: RenderOpts): { svg: string; faces: n
         faces.push(...h.faces);
         heads.push({ part: pi, corners: h.corners.map(toView) });
       }
-    if (!faces.length) return;
     const tri: number[] = [];
     for (const fc of faces) triangles(fc.pts.map(toView), tri);
-    for (const x of tri) all.push(x);
-    for (let k = 0; k < tri.length / 9; k++) owner.push(pi);
     nFaces += faces.length;
-    const g = new BufferGeometry();
-    g.setAttribute('position', new BufferAttribute(new Float32Array(tri), 3));
-    g.boundsTree = new MeshBVH(g);
-    const m = new Mesh(g, both); // face winding is not consistent, so no culling
-    m.userData.part = pi;
-    meshes.push(m);
+    return tri;
   });
+  const sc = scene(per);
+  const result = project(per, sc);
+  const box = sc.box;
 
-  const gen = new ProjectionGenerator();
-  gen.iterationTime = Infinity;
-  gen.includeIntersectionEdges = false; // our parts touch, they never cross
-  const task = gen.generate(meshes);
-  let res = task.next();
-  while (!res.done) res = task.next();
-  const result = res.value;
-
-  // depth (toward the camera) of the first surface seen at screen point (x, z)
-  const scene = new BufferGeometry();
-  scene.setAttribute('position', new BufferAttribute(new Float32Array(all), 3));
-  const sceneBVH = new MeshBVH(scene);
-  scene.computeBoundingBox();
-  const box = scene.boundingBox!;
-  const probe = new Ray(new Vector3(), new Vector3(0, -1, 0));
-  // the first surface seen at screen point (x, z): its depth and its part
-  const NONE = { y: -Infinity, part: -1 };
-  const cache = new Map<string, { y: number; part: number }>();
-  const seen = (x: number, z: number) => {
-    const key = `${Math.round(x * 1e5)},${Math.round(z * 1e5)}`; // 0.01 mm
+  // the first surface seen at screen point (x, y): its depth and its part
+  const NONE = { d: -Infinity, part: -1 };
+  const cache = new Map<string, { d: number; part: number }>();
+  // the nearest triangle at (x, y)
+  const seen = (x: number, y: number) => {
+    const key = `${Math.round(x * 100)},${Math.round(y * 100)}`; // 0.01 mm
     let s = cache.get(key);
     if (!s) {
-      probe.origin.set(x, box.max.y + 1, z);
-      const hit = sceneBVH.raycastFirst(probe, DoubleSide);
-      s = hit ? { y: hit.point.y, part: owner[Math.floor(hit.face!.a / 3)] } : NONE;
+      let best = NONE;
+      under(sc, x, y, (t, d) => {
+        if (d > best.d) best = { d, part: sc.part[t] };
+      });
+      s = best;
       cache.set(key, s);
     }
     return s;
@@ -131,29 +358,29 @@ export function renderHLR(parts: Part[], o: RenderOpts): { svg: string; faces: n
 
   // line widths, in mm at the drawing scale
   const PAD = 150; // mm around the drawing
-  const pxMm = o.size ? o.size / ((box.max.x - box.min.x) / M + 2 * PAD) : 0; // px per mm
+  const pxMm = o.size ? o.size / (box[2] - box[0] + 2 * PAD) : 0; // px per mm
   const weights = o.weights !== false;
   const solid = !!o.size && o.size <= SOLID; // bolt heads as black dots
   const thinMm = pxMm ? (o.strokePx ?? (weights ? 1 : 1.4)) / pxMm : (o.stroke ?? (weights ? 4 : 7));
   const thickMm = pxMm ? (o.outlinePx ?? 2) / pxMm : (o.outline ?? 9);
   const gapMm = !weights || o.gap === false ? 0 : thickMm / 2 + thinMm / 2 + (typeof o.gap === 'number' ? o.gap : thickMm);
 
-  // is the piece [x0, y0, z0, x1, y1, z1] of part `pi` an outline? Ask at a
+  // is the piece [x0, d0, y0, x1, d1, y1] of part `pi` an outline? Ask at a
   // quarter, the middle and three quarters, and take the majority.
   const outline = (q: ArrayLike<number>, pi: number): boolean => {
-    const [dx, dz] = [q[3] - q[0], q[5] - q[2]];
-    const l = Math.hypot(dx, dz);
-    const [nx, nz] = [(-dz / l) * SIDE * M, (dx / l) * SIDE * M];
+    const [dx, dy] = [q[3] - q[0], q[5] - q[2]];
+    const l = Math.hypot(dx, dy);
+    const [nx, ny] = [(-dy / l) * SIDE, (dx / l) * SIDE];
     const at = (f: number) => {
-      const [x, y, z] = [q[0] + dx * f, q[1] + (q[4] - q[1]) * f, q[2] + dz * f];
+      const [x, d, y] = [q[0] + dx * f, q[1] + (q[4] - q[1]) * f, q[2] + dy * f];
       const out = (s: number) => {
-        const h = seen(x + s * nx, z + s * nz);
-        return h.y < y - DEEP * M || (h.part !== pi && h.y < y - M);
+        const h = seen(x + s * nx, y + s * ny);
+        return h.d < d - DEEP || (h.part !== pi && h.d < d - 1);
       };
       return out(1) || out(-1);
     };
     // short pieces: the middle is enough
-    if (l < 4 * DEEP * M) return at(0.5);
+    if (l < 4 * DEEP) return at(0.5);
     const a = at(0.25);
     const b = at(0.75);
     return a === b ? a : at(0.5);
@@ -164,14 +391,14 @@ export function renderHLR(parts: Part[], o: RenderOpts): { svg: string; faces: n
   const ends = (q: ArrayLike<number>): [number, number, number, number] => {
     const res: [number, number, number, number] = [0, -1, 0, -1];
     if (!gapMm) return res;
-    const [dx, dz] = [q[3] - q[0], q[5] - q[2]];
-    const l = Math.hypot(dx, dz);
-    const [ux, uz] = [(dx / l) * SIDE * M, (dz / l) * SIDE * M];
+    const [dx, dy] = [q[3] - q[0], q[5] - q[2]];
+    const l = Math.hypot(dx, dy);
+    const [ux, uy] = [(dx / l) * SIDE, (dy / l) * SIDE];
     for (const e of [0, 1]) {
       const s = e ? 1 : -1;
-      const h = seen(q[e * 3] + s * ux, q[e * 3 + 2] + s * uz);
-      if (h.y > q[e * 3 + 1] + FRONT * M) {
-        res[e * 2] = (gapMm * M) / l;
+      const h = seen(q[e * 3] + s * ux, q[e * 3 + 2] + s * uy);
+      if (h.d > q[e * 3 + 1] + FRONT) {
+        res[e * 2] = gapMm / l;
         res[e * 2 + 1] = h.part;
       }
     }
@@ -179,22 +406,17 @@ export function renderHLR(parts: Part[], o: RenderOpts): { svg: string; faces: n
   };
 
   // the first step at which something sits between `p` and the camera
-  const ray = new Ray();
-  const occluder = (p: Vector3): number => {
-    ray.origin.set(p.x, p.y + 0.5 * M, p.z);
-    ray.direction.set(0, 1, 0);
+  const occluder = (p: ArrayLike<number>): number => {
     let s = Infinity;
-    for (const m of meshes) {
-      const st = shown[m.userData.part].step;
-      if (st >= s) continue;
-      if ((m.geometry.boundsTree as MeshBVH).raycastFirst(ray, DoubleSide)) s = st;
-    }
+    under(sc, p[0], p[2], (t, d) => {
+      if (d > p[1] + 0.5) s = Math.min(s, shown[sc.part[t]].step);
+    });
     return s;
   };
 
   let [x0, y0, x1, y1] = [Infinity, Infinity, -Infinity, -Infinity];
-  const pt = (x: number, z: number) => {
-    const [X, Y] = [(x / M) * scale, (z / M) * scale];
+  const pt = (x: number, y: number) => {
+    const [X, Y] = [x * scale, y * scale];
     x0 = Math.min(x0, X); x1 = Math.max(x1, X); y0 = Math.min(y0, Y); y1 = Math.max(y1, Y);
     return `${f(X)} ${f(Y)}`;
   };
@@ -202,8 +424,7 @@ export function renderHLR(parts: Part[], o: RenderOpts): { svg: string; faces: n
   // and hidden pieces keyed by the step that hides them
   type Out = { vis: Seg[]; edge: Seg[]; until: Map<number, string[]>; fills: { d: string; until: number; head: number; ring: boolean }[] };
   const outs: Out[] = shown.map(() => ({ vis: [], edge: [], until: new Map(), fills: [] }));
-  const mid = new Vector3();
-  const flat = (q: ArrayLike<number>): Seg => [(q[0] / M) * scale, (q[2] / M) * scale, (q[3] / M) * scale, (q[5] / M) * scale];
+  const flat = (q: ArrayLike<number>): Seg => [q[0] * scale, q[2] * scale, q[3] * scale, q[5] * scale];
   const seg = (q: ArrayLike<number>) => `M${pt(q[0], q[2])}L${pt(q[3], q[5])}`;
   const part = (q: ArrayLike<number>, a: number, b: number) => {
     const at = (t: number) => [0, 1, 2].map((k) => q[k] + (q[k + 3] - q[k]) * t);
@@ -211,17 +432,15 @@ export function renderHLR(parts: Part[], o: RenderOpts): { svg: string; faces: n
   };
   // rounding leaves slivers of hidden edges, a fraction of a mm long: drop them
   const MIN = 2; // mm, on screen
-  const short = (q: ArrayLike<number>) => Math.hypot(q[3] - q[0], q[5] - q[2]) < Math.max(MIN, pxMm ? 0.5 / pxMm : 0) * M;
+  const short = (q: ArrayLike<number>) => Math.hypot(q[3] - q[0], q[5] - q[2]) < Math.max(MIN, pxMm ? 0.5 / pxMm : 0);
   const later = (pi: number, s: number, q: ArrayLike<number>) => {
     const list = outs[pi].until.get(s) ?? [];
     list.push(seg(q));
     outs[pi].until.set(s, list);
   };
-  for (const m of meshes) {
-    const pi = m.userData.part as number;
+  result.forEach(({ vis, hid }, pi) => {
     const own = shown[pi].step;
-    // pieces keep their 3D ends: [x0, y0, z0, x1, y1, z1]
-    for (const q of result.visibleEdges.meshToSegments.get(m) ?? []) {
+    for (const q of vis) {
       if (short(q)) continue;
       const [a, ha, b, hb] = ends(q);
       if (a + b < 1) {
@@ -233,23 +452,22 @@ export function renderHLR(parts: Part[], o: RenderOpts): { svg: string; faces: n
       if (a && shown[ha].step > own) later(pi, shown[ha].step, part(q, 0, Math.min(a, 1)));
       if (b && shown[hb].step > own) later(pi, shown[hb].step, part(q, Math.max(1 - b, 0), 1));
     }
-    if (!o.animate) continue;
-    for (const q of result.hiddenEdges.meshToSegments.get(m) ?? []) {
+    if (!o.animate) return;
+    for (const q of hid) {
       if (short(q)) continue;
-      mid.set((q[0] + q[3]) / 2, (q[1] + q[4]) / 2, (q[2] + q[5]) / 2);
-      const s = occluder(mid);
+      const s = occluder([(q[0] + q[3]) / 2, (q[1] + q[4]) / 2, (q[2] + q[5]) / 2]);
       if (s <= own || s === Infinity) continue; // hidden from the start, or never
       later(pi, s, q);
     }
-  }
+  });
   for (const [hi, h] of heads.entries()) {
     // the centre of the top face: if it can be seen, fill the whole head
     const ctr = h.corners.slice(6).reduce((s, p) => add(s, p), [0, 0, 0] as V).map((x) => x / 6) as V;
-    const s = occluder(new Vector3(...ctr));
+    const s = occluder(ctr);
     const own = shown[h.part].step;
     if (s <= own) continue;
-    // small: a solid head reads best. Big: the hex outline (drawn by the
-    // projection) and the chamfer circle on its top face, like a drawing
+    // small: a solid head reads best. Big: the hex outline (drawn with the
+    // other lines) and the chamfer circle on its top face, like a drawing
     if (solid) {
       outs[h.part].fills.push({ d: 'M' + hull(h.corners).map((p) => pt(p[0], p[2])).join('L') + 'Z', until: s, head: hi, ring: false });
       continue;
@@ -271,7 +489,7 @@ export function renderHLR(parts: Part[], o: RenderOpts): { svg: string; faces: n
     const edge = merge(oo.edge, []);
     return { edge, vis: merge(oo.vis, edge) };
   });
-  const d = (list: Seg[]) => list.map((g) => `M${pt(g[0] / scale * M, g[1] / scale * M)}L${pt(g[2] / scale * M, g[3] / scale * M)}`).join('');
+  const d = (list: Seg[]) => list.map((g) => `M${pt(g[0] / scale, g[1] / scale)}L${pt(g[2] / scale, g[3] / scale)}`).join('');
   const lines = merged.map((m) => ({ vis: d(m.vis), edge: d(m.edge) }));
 
   const pad = PAD * scale;
@@ -349,7 +567,7 @@ export function renderHLR(parts: Part[], o: RenderOpts): { svg: string; faces: n
       const ids = [...new Set(fills.map((fl) => fl.head))];
       const ctr = ids.map((hi) => {
         const cs = heads[hi].corners;
-        return [cs.reduce((s, q) => s + q[0], 0) / cs.length / M * scale, cs.reduce((s, q) => s + q[2], 0) / cs.length / M * scale];
+        return [cs.reduce((s, q) => s + q[0], 0) / cs.length * scale, cs.reduce((s, q) => s + q[2], 0) / cs.length * scale];
       });
       const near = (g: Seg) => {
         const [mx, my] = [(g[0] + g[2]) / 2, (g[1] + g[3]) / 2];
@@ -381,8 +599,6 @@ export function renderHLR(parts: Part[], o: RenderOpts): { svg: string; faces: n
     out.push('</g>');
   }
   out.push('</svg>');
-  for (const m of meshes) m.geometry.dispose();
-  scene.dispose();
   return { svg: out.join('\n'), faces: nFaces, dots: nDots, ms: performance.now() - t0 };
 }
 
@@ -394,7 +610,8 @@ type Seg = [number, number, number, number];
 // covered by `over` (the thick lines) are removed.
 function merge(segs: Seg[], over: Seg[]): Seg[] {
   const TOL = 0.05; // drawing units
-  const lines = new Map<string, { d: [number, number]; c: number; list: [number, number][]; over: [number, number][] }>();
+  type Line = { d: [number, number]; c: number; list: [number, number][]; over: [number, number][] };
+  const lines = new Map<string, Line>();
   const add = (g: Seg, into: 'list' | 'over') => {
     let [dx, dy] = [g[2] - g[0], g[3] - g[1]];
     const l = Math.hypot(dx, dy);
@@ -402,8 +619,16 @@ function merge(segs: Seg[], over: Seg[]): Seg[] {
     [dx, dy] = [dx / l, dy / l];
     if (dx < -1e-9 || (Math.abs(dx) < 1e-9 && dy < 0)) [dx, dy] = [-dx, -dy];
     const c = -dy * g[0] + dx * g[1]; // distance of the line to the origin
-    const key = `${Math.round(Math.atan2(dy, dx) * 2000)},${Math.round(c / TOL)}`;
-    let ln = lines.get(key);
+    const [ka, kc] = [Math.round(Math.atan2(dy, dx) * 2000), Math.round(c / TOL)];
+    // a line close to the edge of a bucket can be in the next one
+    let ln: Line | undefined;
+    for (const i of [0, -1, 1]) {
+      for (const j of [0, -1, 1]) {
+        const m = lines.get(`${ka + i},${kc + j}`);
+        if (m && Math.abs(m.c - c) < TOL && Math.abs(m.d[0] * dy - m.d[1] * dx) < 1e-3) ln ??= m;
+      }
+    }
+    const key = `${ka},${kc}`;
     if (!ln) {
       if (into === 'over') return; // a thick line with nothing thin under it
       ln = { d: [dx, dy], c, list: [], over: [] };

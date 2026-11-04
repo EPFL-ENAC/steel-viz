@@ -24,7 +24,7 @@ const emit = defineEmits<{ frame: [f: Frame | null] }>();
 const glEl = ref<HTMLElement>();
 const svgEl = ref<HTMLElement>();
 
-// never reactive: three.js objects and big arrays
+// never reactive: the viewer and big arrays
 let viewer: Viewer | null = null;
 let inViewer: Built['r'] | null = null; // the structure the viewer shows
 let fromViewer: [number, number] | null = null; // the angle the viewer just gave
