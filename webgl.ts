@@ -125,8 +125,14 @@ const ID_MAT = {
 // base: the triangle and line floats before the bolt heads; per: heads per bolt
 type Piece = { part: Part; group: Group; fill: Mesh; lines?: LineSegments2; base: [number, number]; per: number; mat: LineMaterial };
 
-// onTurn: the user turned the view (done: the drag is over)
-export function createViewer(host: HTMLElement, onTurn: (az: number, el: number, done: boolean) => void): Viewer {
+// onTurn: the user turned the view (done: the drag is over). onHover: the
+// part under the mouse (null: none), and the mouse in client px. Only for a
+// mouse with no button down, and not during the build animation.
+export function createViewer(
+  host: HTMLElement,
+  onTurn: (az: number, el: number, done: boolean) => void,
+  onHover?: (part: Part | null, x: number, y: number) => void,
+): Viewer {
   const renderer = new WebGLRenderer({ antialias: true });
   // sized by hand in device pixels (see resize), so pixel ratio 1 here
   const canvas = renderer.domElement;
@@ -138,6 +144,7 @@ export function createViewer(host: HTMLElement, onTurn: (az: number, el: number,
   let colors: Colors = { bg: '#ffffff', fg: '#212121', accent: '#e30713' };
   let two = true;
   let pieces: Piece[] = [];
+  let shown: Part[] = []; // the parts of show(), in the order of their ids
   let [az, el] = [225, 35.264];
   let [radius, centre] = [1, new Vector3()];
   let [zoom, pan] = [1, new Vector3()];
@@ -190,6 +197,14 @@ export function createViewer(host: HTMLElement, onTurn: (az: number, el: number,
   const lineMat = (accent: boolean) =>
     new LineMaterial({ color: new Color(accent ? colors.accent : colors.fg), linewidth: THIN, resolution: new Vector2(w, h) });
 
+  // the faces drawn with their part id as colour, no lines (true), or back to normal
+  const ids = (on: boolean) => {
+    for (const p of pieces) {
+      p.fill.material = on ? p.fill.userData.id : fillMat;
+      if (p.lines) p.lines.visible = !on;
+    }
+  };
+
   // ---- render on demand
   let queued = 0;
   const frame = () => {
@@ -199,10 +214,7 @@ export function createViewer(host: HTMLElement, onTurn: (az: number, el: number,
     renderer.setClearColor(colors.bg);
     if (two) {
       // depth and part ids, faces only
-      for (const p of pieces) {
-        p.fill.material = p.fill.userData.id;
-        if (p.lines) p.lines.visible = false;
-      }
+      ids(true);
       renderer.setRenderTarget(rt);
       renderer.setClearColor('#000000');
       renderer.clear();
@@ -215,10 +227,7 @@ export function createViewer(host: HTMLElement, onTurn: (az: number, el: number,
       renderer.setClearColor('#000000', 1);
       renderer.setRenderTarget(null);
       renderer.setClearColor(colors.bg);
-      for (const p of pieces) {
-        p.fill.material = fillMat;
-        if (p.lines) p.lines.visible = true;
-      }
+      ids(false);
     }
     renderer.render(scene, cam);
     if (two) {
@@ -298,6 +307,8 @@ export function createViewer(host: HTMLElement, onTurn: (az: number, el: number,
   // ---- the structure
   const show = (parts: Part[]) => {
     stopAnim();
+    setHover(null);
+    shown = parts;
     for (const p of pieces) {
       p.fill.geometry.dispose();
       p.lines?.geometry.dispose();
@@ -359,6 +370,7 @@ export function createViewer(host: HTMLElement, onTurn: (az: number, el: number,
 
   const build = (speed = 1) => {
     stopAnim();
+    setHover(null);
     const slots = timeline(pieces.map((p) => p.part), speed);
     const { r, up } = camera(az, el);
     // the direction each part comes from, in the screen plane, as in hlr.ts
@@ -382,6 +394,7 @@ export function createViewer(host: HTMLElement, onTurn: (az: number, el: number,
   let pinch = 0;
   canvas.addEventListener('contextmenu', (e) => e.preventDefault());
   canvas.addEventListener('pointerdown', (e) => {
+    setHover(null);
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     try { canvas.setPointerCapture(e.pointerId); } catch {}
     if (pointers.size === 2) {
@@ -450,8 +463,63 @@ export function createViewer(host: HTMLElement, onTurn: (az: number, el: number,
     pan.add(new Vector3(...add(mul(r, mx * f), mul(up, my * f))));
     place();
     redraw();
+    hoverSoon(); // something else may be under the mouse now
   }, { passive: false });
   canvas.addEventListener('dblclick', () => reset());
+
+  // ---- the part under the mouse: the id pass, rendered for one pixel only
+  const pickRT = new WebGLRenderTarget(1, 1);
+  const px = new Uint8Array(4);
+  const pick = (x: number, y: number): Part | null => {
+    if (!pieces.length || x < 0 || y < 0 || x >= w || y >= h) return null;
+    cam.setViewOffset(w, h, x, y, 1, 1);
+    ids(true);
+    renderer.setRenderTarget(pickRT);
+    renderer.setClearColor('#000000', 1);
+    renderer.clear();
+    renderer.render(scene, cam);
+    renderer.readRenderTargetPixels(pickRT, 0, 0, 1, 1, px);
+    renderer.setRenderTarget(null);
+    ids(false);
+    cam.clearViewOffset();
+    return shown[px[0] + px[1] * 256 - 1] ?? null;
+  };
+  // the hovered part: its lines in the accent colour, a bit thicker
+  let hovered: Part | null = null;
+  const lineStyle = (p: Piece) => {
+    const on = p.part === hovered;
+    p.mat.color.set(on || p.part.accent ? colors.accent : colors.fg);
+    p.mat.linewidth = (two ? THIN : 1.6) * (on ? 2 : 1);
+  };
+  const setHover = (part: Part | null, x = 0, y = 0) => {
+    if (part !== hovered) {
+      hovered = part;
+      for (const p of pieces) lineStyle(p);
+      redraw();
+    }
+    onHover?.(part, x, y);
+  };
+  // the last mouse position, in client px; picked at most once a frame
+  let mouse: { x: number; y: number } | null = null;
+  let hoverQ = 0;
+  const hoverSoon = () => {
+    if (!hoverQ && mouse && onHover)
+      hoverQ = requestAnimationFrame(() => {
+        hoverQ = 0;
+        if (!mouse || anim || pointers.size) return setHover(null);
+        const b = canvas.getBoundingClientRect();
+        setHover(pick(mouse.x - b.left, mouse.y - b.top), mouse.x, mouse.y);
+      });
+  };
+  canvas.addEventListener('pointermove', (e) => {
+    if (e.pointerType !== 'mouse' || e.buttons) return;
+    mouse = { x: e.clientX, y: e.clientY };
+    hoverSoon();
+  });
+  canvas.addEventListener('pointerleave', () => {
+    mouse = null;
+    setHover(null);
+  });
 
   // fit the box of the structure, as seen from this view
   let box: [V, V] = [[0, 0, 0], [0, 0, 0]];
@@ -486,14 +554,14 @@ export function createViewer(host: HTMLElement, onTurn: (az: number, el: number,
     reset,
     setWeights(t) {
       two = t;
-      for (const p of pieces) p.mat.linewidth = t ? THIN : 1.6;
+      for (const p of pieces) lineStyle(p);
       redraw();
     },
     setColors(c) {
       colors = c;
       fillMat.color.set(c.bg);
       down.uniforms.color.value.set(c.fg);
-      for (const p of pieces) p.mat.color.set(p.part.accent ? c.accent : c.fg);
+      for (const p of pieces) lineStyle(p);
       redraw();
     },
     stats() {

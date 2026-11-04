@@ -90,6 +90,19 @@ button.primary:hover { background: var(--primary-hover); border-color: var(--pri
 .drawing.v-diff { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
 .drawing.v-diff #gl { display: none; }
 .drawing.v-diff #svgBase { display: grid; }
+/* the tooltip of the part under the mouse, in the 3D view */
+.tip {
+  position: fixed; z-index: 10; pointer-events: none; max-width: 340px;
+  background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-left: 3px solid var(--fg);
+  padding: 6px 10px; font: 12px/1.4 var(--font-data); box-shadow: 0 2px 8px rgb(0 0 0 / 0.12);
+}
+.tip.warn { border-left-color: var(--warn); }
+.tip-head { font: 13px var(--font-ui); margin-bottom: 4px; }
+.tip-head b { font-weight: 600; }
+.tip-head span { color: var(--fg-muted); font: 12px var(--font-data); }
+.tip dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 1px 10px; margin: 0; }
+.tip dt { color: var(--fg-muted); }
+.tip dd { margin: 0; font-variant-numeric: tabular-nums; }
 .drawing.v-diff #svg { border-right: 1px solid var(--border); }
 .drawing.v-both #gl::before, .drawing.v-both #svg::before, .drawing.v-diff #svg::before, .drawing.v-diff #svgBase::before {
   content: attr(data-label); position: absolute; top: 10px; left: 12px; z-index: 1;

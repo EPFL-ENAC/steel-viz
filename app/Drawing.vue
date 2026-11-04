@@ -9,6 +9,7 @@ import { renderHLR } from '../hlr.ts';
 import { buildEnd, render, timeline, type RenderOpts } from '../steel.ts';
 import { createViewer } from '../webgl.ts';
 import { dev, params, s, stats, turnTo, type Built } from './state.ts';
+import { describe, type Tip } from './info.ts';
 
 const props = defineProps<{ built: Built | null; replay: number }>();
 
@@ -24,6 +25,20 @@ let fromViewer: [number, number] | null = null; // the angle the viewer just gav
 let lastSvg = '';
 
 const hasGL = ref(true);
+// the tooltip of the part under the mouse, in the 3D view. x, y: client px
+const tip = ref<(Tip & { x: number; y: number }) | null>(null);
+const tipStyle = computed(() => {
+  const t = tip.value;
+  if (!t) return {};
+  // 14 px from the mouse, on the side with room
+  const left = t.x < innerWidth - 300;
+  const top = t.y < innerHeight - 220;
+  return {
+    left: `${t.x + (left ? 14 : -14)}px`,
+    top: `${t.y + (top ? 14 : -14)}px`,
+    transform: `translate(${left ? 0 : '-100%'}, ${top ? 0 : '-100%'})`,
+  };
+});
 const mode = computed(() => (hasGL.value || s.viewer === 'diff' ? s.viewer : 'svg'));
 const hint = computed(() => ({
   '3d': 'Drag to turn, right drag to move, wheel to zoom, double click to see it all',
@@ -137,6 +152,7 @@ async function drawBase(opts: RenderOpts, svg: string, fast: boolean) {
 watch(() => props.built, (b) => draw(b?.animate), { flush: 'post' });
 watch(() => props.replay, () => draw(true), { flush: 'post' });
 watch(() => [s.weights, s.size, mode.value], () => draw(), { flush: 'post' });
+watch(mode, () => (tip.value = null));
 // a new angle: the fast drawing now, the exact one when it stops moving
 let exact = 0;
 watch(
@@ -154,10 +170,17 @@ media.addEventListener('change', paint);
 
 onMounted(() => {
   try {
-    viewer = createViewer(glEl.value!, (az, el) => {
-      turnTo(az, el);
-      fromViewer = [s.az, s.el];
-    });
+    viewer = createViewer(
+      glEl.value!,
+      (az, el) => {
+        turnTo(az, el);
+        fromViewer = [s.az, s.el];
+      },
+      (part, x, y) => {
+        const b = props.built;
+        tip.value = part && b ? { ...describe(part, b.r), x, y } : null;
+      },
+    );
   } catch {
     hasGL.value = false; // no WebGL: only the SVG
   }
@@ -223,4 +246,13 @@ defineExpose({
     <div id="svgBase" ref="baseEl" :data-label="`${dev?.base.ref}, at ${dev?.base.sha}`" />
   </div>
   <div class="hint" aria-hidden="true">{{ hint }}</div>
+  <div v-if="tip" class="tip" :class="{ warn: tip.warn }" :style="tipStyle" aria-hidden="true">
+    <div class="tip-head"><b>{{ tip.title }}</b> <span>{{ tip.id }}</span></div>
+    <dl>
+      <template v-for="[k, v] in tip.rows" :key="k">
+        <dt>{{ k }}</dt>
+        <dd>{{ v }}</dd>
+      </template>
+    </dl>
+  </div>
 </template>
