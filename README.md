@@ -122,7 +122,7 @@ The playground also has a 3D view (`webgl.ts`, the "3D" choice, on by default). 
 
 The "3D / SVG / Both" switch picks the viewer. "SVG" shows the exact drawing, at full size or at a px size. "Both" puts the 3D view on the left and the exact drawing on the right, with the same view. When you turn one, the other follows. While you drag, the SVG uses the fast painter drawing, then the exact one when you let go.
 
-In the 3D view: drag to turn, right drag (or shift drag) to move, the wheel or two fingers to zoom, double click to see the whole structure again. The view sliders follow.
+In the 3D view: drag to turn, right drag (or shift drag) to move, the wheel or two fingers to zoom, double click to see the whole structure again. The view sliders follow. Hover a part with the mouse to see what it is: its type, and for a member its section, length, connections, ratio and forces (from `result.members`). The part under the mouse comes from the same part-id pass, drawn for one pixel only.
 
 The exact renderer draws like a technical drawing:
 

@@ -21,7 +21,14 @@ export type Box = { c: V; ax: [V, V, V]; h: [number, number, number] };
 export type Kind = 'base' | 'column' | 'plate' | 'member' | 'bolts';
 // kind and from: how the part arrives in the build animation (from: the 3D
 // direction it comes from)
-export type Part = { id: string; step: number; faces: Face[]; dots: Dot[]; supports: string[]; boxes?: Box[]; accent?: boolean; kind?: Kind; from?: V };
+// What a part is, for the tooltip of the playground (the renderers don't read
+// it). type: 'Column', 'Brace', 'Cap plate'... of: the part it belongs to (a
+// plate, bolts). sec, L (mm), conn (one per end): for a member. member: its
+// id in the solver model, the key of Result.members (all columns are 'column').
+export type PartInfo = { type: string; of?: string; sec?: Section; L?: number; conn?: string[]; member?: string };
+export type Part = {
+  id: string; step: number; faces: Face[]; dots: Dot[]; supports: string[]; boxes?: Box[]; accent?: boolean; kind?: Kind; from?: V; info?: PartInfo;
+};
 
 // Less detail when the drawing is small: at 160 px or less bolts are only
 // noise, at 64 px plates too, at 40 px the secondary beams.
