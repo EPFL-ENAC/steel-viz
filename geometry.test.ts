@@ -5,6 +5,8 @@ import { loadCatalog } from './sections.ts';
 import { floating, generate, type Form } from './generate.ts';
 import { clashes } from './clash.ts';
 import { readTables } from './tables.ts';
+import { triangles } from './triangles.ts';
+import { cross, len, sub, type V } from './vec.ts';
 
 const cats = {
   aisc: loadCatalog('aisc', ...readTables('aisc')),
@@ -133,4 +135,38 @@ test('every part has its info, every member its check', () => {
         const max = Math.max(...Object.values(r.members).map((m) => m.ratio));
         assert.ok(Math.abs(max - r.ratio) < 1e-6, `${at}: max ratio ${max} in members, ${r.ratio} in the log`);
       }
+});
+
+// the triangles of a face cover it: n corners give n - 2 triangles, and the
+// same area. The faces with 5 corners or more are the ends of I, C, L and T
+// sections (concave) and the bolt heads.
+test('triangles cover every face', () => {
+  const area = (pts: V[]) => {
+    const n: V = [0, 0, 0];
+    for (let i = 0; i < pts.length; i++) {
+      const c = cross(pts[i], pts[(i + 1) % pts.length]);
+      for (let k = 0; k < 3; k++) n[k] += c[k] / 2;
+    }
+    return len(n);
+  };
+  let big = 0;
+  for (const name of names)
+    for (const form of forms)
+      for (let seed = 1; seed <= 10; seed++)
+        for (const p of make(name, form, seed).parts)
+          for (const f of p.faces) {
+            const out: number[] = [];
+            triangles(f.pts, out);
+            const at = `${name} ${form} seed ${seed} ${p.id}, ${f.pts.length} corners`;
+            assert.equal(out.length, 9 * (f.pts.length - 2), at);
+            let sum = 0;
+            for (let k = 0; k < out.length; k += 9) {
+              const [a, b, c] = [0, 3, 6].map((o) => out.slice(k + o, k + o + 3) as V);
+              sum += len(cross(sub(b, a), sub(c, a))) / 2;
+            }
+            const want = area(f.pts);
+            assert.ok(Math.abs(sum - want) <= 1e-6 * want + 1e-6, `${at}: area ${sum}, not ${want}`);
+            if (f.pts.length > 4) big++;
+          }
+  assert.ok(big > 0, 'no face with 5 corners or more');
 });

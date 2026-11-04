@@ -166,7 +166,7 @@ Two renderers:
 - `hlr.ts` (the default): exact hidden lines, from [three-edge-projection](https://github.com/gkjohnson/three-edge-projection). It takes 50 to 150 ms for one structure.
 - `render` in `steel.ts` (`--painter`): the painter's trick, ported from `sculpture_render.py` (resslab-hub, branch `feat/logo-aisc`). About 5 ms, but some lines are wrong. The playground uses it only while you drag the view in an SVG mode.
 
-The playground also has a 3D view (`webgl.ts`, the "3D" choice, on by default). It is for looking at the structure, not for export. It runs in WebGL with three.js, and builds the geometry once per structure, so you can turn it, move it and zoom with every bolt shown, at the frame rate of the screen. Faces are filled with the background and the GPU depth buffer hides the hidden lines. Edges are thin lines. A second pass gives the thick outlines with the same rule as `hlr.ts` (a jump in depth over 50 mm, or another part behind), read from a depth and part-id texture. That pass works per pixel, so it runs at about 3 samples per CSS px (2x on a 1x screen) and is averaged down, or the outlines would show stair steps. Bolt heads get thin lines only. The build animation plays in 3D too, on the same `timeline()`. The lines are close to the exact drawing but not the same (no gaps, no merged lines). "Copy SVG" always gives the exact drawing from `hlr.ts`, for the current view.
+The playground also has a 3D view (`webgl.ts`, the "3D" choice, on by default). It is for looking at the structure, not for export. It runs in plain WebGL2, with no three.js, and builds the geometry once per structure, so you can turn it, move it and zoom with every bolt shown, at the frame rate of the screen. Faces are filled with the background and the GPU depth buffer hides the hidden lines. Edges are thin lines: each segment is a small quad with round ends, drawn as instances and sized in the vertex shader (as three's `LineSegments2` did before). A second pass gives the thick outlines with the same rule as `hlr.ts` (a jump in depth over 50 mm, or another part behind), read from a depth and part-id texture. That pass works per pixel, so it runs at about 3 samples per CSS px (2x on a 1x screen) and is averaged down, or the outlines would show stair steps. Bolt heads get thin lines only. The build animation plays in 3D too, on the same `timeline()`. The lines are close to the exact drawing but not the same (no gaps, no merged lines). "Copy SVG" always gives the exact drawing from `hlr.ts`, for the current view.
 
 The "3D / SVG / Both" switch picks the viewer. "SVG" shows the exact drawing, at full size or at a px size. "Both" puts the 3D view on the left and the exact drawing on the right, with the same view. When you turn one, the other follows. While you drag, the SVG uses the fast painter drawing, then the exact one when you let go.
 
@@ -215,12 +215,13 @@ Files:
 - `clash.ts`: do two parts go through each other (each part as a few boxes).
 - `score.ts`, `pick.ts`: the logo score, and the scan over many seeds.
 - `hlr.ts`: the exact hidden-line renderer, with bolt heads as real hex solids.
-- `webgl.ts`: the 3D view of the playground.
+- `webgl.ts`: the 3D view of the playground, in plain WebGL2.
+- `triangles.ts`: the triangles of a flat face (a port of the earcut steps that three.js ran), for `webgl.ts` and `hlr.ts`.
 - `three-edge-projection.d.ts`: types for the part of three-edge-projection that `hlr.ts` uses (the library ships none).
 - `cli.ts`: the command line.
 - `app/`, `vite.config.ts`: the playground, a Vue app served by Vite.
 - `index.ts`, `3d.ts`: the two entries of the package (see below).
-- `package.test.ts`: checks that the light entry loads no three.js, no other package and no Node API.
+- `package.test.ts`: checks that the light entry and the 3D viewer (`webgl.ts`) load no three.js, no other package and no Node API.
 - `tsconfig.lib.json`, `release.sh`: the package build, and the release tag.
 
 `dist/`, `lib/` and the SVGs are build output, they stay out of git. `lib/` is only in the commit of a release tag.
@@ -236,7 +237,7 @@ The repo is also the package `@epfl-enac/steel-viz`. It is not on npm. The hub t
 It has two entries:
 
 - `@epfl-enac/steel-viz`: the light entry. `generate`, `loadCatalog`, the painter `render`, `timeline`, `camera`, `VIEWS`, and the specimen input (`toSpecimen`, `fromHubConnection`). It loads no three.js and no other package. `package.test.ts` checks it. Use it for the loading animation.
-- `@epfl-enac/steel-viz/3d`: `renderHLR` (the exact drawing) and `createViewer` (the WebGL view). It loads three.js. Import it with a dynamic `import()`, only on the page that needs it, so three.js stays out of the main bundle.
+- `@epfl-enac/steel-viz/3d`: `renderHLR` (the exact drawing) and `createViewer` (the WebGL view). It loads three.js, for `renderHLR` only: the viewer alone loads no package. Import it with a dynamic `import()`, only on the page that needs it, so three.js stays out of the main bundle.
 
 The package has no section table. The hub has the same CSV files (ours are copies of them), so it passes their text to `loadCatalog()`:
 
