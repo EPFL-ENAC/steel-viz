@@ -51,6 +51,7 @@ const DEFAULTS = {
   connKinds: GEN.connKindsP,
   skew: GEN.skewP,
   round: GEN.roundP, // round tube braces
+  shortBraces: GEN.shortBraceP, // short braces on tree arms
   // view
   viewer: '3d', // 3d, svg or both
   compare: 0, // 1: this branch and the base branch side by side (dev server only)
@@ -72,7 +73,7 @@ export type Key = keyof Settings;
 export const GROUPS = {
   structure: ['form', 'arms', 'height', 'load', 'family', 'shapes'],
   layout: ['storeys', 'span', 'bracing', 'xKind', 'armLmin', 'armLmax', 'armZmin', 'armZmax', 'conn', 'gable'],
-  details: ['braces', 'secondaries', 'posts', 'splices', 'trusses', 'rods', 'xBraces', 'colSplice', 'connKinds', 'skew', 'round'],
+  details: ['braces', 'secondaries', 'posts', 'splices', 'trusses', 'rods', 'xBraces', 'colSplice', 'connKinds', 'skew', 'round', 'shortBraces'],
   view: ['viewer', 'compare', 'view', 'az', 'el', 'weights', 'detail', 'size'],
   animation: ['duration', 'speed'],
 } satisfies Record<string, Key[]>;
@@ -132,7 +133,7 @@ export const params = (): Partial<Params> => ({
   xKind: s.xKind as Params['xKind'], xP: s.xBraces,
   armL: [s.armLmin, s.armLmax], armZ: [s.armZmin, s.armZmax], conn: s.conn as Params['conn'], gableP: s.gable,
   braceP: s.braces, secondaryP: s.secondaries, postP: s.posts, beamSpliceP: s.splices,
-  trussK: s.trusses, rodP: s.rods, colSpliceP: s.colSplice, connKindsP: s.connKinds, skewP: s.skew, roundP: s.round,
+  trussK: s.trusses, rodP: s.rods, colSpliceP: s.colSplice, connKindsP: s.connKinds, skewP: s.skew, roundP: s.round, shortBraceP: s.shortBraces,
 });
 
 const TABLES: Record<Family, [string, string, string, string, string]> = { aisc: [aiscI, aiscHss, aiscC, aiscL, aiscO], eu: [euI, euHss, euC, euL, euO] };

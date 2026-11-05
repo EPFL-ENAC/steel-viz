@@ -230,6 +230,7 @@ async function copy(what: 'svg' | 'link') {
           <Slider id="connKinds" v-model="s.connKinds" label="More connection kinds" :min="0" :max="1" :step="0.05" :out="pct(s.connKinds)" />
           <Slider id="skew" v-model="s.skew" label="Skewed arms" :min="0" :max="1" :step="0.05" :out="pct(s.skew)" />
           <Slider id="round" v-model="s.round" label="Round tube braces" :min="0" :max="1" :step="0.05" :out="pct(s.round)" />
+          <Slider id="shortBraces" v-model="s.shortBraces" label="Short arm braces" :min="0" :max="1" :step="0.05" :out="pct(s.shortBraces)" />
         </Section>
 
         <Section id="view" title="View" :keys="GROUPS.view" open>

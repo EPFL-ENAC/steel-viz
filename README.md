@@ -36,6 +36,16 @@ Some arm braces are round tubes (CHS and pipes, 60 to 300 mm), from a draw of th
 
 A round tube has 12 sides in the drawings (a rod has 16). With 12, no line runs along the tube, and the width changes by 3 % only with the view. Its long sides have no line of their own: the outline comes from the renderer (`hlr.ts`, and the outline pass of the 3D view, also with one weight).
 
+A full brace needs 1 m along the arm and down the column. On a tree at the default height (2500 mm), this never fits. So a tree arm that `braceP` picks and that has no room for a full brace can get a short one. `shortBraceP` gives the chance (0.5 by default, `--short-braces` in the CLI, "Short arm braces" in the playground). It is one draw per arm, on its own stream, keyed by the arm, so with `shortBraceP` 0 a seed gives the same parts as before. Portals and boxes never get a short brace, so they don't change.
+
+A short brace goes at 45 degrees, or flatter down to about 30 degrees when the tube would be too short. It reaches at most 0.6 of the arm, and its tube is at least 250 mm long between the gussets. It has the small gusset of the low truss, with one row of 2 bolts (a double angle keeps its lap plate, and a round tube gets no end cap). It can go down to 500 mm from the floor, and 450 mm above the arm below it. To keep this fit after the sizing:
+
+- The arm stays 310 mm deep or less, and the brace 150 mm or less.
+- The column stays 400 mm deep or less, if the arm is on a column flange.
+- The arm gets no truss, and an end plate takes the place of flange plates.
+
+On seeds 1 to 40, 13 trees get a short brace with the default values, 30 with `braceP` 1, and 38 with `braceP` 1 and `shortBraceP` 1.
+
 The sizing works in two steps, with public formulas from EC3 (Eurocode 3) and AISC 360-22:
 
 1. The whole structure: the solver finds the elastic critical load factor `alphaCr`. It is how many times the load the structure takes before it buckles as a whole (a buckling analysis with the geometric stiffness, in `solver.ts`). The moments are then multiplied by `1 / (1 - 1/alphaCr)`, for the sway effects (EC3 5.2.2). This rule needs `alphaCr >= 3`. If it is lower, the member with the most strain energy in the buckling mode gets a heavier section, and the solver runs again.
@@ -53,7 +63,7 @@ Then come the small details, from a random draw of their own, so a seed keeps th
 
 Trusses and tension rods also come from a draw of their own, after the fix loop:
 
-- Truss: a beam gets a bottom chord 700 to 900 mm under it, with tube diagonals in a zigzag between the two. In a bay, both ends of the zigzag are on the bottom chord. On an arm, it ends at the tip on the top chord. The truss takes the place of the braces of that beam. A box beam gets a truss less often than a portal beam, because a box has 4 to 8 bay beams. A tree arm gets a lower truss, 450 to 650 mm, so it fits above the arm below it on the same face. It ends at the tip, on the top chord. Its diagonals have a small gusset with one row of 2 bolts. On seeds 1 to 40, a truss comes on 4 or 5 trees (it depends on the family), 11 portals and 12 boxes.
+- Truss: a beam gets a bottom chord 700 to 900 mm under it, with tube diagonals in a zigzag between the two. In a bay, both ends of the zigzag are on the bottom chord. On an arm, it ends at the tip on the top chord. The truss takes the place of the braces of that beam, but not of a short brace. A box beam gets a truss less often than a portal beam, because a box has 4 to 8 bay beams. A tree arm gets a lower truss, 450 to 650 mm, so it fits above the arm below it on the same face. It ends at the tip, on the top chord. Its diagonals have a small gusset with one row of 2 bolts. On seeds 1 to 40, a truss comes on 4 or 5 trees (it depends on the family), 11 portals and 12 boxes.
 - Tension rod: a round bar from the column down to the top of an arm that sticks out, with a clevis (a fork and a pin) at each end. Only on an arm with no braces, and only when the column has room above it, under the next arm and its braces.
 
 The solver checks the structure again with them and sizes the chords, the diagonals and the rods. If the structure does not stand up anymore, they are left out.
@@ -142,7 +152,7 @@ Later, the same code can take a two storey portal (the gable on the top bay beam
 
 ### The look settings
 
-Arms, height and load are not the only knobs. These `Params` in `generate.ts` change the look too. Each one has an auto or default value. At that value the seed takes the same draws, so it gives the same structure as before (`params.test.ts` checks it on 30 seeds). Only `skewP` and `xP` are different: at their default, some trees get skewed arms and some bays get an X. Set them to 0 for the structures of before. When you set one, the seed still takes its draw, then the value replaces it.
+Arms, height and load are not the only knobs. These `Params` in `generate.ts` change the look too. Each one has an auto or default value. At that value the seed takes the same draws, so it gives the same structure as before (`params.test.ts` checks it on 30 seeds). Only `skewP`, `xP` and `shortBraceP` are different: at their default, some trees get skewed arms or short braces, and some bays get an X. Set them to 0 for the structures of before. When you set one, the seed still takes its draw, then the value replaces it.
 
 | param | default | CLI | playground | what it does |
 |---|---|---|---|---|
@@ -165,13 +175,14 @@ Arms, height and load are not the only knobs. These `Params` in `generate.ts` ch
 | `connKindsP` | 0.35 | `--conn-kinds` | Details, more connection kinds | the chance that a beam end gets one of the newer kinds (see "Beam end connections") |
 | `skewP` | 0.3 | `--skew` | Details, skewed arms | the chance that a tree arm leaves its column at 30 or 45 degrees (see "Skewed arms"). 0 gives the trees of before. |
 | `roundP` | 0.3 | `--round-tubes` | Details, round tube braces | the chance that the braces of an arm are round tubes |
+| `shortBraceP` | 0.5 | `--short-braces` | Details, short arm braces | the chance of a short brace on a tree arm with no room for a full one |
 
 ```sh
 node cli.ts --seed 5 --form portal --storeys 2 --bracing chevron --conn welded --span 1.4
 node cli.ts --seed 5 --form tree --arm-length 0.5,0.9 --arm-height 0.6,1
 ```
 
-A setting can give a mechanism (the status says so), never a clash or a floating part (`params-*.test.ts`, 25 seeds for each case).
+A setting can give a mechanism (the status says so), never a clash or a floating part (`params-*.test.ts`, 25 seeds for each case). One known limit: above a load of 200 kN/m (the top of the slider), a tree with short braces can have clashes.
 
 Parts must not go through each other. A secondary beam is coped (its flanges cut back) where it meets the flanges of its arm, and its plate fits between those flanges. A brace stays above the arms under it on the same face of its column, and is long enough that its two gussets don't touch. `clash.ts` checks this with boxes, and `geometry.test.ts` runs it on every form, 240 structures, on 72 more with every member in its other shape (`shapeP` 1), and on 72 more with round tube braces (`roundP` 1).
 
@@ -505,7 +516,7 @@ For the EU family, pass `european-sections.csv` and `hss-european-sections.csv` 
 
 The hub has no channel, angle or round tube table, so this catalog has no channels, no double angles and no round tubes: the braces and the secondary beams keep their tube and I sections. The tees still come, because they are made from the I table. To get the same drawing as here, also pass the channel, angle and round tube CSV files of `sections/` (`loadCatalog('aisc', iCsv, hssCsv, channelCsv, angleCsv, chsCsv)`). For no other shape at all, pass `shapeP: 0` and `roundP: 0` to `generate()`.
 
-A tree of today can have skewed arms (`skewP`, 0.3 by default), and a bay an X (`xP`, 0.3 by default). The logo is an exported SVG, so it doesn't change. To export the same seed again with the same look, pass `skewP: 0` and `xP: 0`.
+A tree of today can have skewed arms (`skewP`, 0.3 by default) and short braces (`shortBraceP`, 0.5 by default), and a bay an X (`xP`, 0.3 by default). The logo is an exported SVG, so it doesn't change. To export the same seed again with the same look, pass `skewP: 0`, `shortBraceP: 0` and `xP: 0`.
 
 The package has no dependency, so the hub installs nothing else. For the 3D view:
 

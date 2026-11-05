@@ -3,6 +3,7 @@
 //   [--form mix|tree|portal|box] [--animate] [--frames] [--painter] [--flat] [--size px]
 //   [--shapes 0.35] (the chance of a channel, double angle or tee member, 0 for none)
 //   [--round-tubes 0.3] (the chance of round tube braces on an arm, 0 for none)
+//   [--short-braces 0.5] (the chance of a short brace on a tree arm with no room for a full one, 0 for none)
 //   the look (see Params in generate.ts): [--storeys 0|1|2] [--span 1] [--bracing auto|none|knee|chevron|diagonal|x]
 //   [--x-kind auto|flat|rod|angle] [--x-braces 0.3] (the chance that an auto diagonal is an X)
 //   [--conn auto|shear_tab|end_plate|flange_plates|welded|clip_angles|seated|stiffened_seat|tee|end_plate_stiffened]
@@ -51,6 +52,7 @@ const r = generate(
     colSpliceP: num('col-splice', DEFAULTS.colSpliceP), connKindsP: num('conn-kinds', DEFAULTS.connKindsP), skewP: num('skew', DEFAULTS.skewP),
     gableP: num('gable', DEFAULTS.gableP),
     roundP: num('round-tubes', DEFAULTS.roundP),
+  shortBraceP: num('short-braces', DEFAULTS.shortBraceP),
   },
   cat,
   detail,
