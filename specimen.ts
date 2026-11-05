@@ -8,6 +8,9 @@
 // - column: one column, standing on a floor block, pushed at its top, or
 //   lying on two rollers and pushed at mid span (the `columns` and
 //   `hss_columns` tables). It goes to buildColumn in bench.ts.
+// - link: the link of an eccentrically braced frame, alone or in a test
+//   frame (the `eccentric_braced_frames` table). It goes to buildLink in
+//   bench.ts.
 // hub.ts reads the records of the hub tables into these types.
 //
 // No three.js here: this file only needs the section formulas.
@@ -97,10 +100,38 @@ export type ColumnSpecimen = {
   notes?: string[];
 };
 
-export type Specimen = ConnSpecimen | BraceSpecimen | ColumnSpecimen;
+// An EBF link test. The link is the short piece of beam of an eccentrically
+// braced frame that yields in shear, `e` long.
+// - config TF1: the link alone, one end on a reaction block, the other end
+//   pushed up and down by an actuator.
+// - TF2, TF3 (and TF2c, TF3c with a slab): the link in the middle of the beam
+//   of a one bay frame, a brace under each link end.
+// - TF4, TF4c: the link at one end of the beam, against a column, a brace
+//   under its other end.
+// at: where the hub says the link is (middle or edge), the rig follows config.
+// stiffeners: their positions along the link (mm from its first end), on the
+// front and on the back of the web. The end stiffeners are always drawn.
+export type LinkSpecimen = {
+  test: 'link';
+  id: string;
+  family?: Family;
+  section: SectionRef;
+  e: number; // mm, the link length
+  at: 'middle' | 'edge';
+  config: 'TF1' | 'TF2' | 'TF3' | 'TF2c' | 'TF3c' | 'TF4' | 'TF4c';
+  ends?: 'bolted' | 'welded'; // how the link ends hold on (default welded, TF1 always has end plates)
+  endPlate?: number; // mm, the end plate thickness
+  stiffeners: { t?: number; front: number[]; back: number[] };
+  frame?: { span: number; height: number }; // mm, between the column axes, from the foot pins to the beam axis
+  brace?: number; // degrees, the brace angle the hub gives (only checked against the drawing)
+  notes?: string[];
+};
+
+export type Specimen = ConnSpecimen | BraceSpecimen | ColumnSpecimen | LinkSpecimen;
 
 // the kinds a beam end of a specimen can have
 export const BEAM_CONNS: ConnType[] = BEAM_CONN_KINDS;
+export const LINK_CONFIGS: LinkSpecimen['config'][] = ['TF1', 'TF2', 'TF3', 'TF2c', 'TF3c', 'TF4', 'TF4c'];
 
 // ------------------------------------------------------------- sections
 // table ids and hub names written the same way: W14x82 -> W14X82, HEB 300 -> HE300B

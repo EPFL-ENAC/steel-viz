@@ -114,6 +114,7 @@ It can also draw a real test of RESSLab Hub instead of a seed: a specimen. For n
 - A brace test: one brace, alone or in a test frame. That's the `braces` table, 279 of its 294 tests. See "Brace tests" below.
 - A column test: one column, pushed sideways at its top under an axial load. That's the `columns` table, all its 153 tests. See "Column tests" below.
 - An HSS column test: one square or rectangular tube, standing like a column test, or lying on two rollers and pushed at mid span. That's the `hss_columns` table, all its 284 tests. See "HSS column tests" below.
+- An EBF link test: the link of an eccentrically braced frame (the short piece of beam that yields in shear), alone or in a one bay frame. That's the `eccentric_braced_frames` table, all its 240 tests. See "EBF link tests" below.
 
 The sections are the real ones, so there is no fix loop and no sizing. The solver runs once, and the log gives `alphaCr` and the max ratio under `--load`, only as information. The end plates and the continuity plates are drawn. Splices, foot gussets, trusses, rods and posts are not.
 
@@ -124,7 +125,7 @@ The test rig is drawn with lighter lines (parts of kind `rig`, built with `rig.t
 
 The pin of the link (or of the actuator) on the head is the top pin of the column. The solver holds the nodes the same way, but an actuator only brings the load, it holds nothing. So a column loaded test with no beam, or with a beam on a shear tab, is a mechanism.
 
-`hub.ts` reads two kinds of JSON file. The first one is a record of a hub table, as the hub API gives it (numbers, `null`) or as a row of its CSV file (strings, `NA`). A field says which table: `specimen_type` for `connection`, `brace_angle` for `braces`, `axis_of_bending` for `columns`, `test_configuration` for `hss_columns`. The files in `specimens/` are hub records (resslab-hub-data is public domain). The second one is our own `Specimen`, for a test that is not in the hub:
+`hub.ts` reads two kinds of JSON file. The first one is a record of a hub table, as the hub API gives it (numbers, `null`) or as a row of its CSV file (strings, `NA`). A field says which table: `specimen_type` for `connection`, `brace_angle` for `braces`, `axis_of_bending` for `columns`, `test_configuration` for `hss_columns`, `link_loc` for `eccentric_braced_frames`. The files in `specimens/` are hub records (resslab-hub-data is public domain). The second one is our own `Specimen`, for a test that is not in the hub:
 
 ```json
 {
@@ -238,6 +239,32 @@ A 3PB test of our own: `"ends": "3pb"`, `length` between the rollers, `"axial": 
 
 `hss.test.ts` covers the two hub files of `specimens/` (`Kuwada_et_al_2015__DT16-LD24-A45-ny03` CF at 45°, `Yamada_et_al_2012__No-14` 3PB with an axial load), 3PB at four angles with and without the axial load, the length rule, and the errors.
 
+### EBF link tests
+
+A record of the hub `eccentric_braced_frames` table (it has a `link_loc`) is a link test. `bench.ts` draws it (`buildLink`), with no solve. The id is `ebf-<id>`, because `spec_id` is not unique.
+
+- The link is an I from the nominal sizes `h_n`, `bf_n`, `tf_n` and `tw_n`, `e` long. The `_m` columns are the measured sizes of the same link, not the beam outside it. The beam pieces next to the link have the link section (in an EBF the link is a piece of the beam), drawn as rig.
+- `l_confi` gives the rig. `link_loc` (middle or edge) is only kept: 22 rows say TF1 and edge, they are drawn as TF1 and the log says so.
+  - TF1: the link alone. Its first end plate on a tall reaction block, its second end plate on a vertical loading beam. An actuator, hung from a crosshead, pushes the beam up and down.
+  - TF2, TF3 (and TF2c, TF3c): the pinned frame of the brace tests, `l_st` between the column axes, the beam axis `h_st` above the foot pins. The link is in the middle of the beam, a frame brace goes from near each foot up to a link end. An actuator pushes a column at beam height, from a reaction wall. TF3c ("link in a system") is drawn as TF2.
+  - TF4, TF4c: the same frame, the link against a column, one frame brace under its other end. The actuator pushes the other column.
+  - The `c` configs have a concrete slab. It is not drawn yet, and the log says so.
+- `l_con_typ` with `bolted`: an end plate at each link end, `t_e_s` thick (else `max(20, 1.5 tf)`, and the log says so). TF1 always has end plates, past the flanges, with the bolts outside the flanges. In a frame, the end plates are flush with the flanges.
+- Stiffeners: an end stiffener on both faces of the web at each end, always. Then the ones of the data. `l_s_side` single: on the front only, double: on the front and the back, each face with its own count and spacing. `l_s_no_f` (or `_b`) stiffeners, `l_s_d_pnl_1_f` the end panels, `l_s_d_pnl_2_f` the inner panels (non-regular only). When the panels don't add up to `e` (more than 3 % off), they go at equal spacing, and the log says so (about 60 rows). NA: no stiffener. NR: only the end stiffeners, with a note. `t_s` is their thickness (else `max(10, 0.75 tw)`).
+- No `l_st`, `h_st` (189 rows): the span is `max(3000, 3 e)`. The height comes from the brace angle `a_b_b` when there is one, else it is 0.6 times the span. A frame too small for the link and its braces is drawn bigger. The log says each of these.
+- `a_b_b` is read as the brace angle. When the frame sizes give an angle more than 3° away, the log says so (Bozkurt & Topkaya, Itani et al., Roeder & Popov).
+- Not drawn: the extra flange plates (`tf_add_n`), the channels of a built-up `C ...` profile (drawn as an I), the lateral bracing of the link. The log says the first two.
+
+A link test of our own, as JSON (`stiffeners` in mm from the first link end, `frame` optional):
+
+```json
+{ "test": "link", "id": "my-link", "section": "W18X40", "e": 711, "at": "middle", "config": "TF2",
+  "ends": "bolted", "stiffeners": { "t": 10, "front": [237, 474], "back": [] },
+  "frame": { "span": 4000, "height": 2500 } }
+```
+
+`ebf.test.ts` covers the two hub files of `specimens/` (`Hjelmstad_and_Popov_1983_4` TF1, `Volynkin_and_Clifton_2016_AL-4C` TF4), every config with a short, a mid and a long link at every level of detail, the frame sizes, the stiffener rule, and the errors.
+
 The output is an SVG line drawing with the hidden lines removed. The SVG can also build itself step by step, as an animation.
 
 Two renderers:
@@ -286,8 +313,8 @@ Files:
 - `sections/`, `tables.ts`: the CSV tables (see `sections/README.md`), and how Node reads them.
 - `solver.ts`: 3D frame solver (6 DOF per node, pinned ends, finds mechanisms), and the buckling analysis (`alphaCr`).
 - `checks.ts`: the member checks (AISC 360-22 E3, F2, F6, H1-1).
-- `generate.ts`: topology, the fix loop, trusses and rods, posts and beam splices, and the sizing. Also the specimen path (`buildSpecimen`), and it sends a brace test or a column test (also HSS) to `bench.ts`.
-- `bench.ts`: a brace test or a column test in its rig (`buildBrace`, `buildColumn`: standing, or lying for 3PB).
+- `generate.ts`: topology, the fix loop, trusses and rods, posts and beam splices, and the sizing. Also the specimen path (`buildSpecimen`), and it sends a brace test, a column test (also HSS) or a link test to `bench.ts`.
+- `bench.ts`: a brace test, a column test or an EBF link test in its rig (`buildBrace`, `buildColumn`: standing, or lying for 3PB, `buildLink`).
 - `specimen.ts`, `specimens/`: a real test as input (the `Specimen` type, the section lookup), and hub records as examples and test data.
 - `hub.ts`: reads a record of the hub test tables as a `Specimen`. `hub-count.ts` runs it on every row of resslab-hub-data and counts what we can draw (`node hub-count.ts [folder]`).
 - `rig.ts`: the test rig parts (reaction blocks, pins, links, actuators, rollers, rig frame members).
@@ -315,7 +342,7 @@ The repo is also the package `@epfl-enac/steel-viz`. It is not on npm. The hub t
 
 It has two entries:
 
-- `@epfl-enac/steel-viz`: the light entry. `generate`, `loadCatalog`, the exact drawing `renderHLR`, the painter `render`, `timeline`, `camera`, `VIEWS`, and the specimen input (`toSpecimen`, `fromHubConnection`, `fromHubBrace`, `fromHubColumn`, `fromHubHssColumn`). It loads no package. `package.test.ts` checks it. Use it for the loading animation and the SVG drawings.
+- `@epfl-enac/steel-viz`: the light entry. `generate`, `loadCatalog`, the exact drawing `renderHLR`, the painter `render`, `timeline`, `camera`, `VIEWS`, and the specimen input (`toSpecimen`, `fromHubConnection`, `fromHubBrace`, `fromHubColumn`, `fromHubHssColumn`, `fromHubEbf`). It loads no package. `package.test.ts` checks it. Use it for the loading animation and the SVG drawings.
 - `@epfl-enac/steel-viz/3d`: `createViewer` (the WebGL view). It loads no package either, but it is bigger. Import it with a dynamic `import()`, only on the page that needs it, so it stays out of the main bundle.
 
 The package has no section table. The hub has the same CSV files (ours are copies of them), so it passes their text to `loadCatalog()`:
@@ -331,7 +358,7 @@ const [az, el] = VIEWS.iso;
 const { svg } = render(parts, { az, el, animate: true }); // an SVG that builds itself with CSS
 ```
 
-For the EU family, pass `european-sections.csv` and `hss-european-sections.csv` with `'eu'`. A test of the hub goes through `toSpecimen(record)` (or `fromHubConnection`, `fromHubBrace`, `fromHubColumn`, `fromHubHssColumn`), then `generate({ specimen }, catalog)`.
+For the EU family, pass `european-sections.csv` and `hss-european-sections.csv` with `'eu'`. A test of the hub goes through `toSpecimen(record)` (or `fromHubConnection`, `fromHubBrace`, `fromHubColumn`, `fromHubHssColumn`, `fromHubEbf`), then `generate({ specimen }, catalog)`.
 
 The hub has no channel or angle table, so this catalog has no channels and no double angles: the braces and the secondary beams keep their tube and I sections. The tees still come, because they are made from the I table. To get the same drawing as here, also pass the channel and angle CSV files of `sections/` (`loadCatalog('aisc', iCsv, hssCsv, channelCsv, angleCsv)`). For no other shape at all, pass `shapeP: 0` to `generate()`.
 

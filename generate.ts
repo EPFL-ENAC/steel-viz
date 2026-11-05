@@ -18,8 +18,8 @@ import {
   type BeamConn, type ConnType, type Fit, type Geo, type P2, type Part, type PartInfo, type Plate,
 } from './steel.ts';
 import { overlap, own } from './clash.ts';
-import { BEAM_CONNS, findSection, type BraceSpecimen, type ColumnSpecimen, type ConnSpecimen, type Specimen } from './specimen.ts';
-import { buildBrace, buildColumn } from './bench.ts';
+import { BEAM_CONNS, findSection, type BraceSpecimen, type ColumnSpecimen, type ConnSpecimen, type LinkSpecimen, type Specimen } from './specimen.ts';
+import { buildBrace, buildColumn, buildLink } from './bench.ts';
 import { actuator, block, clevis, hingeSize, link } from './rig.ts';
 
 export type Detail = 'members' | 'plates' | 'bolts';
@@ -137,6 +137,9 @@ export type Structure = {
   brace?: { frame: BraceSpecimen['frame']; L: number; angle: number; ends: BraceSpecimen['ends'] };
   // a column test (bench.ts): col is the column section, H its length
   columnTest?: { ends: ColumnSpecimen['ends']; L: number; angle: number };
+  // a link test (bench.ts): col is the link section, H the height of its axis.
+  // stiffeners: how many are drawn, span and height: the frame (not for TF1).
+  link?: { config: LinkSpecimen['config']; at: LinkSpecimen['at']; e: number; stiffeners: number; span?: number; height?: number };
 };
 const colId = (i: number) => (i ? `column${i + 1}` : 'column');
 const baseId = (i: number) => (i ? `base${i + 1}` : 'base');
@@ -1453,6 +1456,7 @@ export function generate(p0: Partial<Params>, cat: Catalog, detail: Detail = 'bo
   const p = { ...DEFAULTS, ...p0 };
   if (p.specimen?.test === 'brace') return buildBrace(p, p.specimen, cat, detail);
   if (p.specimen?.test === 'column') return buildColumn(p, p.specimen, cat, detail);
+  if (p.specimen?.test === 'link') return buildLink(p, p.specimen, cat, detail);
   if (p.specimen) return buildSpecimen(p, p.specimen, cat, detail);
   const rng = mulberry32(p.seed * 7919 + 13);
   const t0 = performance.now();

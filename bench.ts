@@ -1,5 +1,6 @@
 // The tests of RESSLab Hub that are not beam-to-column tests: one specimen
-// in its test rig, from a BraceSpecimen or a ColumnSpecimen (specimen.ts).
+// in its test rig, from a BraceSpecimen, a ColumnSpecimen or a LinkSpecimen
+// (specimen.ts).
 // generate() sends them here. No solve: the specimen is only drawn (ok, no
 // ratio). No three.js here.
 //
@@ -21,11 +22,15 @@
 // ------------------------------------------------------------- column tests
 // The `columns` and `hss_columns` tables: one column on a floor block, or
 // lying on two rollers (3pb). See buildColumn.
+//
+// ------------------------------------------------------------- link tests
+// The `eccentric_braced_frames` table: one EBF link, alone or in a frame.
+// See buildLink.
 import type { V } from './vec.ts';
 import type { Catalog, Section } from './sections.ts';
-import { boxOf, flat, geo, memberBoxes, memberFaces, type P2, type Part } from './steel.ts';
+import { boxOf, flat, geo, memberBoxes, memberFaces, stiffener, type P2, type Part } from './steel.ts';
 import { actuator, block, clevis, crosshead, hingeSize, rigMember, rigSection, roller, seat, type RigOpts } from './rig.ts';
-import { findSection, type BraceSpecimen, type ColumnSpecimen } from './specimen.ts';
+import { LINK_CONFIGS, findSection, type BraceSpecimen, type ColumnSpecimen, type LinkSpecimen } from './specimen.ts';
 import type { Detail, Params, Result, Structure } from './generate.ts';
 
 // ------------------------------------------------------------- the plane
@@ -208,6 +213,28 @@ function forDetail(parts: Part[], detail: Detail): Part[] {
   return parts.filter((q) => !gone.has(q.id)).map((q) => ({ ...q, supports: [...new Set(keep(q.supports))] }));
 }
 
+// The pinned frame of a rig (brace and link tests): two floor blocks, the
+// base beam on them, a pin on the base beam under each column, the two
+// columns (rig-colA at -y, rig-colB at +y). yA, yB: the inner flange faces of
+// the columns. zb: the base beam top. zt: the column tops. zfb: the base beam
+// bottom (the floor is 400 mm under it).
+function pinnedFrame(R: Section, yA: number, yB: number, zb: number, zt: number, add: Add, ro: (s: string[], type?: string) => RigOpts, ground: () => RigOpts) {
+  const dR = R.d;
+  const [axA, axB] = [yA - dR / 2, yB + dR / 2];
+  const zfb = zb - dR;
+  const bw = Math.max(600, R.bf + 200);
+  add(block('rig-block', [0, axA, zfb - 200], [bw, 600, 400], ground()));
+  add(block('rig-block2', [0, axB, zfb - 200], [bw, 600, 400], ground()));
+  add(rigMember('rig-base', R, [0, axA - 300, zb - dR / 2], [0, axB + 300, zb - dR / 2], ro(['rig-block', 'rig-block2'], 'Base beam')));
+  const Df = clamp(r5(0.25 * dR), 40, 100);
+  const reach = hingeSize(Df).reach;
+  add(clevis('rig-footA', [0, axA, zb], Z, X, Df, reach, ro(['rig-base'])));
+  add(clevis('rig-footB', [0, axB, zb], Z, X, Df, reach, ro(['rig-base'])));
+  add(rigMember('rig-colA', R, [0, axA, zb + reach], [0, axA, zt], ro(['rig-footA'], 'Frame column')));
+  add(rigMember('rig-colB', R, [0, axB, zb + reach], [0, axB, zt], ro(['rig-footB'], 'Frame column')));
+  return { axA, axB, zfb, reach };
+}
+
 // ------------------------------------------------------------- the test
 export function buildBrace(p: Params, spec: BraceSpecimen, cat: Catalog, detail: Detail): Result {
   const t0 = performance.now();
@@ -320,18 +347,7 @@ export function buildBrace(p: Params, spec: BraceSpecimen, cat: Catalog, detail:
     // SBF, DBF: the frame, its columns pinned on the base beam
     const dR = R.d;
     const [yA, yB, zb, zt] = [c.colA!, -c.colB!, c.base!, -c.beam!];
-    const [axA, axB] = [yA - dR / 2, yB + dR / 2];
-    const zfb = zb - dR; // the base beam bottom, on the floor blocks
-    const bw = Math.max(600, R.bf + 200);
-    add(block('rig-block', [0, axA, zfb - 200], [bw, 600, 400], ground()));
-    add(block('rig-block2', [0, axB, zfb - 200], [bw, 600, 400], ground()));
-    add(rigMember('rig-base', R, [0, axA - 300, zb - dR / 2], [0, axB + 300, zb - dR / 2], ro(['rig-block', 'rig-block2'], 'Base beam')));
-    const Df = clamp(r5(0.25 * dR), 40, 100);
-    const reach = hingeSize(Df).reach;
-    add(clevis('rig-footA', [0, axA, zb], Z, X, Df, reach, ro(['rig-base'])));
-    add(clevis('rig-footB', [0, axB, zb], Z, X, Df, reach, ro(['rig-base'])));
-    add(rigMember('rig-colA', R, [0, axA, zb + reach], [0, axA, zt], ro(['rig-footA'], 'Frame column')));
-    add(rigMember('rig-colB', R, [0, axB, zb + reach], [0, axB, zt], ro(['rig-footB'], 'Frame column')));
+    const { zfb } = pinnedFrame(R, yA, yB, zb, zt, add, ro, ground);
     add(rigMember('rig-beam', R, [0, yA - dR, zt + dR / 2], [0, yB + dR, zt + dR / 2], ro(['rig-colA', 'rig-colB'], 'Frame beam')));
     bottomRig.push(['rig-base', 'rig-colA'], ['rig-base', 'rig-colB']);
     topRig.push('rig-beam');
@@ -552,4 +568,215 @@ function lying(b: ColumnBench) {
   const xw = xe + tp[1] + reach; // the reaction wall face
   add(block('rig-wall', [xw + 200, 0, (zf + zt) / 2], [400, Wb, zt - zf], ground('Reaction wall')));
   add(actuator('rig-axial', [xw, 0, zc], [xe + tp[1], 0, zc], Y, Da, ro(['rig-wall', 'column-end2'])));
+}
+
+// ------------------------------------------------------------- link tests
+// The `eccentric_braced_frames` table: one link of an EBF in its rig.
+//
+// The link is along y, its web in the plane x = 0, its stiffeners on the
+// front (+x) and the back (-x) of the web. As for the braces, the rig is in
+// the plane y-z and its pins turn about x.
+// - TF1: the link alone. Its first end plate on a tall reaction block, its
+//   second end plate on a vertical loading beam, pushed up and down by an
+//   actuator hung from a crosshead.
+// - TF2, TF3: the pinned frame of the brace tests, the link in the middle
+//   of its beam, a frame brace from near each foot to the link ends. The
+//   actuator pushes colA at beam height, from a wall at -y.
+// - TF4: the link against colA, one frame brace from near the foot of colB
+//   to the other link end. The actuator pushes colB, from a wall at +y.
+// The beam pieces next to the link have the link section (in an EBF the link
+// is a piece of the beam), drawn as rig.
+
+export function buildLink(p: Params, spec: LinkSpecimen, cat: Catalog, detail: Detail): Result {
+  const t0 = performance.now();
+  const sec = findSection(spec.section, cat);
+  const e = spec.e;
+  if (!(e > 0)) throw new Error(`${spec.id}: e must be a number above 0, not ${JSON.stringify(e)}`);
+  if (!LINK_CONFIGS.includes(spec.config)) throw new Error(`${spec.id}: config must be one of ${LINK_CONFIGS.join(', ')}, not ${JSON.stringify(spec.config)}`);
+  if (sec.kind !== 'I') throw new Error(`${spec.id}: a link must be an I section, not ${sec.id}`);
+  const log = [...(spec.notes ?? [])];
+  const isolated = spec.config === 'TF1';
+  const edge = spec.config === 'TF4' || spec.config === 'TF4c';
+  const { d, bf, tf } = sec;
+
+  // the plate sizes
+  let ts = spec.stiffeners?.t ?? 0;
+  if (!(ts > 0)) {
+    ts = Math.max(10, Math.ceil(0.75 * sec.tw));
+    log.push(`stiffener thickness not given, drawn ${ts} mm`);
+  }
+  const plated = isolated || spec.ends === 'bolted';
+  let tp = 0;
+  if (plated) {
+    tp = spec.endPlate !== undefined && spec.endPlate > 0 ? spec.endPlate : Math.max(20, Math.round(1.5 * tf));
+    if (tp !== spec.endPlate) log.push(`end plate thickness not given, drawn ${tp} mm`);
+  }
+  // TF1: the end plates go past the flanges (the bolts there). In a frame
+  // they are flush with the flanges (the frame braces come up under them).
+  const mz = isolated ? clamp(r5(0.25 * d), 60, 150) : 0;
+  const [px, pz] = [bf + (isolated ? 80 : 100), d + 2 * mz];
+
+  const parts: Part[] = [];
+  let step = 1;
+  const add: Add = (pt) => {
+    pt.step = pt.supports.length ? step++ : 0;
+    parts.push(pt);
+    return pt;
+  };
+  const ro = (supports: string[], type?: string): RigOpts => ({ step: 0, supports, ...(type ? { type } : {}) });
+  const ground = (type?: string): RigOpts => ({ step: 0, supports: [], from: [0, 0, -1], ...(type ? { type } : {}) });
+  const R = rigSection(cat, Math.max(300, 1.5 * d), bf);
+  const t1 = performance.now();
+
+  // an end plate on the link end at y (n: from the plate toward the link)
+  const plate = (id: string, y: number, n: number, zl: number, on: string[]) => {
+    const f = flat([0, y - (n * tp) / 2, zl], X, Z, tp, rect(px, pz));
+    const dots = [];
+    if (detail === 'bolts') {
+      const xs = isolated ? [-1, 1].map((k) => (k * Math.max(sec.tw / 2 + 30, Math.min(70, bf / 2 - 30)))) : [-1, 1].map((k) => k * (bf / 2 + 25));
+      const zs = isolated ? [-1, 1].map((k) => k * (d / 2 + mz / 2)) : [-1, 0, 1].map((k) => k * (d / 2 - 40));
+      for (const x of xs) for (const z of zs) dots.push({ p: [x, y, zl + z] as V, n: [0, n, 0] as V });
+    }
+    return add({ id, step: 0, supports: on, kind: 'plate', from: Z, faces: f.faces, boxes: [f.box], dots, info: { type: 'End plate', of: 'link' } }).id;
+  };
+
+  // The link from y0 to y0 + e at height zl, with its end plates (when it
+  // has them) and its stiffeners. on: what its first end stands on. Returns
+  // what stands at its second end.
+  const linkAt = (y0: number, zl: number, on: string[]): string => {
+    const first = tp ? [plate('link-endA', y0, 1, zl, on)] : on;
+    const g = geo('link', sec, [0, y0, zl], [0, y0 + e, zl], false);
+    add({ id: 'link', step: 0, supports: first, kind: 'member', from: Z, faces: memberFaces(g, p.seg), boxes: memberBoxes(g), dots: [], info: { type: 'Link', sec, L: e } });
+    // an end stiffener on both faces at each end, then the ones of the data
+    let k = 0;
+    let dropped = 0;
+    for (const [side, list] of [[1, spec.stiffeners?.front ?? []], [-1, spec.stiffeners?.back ?? []]] as const) {
+      const ys = [ts / 2, e - ts / 2];
+      for (const y of [...list].sort((a, b) => a - b)) {
+        if (ys.some((o) => Math.abs(o - y) < ts + 1)) dropped++;
+        else ys.push(y);
+      }
+      for (const y of ys.sort((a, b) => a - b)) {
+        const f = stiffener(sec, [0, y0 + y, zl], [side, 0, 0], Z, ts);
+        add({ id: `link-stiffener${++k}`, step: 0, supports: ['link'], kind: 'plate', from: [side, 0, 0], faces: f.faces, boxes: [f.box], dots: [], info: { type: 'Stiffener', of: 'link' } });
+      }
+    }
+    if (dropped) log.push(`${dropped} stiffener${dropped > 1 ? 's' : ''} too close to another one or to a link end, not drawn`);
+    return tp ? plate('link-endB', y0 + e, -1, zl, ['link']) : 'link';
+  };
+  let H: number;
+  let frameSize: { span: number; height: number } | undefined;
+  if (isolated) {
+    // TF1: the link at zl above the floor (z = 0)
+    const zl = r5(Math.max(800, 2 * d));
+    H = zl;
+    const ztop = zl + pz / 2 + 200;
+    const bw = Math.max(600, px + 200);
+    add(block('rig-block', [0, -tp - 300, ztop / 2], [bw, 600, ztop], ground()));
+    const endB = linkAt(0, zl, ['rig-block']);
+    const yL = e + tp + R.d / 2;
+    const Da = clamp(r5(0.2 * d), 40, 80);
+    const zLt = zl + pz / 2 + 200; // the loading beam top
+    add(rigMember('rig-load', R, [0, yL, zl - pz / 2], [0, yL, zLt], ro([endB], 'Loading beam')));
+    const top = zLt + Math.max(1000, 14 * Da);
+    const span = r5(Math.max(px, R.bf, 600) + R.d + 200);
+    add(crosshead('rig-crosshead', [0, yL, top], X, span, 0, R, ground()));
+    add(actuator('rig-actuator', [0, yL, top], [0, yL, zLt], X, Da, ro(['rig-crosshead', 'rig-load'])));
+  } else {
+    // the frame size, from the data or a default
+    let [L, Hf] = spec.frame ? [spec.frame.span, spec.frame.height] : [r5(Math.max(3000, 3 * e)), 0];
+    // no frame size: the height from the brace angle when the hub gives it
+    // (from the foot pin to the link end, as brace() checks it), else 0.6 L
+    const run = edge ? L - R.d / 2 - tp - e : (L - e) / 2;
+    const fromAngle = !spec.frame && spec.brace !== undefined && spec.brace > 10 && spec.brace < 80;
+    if (!spec.frame) {
+      Hf = fromAngle ? r5(run * Math.tan((spec.brace! * Math.PI) / 180)) : r5(0.6 * L);
+      log.push(`l_st, h_st not given: frame drawn ${L} x ${Hf} mm${fromAngle ? ` (the height from the brace angle ${spec.brace}°)` : ''}`);
+    }
+    // room for the link, its plates, the beam pieces and the braces
+    const need = r5(e + 2 * tp + R.d + (edge ? 600 : 1200)) + 5;
+    if (L < need) {
+      log.push(`frame span ${L} mm is too short for the link and the frame columns, drawn ${need} mm`);
+      L = need;
+    }
+    const hneed = r5(d + 1000);
+    if (fromAngle && Hf < hneed) {
+      // a flat brace: keep its angle, make the frame wider
+      Hf = hneed;
+      const r = Hf / Math.tan((spec.brace! * Math.PI) / 180);
+      L = Math.max(L, r5(edge ? r + R.d / 2 + tp + e : 2 * r + e) + 5);
+      log.push(`frame drawn ${L} x ${Hf} mm to keep the brace angle ${spec.brace}°`);
+    }
+    if (Hf < hneed) {
+      log.push(`frame height ${Hf} mm is too low for the frame braces, drawn ${hneed} mm`);
+      Hf = hneed;
+    }
+    frameSize = { span: L, height: Hf };
+    H = Hf;
+    const [yA, yB] = [-L / 2 + R.d / 2, L / 2 - R.d / 2];
+    const zt = Hf + d / 2 + 150;
+    const { axA, axB, zfb } = pinnedFrame(R, yA, yB, 0, zt, add, ro, ground);
+
+    // the link starts at y0. ends: where the beam pieces start (past the end plates)
+    const y0 = edge ? yA + tp : -e / 2;
+    const ends = edge ? [y0 + e + tp] : [-e / 2 - tp, e / 2 + tp];
+    // the frame braces: under the beam from near a column foot (s = 1: the
+    // foot of colA, going toward +y) up toward the link end yT. The brace
+    // axis goes through the link end on the beam axis. It stops 2 mm under
+    // the beam and 2 mm over the base beam, 20 mm clear of the column.
+    const Rb = rigSection(cat, clamp(0.6 * d, 150, 400));
+    const braces: string[] = [];
+    const brace = (id: string, s: number, yT: number) => {
+      const inner = s > 0 ? yA : -yB; // the column face, the brace side made +y
+      const T: Q = [s * yT, Hf];
+      let By = inner + Rb.d;
+      let u: Q = [1, 0];
+      let sb = 0;
+      for (let i = 0; i < 6; i++) {
+        const dl = Math.hypot(T[0] - By, T[1]);
+        u = [(T[0] - By) / dl, T[1] / dl];
+        sb = (2 + (Rb.d / 2) * u[0]) / u[1];
+        By += inner + 20 - (By + sb * u[0] - (Rb.d / 2) * u[1]);
+      }
+      const st = (Hf - d / 2 - 2 - (Rb.d / 2) * u[0]) / u[1];
+      const P = (k: number): V => [0, s * (By + k * u[0]), k * u[1]];
+      add(rigMember(id, Rb, P(sb), P(st), ro(['rig-base'], 'Frame brace')));
+      braces.push(id);
+      // the angle of the frame: from the foot pin to the link end
+      const drawn = (Math.atan2(Hf, Math.abs(yT - (s > 0 ? axA : axB))) * 180) / Math.PI;
+      const note = `brace angle ${spec.brace}° given, the frame sizes give ${Math.round(drawn * 10) / 10}°`;
+      if (spec.brace !== undefined && Math.abs(spec.brace - drawn) > 3 && !log.includes(note)) log.push(note);
+    };
+    if (edge) brace('rig-brace', -1, y0 + e);
+    else {
+      brace('rig-brace', 1, -e / 2);
+      brace('rig-brace2', -1, e / 2);
+    }
+    // the beam, the link in it
+    let endB: string;
+    if (edge) endB = linkAt(y0, Hf, ['rig-colA', ...braces]);
+    else {
+      add(rigMember('rig-beamA', sec, [0, yA, Hf], [0, ends[0], Hf], ro(['rig-colA', ...braces], 'Frame beam')));
+      endB = linkAt(y0, Hf, ['rig-beamA']);
+    }
+    add(rigMember('rig-beamB', sec, [0, ends[ends.length - 1], Hf], [0, yB, Hf], ro([endB, 'rig-colB'], 'Frame beam')));
+
+    // the push at beam height, from a wall: at -y on colA, or for an edge
+    // link at +y on colB
+    const s = edge ? 1 : -1;
+    const y1 = edge ? axB + R.d / 2 : axA - R.d / 2;
+    const D = clamp(r5(0.2 * R.d), 40, 80);
+    const yw = y1 + s * Math.max(1000, 14 * D);
+    const zf = zfb - 400;
+    add(block('rig-wall', [0, yw + s * 200, (zf + Hf + 400) / 2], [Math.max(600, R.bf + 200), 400, Hf + 400 - zf], ground('Reaction wall')));
+    add(actuator('rig-actuator', [0, yw, Hf], [0, y1, Hf], X, D, ro(['rig-wall', edge ? 'rig-colB' : 'rig-colA'])));
+  }
+  const nst = parts.filter((q) => q.info?.type === 'Stiffener').length;
+
+  log.push(`link test ${spec.config} (${spec.at}), e ${e} mm, ${plated ? 'end plates' : 'welded ends'}, not solved (only drawn)`);
+  const st: Structure = {
+    form: 'specimen', id: spec.id, H, col: sec, cols: [], arms: [], secs: [],
+    link: { config: spec.config, at: spec.at, e, stiffeners: nst, ...(frameSize ?? {}) },
+  };
+  return { st, parts: forDetail(parts, detail), ok: true, log, ratio: 0, alpha: Infinity, solves: 0, ms: { topology: t1 - t0, solve: 0, geometry: performance.now() - t1 }, nodes: 0, members: {} };
 }

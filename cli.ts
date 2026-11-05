@@ -64,6 +64,9 @@ console.log(
     `${out}: ${spec ? `specimen ${spec.id}` : `seed ${opt('seed', '1')}`}, ${family}, view ${view}, detail ${detail}, ${render === painter ? 'painter' : 'hlr'}`,
     r.st.brace
       ? `  structure: specimen, brace test ${r.st.brace.frame}, ${r.st.col.id} ${r.st.brace.L} mm at ${r.st.brace.angle}°, ${r.st.brace.ends} ends`
+      : r.st.link
+      ? `  structure: specimen, link test ${r.st.link.config} ${r.st.link.at}, ${r.st.col.id} e ${r.st.link.e} mm, ${r.st.link.stiffeners} stiffeners` +
+        (r.st.link.span ? `, frame ${r.st.link.span} x ${r.st.link.height} mm` : '')
       : r.st.columnTest
       ? `  structure: specimen, column test ${r.st.columnTest.ends}, ${r.st.col.id} ${r.st.columnTest.L} mm, pushed at ${r.st.columnTest.angle}° from the web`
       : spec

@@ -9,7 +9,7 @@
 //
 // No three.js and no Node API here: index.ts exports it.
 import type { ConnType } from './steel.ts';
-import type { BraceSpecimen, ColumnSpecimen, ConnSpecimen, SectionRef, Specimen, SpecimenBeam } from './specimen.ts';
+import { LINK_CONFIGS, type BraceSpecimen, type ColumnSpecimen, type ConnSpecimen, type LinkSpecimen, type SectionRef, type Specimen, type SpecimenBeam } from './specimen.ts';
 
 export type HubRecord = Record<string, unknown>;
 
@@ -230,6 +230,84 @@ export function fromHubHssColumn(rec: HubRecord): ColumnSpecimen {
   return { test: 'column', id, section, length, ends, angle, axial, notes };
 }
 
+// ------------------------------------------------------------- ebf links
+
+// The stiffeners of a link, from a record of the hub `eccentric_braced_frames`
+// table: their positions from the link end, on the front of the web (f) and,
+// for a double sided link, on the back (b). l_s_no_x: how many. l_s_d_pnl_1_x:
+// the end panels (from the link end to the first one), l_s_d_pnl_2_x: the
+// inner panels (empty when they are all the same). When the panels don't add
+// up to e (more than 3 % off), they are drawn at equal spacing, with a note.
+// l_s_side NA: no stiffener. NR: not reported. The end stiffeners are not in
+// these lists (buildLink always draws them).
+export function linkStiffeners(rec: HubRecord, e: number): { front: number[]; back: number[]; notes: string[] } {
+  const { text, value } = fields(rec, 'row');
+  const notes: string[] = [];
+  const side = text('l_s_side').toLowerCase();
+  const raw = typeof rec.l_s_side === 'string' ? rec.l_s_side.trim().toUpperCase() : '';
+  if (raw === 'NR') return { front: [], back: [], notes: ['stiffeners not reported: only the end stiffeners are drawn'] };
+  const face = (x: 'f' | 'b', name: string): number[] => {
+    const n = value(`l_s_no_${x}`);
+    if (!side || !(n > 0)) return [];
+    const [p1, p2] = [value(`l_s_d_pnl_1_${x}`), value(`l_s_d_pnl_2_${x}`)];
+    if (!(p1 > 0)) {
+      notes.push(`${name} stiffener spacing not reported: only the end stiffeners are drawn`);
+      return [];
+    }
+    const even = [...Array(n).keys()].map((k) => mm(((k + 1) * e) / (n + 1)));
+    const off = (x: number) => Math.abs(x - e) > 0.03 * e;
+    if (!(p2 > 0)) {
+      if (off(p1 * (n + 1))) notes.push(`${name} stiffeners: ${n} at ${p1} mm does not fill e ${e} mm, drawn at equal spacing`);
+      return even;
+    }
+    if (off(2 * p1 + (n - 1) * p2)) {
+      notes.push(`${name} stiffeners: ${n} with panels ${p1} and ${p2} mm do not fill e ${e} mm, drawn at equal spacing`);
+      return even;
+    }
+    return [...Array(n).keys()].map((k) => mm(p1 + k * p2));
+  };
+  const front = face('f', 'front');
+  const back = side === 'double' ? face('b', 'back') : [];
+  return { front, back, notes: [...new Set(notes)] };
+}
+
+// one record of the hub `eccentric_braced_frames` table: one link of an EBF,
+// alone (TF1) or in a frame (TF2, TF3, TF4, c: with a slab). The sizes are
+// the nominal ones (_n), the measured ones (_m) are the same link.
+export function fromHubEbf(rec: HubRecord): LinkSpecimen {
+  const id = `ebf${String(rec.id ?? '').trim() ? `-${String(rec.id).trim()}` : ''}`;
+  const { text, value, num, unsupported } = fields(rec, id);
+  const notes: string[] = [];
+  const section = sectionOf(rec.profile, num('h_n'), num('bf_n'), num('tf_n'), num('tw_n'));
+  const e = num('e');
+  const cf = text('l_confi');
+  if (!cf) throw new Error(`${id}: l_confi is missing`);
+  const config = LINK_CONFIGS.find((c) => c.toLowerCase() === cf.toLowerCase());
+  if (!config) throw unsupported('l_confi');
+  const loc = text('link_loc').toLowerCase();
+  if (!loc) throw new Error(`${id}: link_loc is missing`);
+  if (loc !== 'middle' && loc !== 'edge') throw unsupported('link_loc');
+  const at = loc as LinkSpecimen['at'];
+  if (config === 'TF1' && at === 'edge') notes.push('l_confi TF1 is an isolated link, link_loc says edge: drawn as TF1');
+  if (config === 'TF3c') notes.push('link in a system: drawn as TF2');
+  if (/c$/.test(config)) notes.push('the concrete slab is not drawn yet');
+  if (/^C\s/i.test(String(rec.profile ?? '').trim())) notes.push('built up from channels, drawn as an I');
+  if (value('tf_add_n') > 0) notes.push(`extra flange plates (tf_add_n ${value('tf_add_n')} mm) not drawn`);
+  const [span, height] = [value('l_st'), value('h_st')];
+  const bolted = /bolted/i.test(text('l_con_typ'));
+  const st = linkStiffeners(rec, e);
+  notes.push(...st.notes);
+  return {
+    test: 'link', id, section, e, at, config,
+    ends: bolted ? 'bolted' : 'welded',
+    ...(bolted && value('t_e_s') > 0 ? { endPlate: mm(value('t_e_s')) } : {}),
+    stiffeners: { ...(value('t_s') > 0 ? { t: mm(value('t_s')) } : {}), front: st.front, back: st.back },
+    ...(span > 0 && height > 0 ? { frame: { span: mm(span), height: mm(height) } } : {}),
+    ...(value('a_b_b') > 0 ? { brace: mm(value('a_b_b')) } : {}),
+    notes,
+  };
+}
+
 // ------------------------------------------------------------- any record
 // a JSON object: our own Specimen, or a hub record (the reader is picked from
 // a field only its table has)
@@ -240,9 +318,11 @@ export function toSpecimen(json: unknown): Specimen {
   if ('brace_angle' in o) return fromHubBrace(o);
   if ('axis_of_bending' in o) return fromHubColumn(o);
   if ('test_configuration' in o) return fromHubHssColumn(o);
+  if ('link_loc' in o) return fromHubEbf(o);
   if (o.test === 'brace') return o as BraceSpecimen;
   if (o.test === 'column') return o as ColumnSpecimen;
-  if (o.test !== undefined && o.test !== 'connection') throw new Error(`test "${String(o.test)}" is not known (connection, brace or column)`);
+  if (o.test === 'link') return o as LinkSpecimen;
+  if (o.test !== undefined && o.test !== 'connection') throw new Error(`test "${String(o.test)}" is not known (connection, brace, column or link)`);
   if ('column' in o) return { beams: [], ...(o as Partial<ConnSpecimen>) } as ConnSpecimen;
-  throw new Error('not a specimen: no "column" or "test" (a Specimen), no "specimen_type", "brace_angle", "axis_of_bending" or "test_configuration" (a hub record)');
+  throw new Error('not a specimen: no "column" or "test" (a Specimen), no "specimen_type", "brace_angle", "axis_of_bending", "test_configuration" or "link_loc" (a hub record)');
 }
