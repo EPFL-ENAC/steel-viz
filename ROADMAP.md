@@ -58,7 +58,8 @@ The specimen input draws four tables of the hub, each test in its test rig. `nod
 - [x] HSS column tests (`hss_columns`), CF, DC and 3PB: 284 of 284. How we read `length__mm` is our own guess (RESSLab-Team/resslab-hub-data#75).
 - [ ] A round tube in `hss_columns`: read it as a CHS (`chsSection`). No row has one yet.
 - [ ] EBF link tests (`eccentric_braced_frames`, 240 tests). In progress on the `feat/ebf-links` branch.
-- [ ] A specimen input in the playground: paste a hub record, or pick one from a list.
+- [x] A specimen input in the playground: paste a hub record, or pick one from a list.
+  Done: "Hub test" at the top of the rail. Pick a table, search a test, walk them with ← and →, or paste a record. The rail shows what the reader made of it, or its error.
 
 ## Playground
 
