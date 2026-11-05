@@ -9,18 +9,24 @@ import { CONNS, timeline, type ConnType } from '../steel.ts';
 import Drawing from './Drawing.vue';
 import { anim, here } from './engine.ts';
 import GoodSeeds from './GoodSeeds.vue';
+import HubTest from './HubTest.vue';
 import RangeSlider from './RangeSlider.vue';
 import Section from './Section.vue';
 import Seg from './Seg.vue';
 import Slider from './Slider.vue';
 import { BUILD_KEYS, GROUPS, catalog, dev, params, s, setView, stats, turnTo, type Built } from './state.ts';
+import { current, setMode } from './tests.ts';
 
 const CONN = (c: ConnType) => CONNS[c].label;
 
-// ---- the structure
+// ---- the structure: a seed, or a hub test (s.specimen, app/tests.ts)
 const built = shallowRef<Built | null>(null);
 const error = ref('');
+const note = ref(''); // why the sheet has no drawing: a hub test we can't draw
 function build(animate: boolean) {
+  if (s.specimen) return buildTest(animate);
+  shownRecord = null;
+  note.value = '';
   try {
     const t0 = performance.now();
     const r = generate(params(), catalog(s.family), s.detail as any);
@@ -30,12 +36,41 @@ function build(animate: boolean) {
     error.value = String(e.stack ?? e);
   }
 }
+// a hub test: no solve to fix it, no sizing. A row the reader can't read, or
+// a throw of generate(), gives no drawing and a note on the sheet.
+let shownRecord: unknown = null;
+function buildTest(animate: boolean) {
+  const c = current.value;
+  const fit = c?.record !== shownRecord; // a new test: the 3D view fits it
+  shownRecord = c?.record ?? null;
+  error.value = ''; // an error of the seed
+  const none = (why: string) => {
+    built.value = null;
+    note.value = why;
+    stats.draw = stats.ms = '';
+  };
+  if (!c) return none('Loading the test…');
+  if (!c.spec) return none(c.error ?? '');
+  try {
+    const t0 = performance.now();
+    const r = generate({ specimen: c.spec }, catalog(c.spec.family ?? 'aisc'), s.detail as any);
+    built.value = { r, ms: performance.now() - t0, animate, fit };
+    note.value = '';
+  } catch (e: any) {
+    none(`${c.id}: ${e.message}`);
+  }
+}
 // build time 0 (the default): a change shows the new structure at once.
 // Over 0: each change plays the build, in that time.
 const plays = computed(() => s.duration > 0);
 build(plays.value);
 watch(() => BUILD_KEYS.map((k) => s[k]), () => build(plays.value));
 watch(() => s.detail, () => build(false));
+watch(current, () => build(plays.value)); // a new test, or back to the seed
+
+// ---- seed or hub test
+const hub = computed(() => !!s.specimen);
+const mode = computed({ get: () => (hub.value ? 'hub' : 'seed'), set: (v) => setMode(v === 'hub') });
 
 const replay = ref(0);
 // play again when the build time or the speed stops moving (not when it goes to 0)
@@ -79,6 +114,10 @@ const members = computed(() => {
 });
 const column = computed(() => {
   const st = built.value?.r.st;
+  if (hub.value) {
+    const c = current.value;
+    return [c?.id, c?.name, st?.col.id].filter(Boolean).join(', ');
+  }
   return st ? `${st.form}, ${st.cols.length > 1 ? st.cols.length + ' × ' : ''}${st.col.id}${st.splice ? ' / ' + st.splice.sec.id : ''}, ${(st.H / 1000).toFixed(2)} m` : '';
 });
 
@@ -121,7 +160,8 @@ async function copy(what: 'svg' | 'link') {
     <aside class="rail">
       <header class="head">
         <h1>Steel structure generator</h1>
-        <p class="lede">One column with arms, a portal or a box. The frame solver checks it stands, fixes it when it does not, and sizes every member from the real section tables.</p>
+        <p v-if="hub" class="lede">A real test of the RESSLab Hub, drawn in its test rig, from the record as the hub gives it. The seed settings are off.</p>
+        <p v-else class="lede">One column with arms, a portal or a box. The frame solver checks it stands, fixes it when it does not, and sizes every member from the real section tables.</p>
         <div class="tags">
           <span v-if="dev" class="epfl-tag" :title="`${dev.branch} at ${dev.sha}${dev.dirty ? ', with changes not committed' : ''}. Live: it reloads on each save.`">
             {{ dev.branch }} <span class="num">{{ dev.sha }}{{ dev.dirty ? '*' : '' }}</span>
@@ -130,8 +170,16 @@ async function copy(what: 'svg' | 'link') {
         </div>
       </header>
 
+      <div class="mode">
+        <Seg v-model="mode" label="Draw" :options="[['seed', 'Seed'], ['hub', 'Hub test']]" />
+      </div>
+
       <div class="sections">
-        <Section id="structure" title="Structure" :keys="GROUPS.structure" open>
+        <Section v-if="hub" id="test" title="Test" open>
+          <HubTest />
+        </Section>
+
+        <Section v-if="!hub" id="structure" title="Structure" :keys="GROUPS.structure" open>
           <div class="seed">
             <label for="seed">Seed</label>
             <button type="button" class="epfl-btn epfl-btn-secondary epfl-btn-sm" title="Previous seed" aria-label="Previous seed" @click="nextSeed(-1)">Prev</button>
@@ -147,7 +195,7 @@ async function copy(what: 'svg' | 'link') {
           <Seg v-model="s.shapes" label="Channels, angles, tees" :options="[['none', 'None'], ['some', 'Some'], ['all', 'All']]" />
         </Section>
 
-        <Section id="layout" title="Layout" :keys="GROUPS.layout">
+        <Section v-if="!hub" id="layout" title="Layout" :keys="GROUPS.layout">
           <p class="note">Storeys, span and bracing change a portal or a box. Arm length is for a tree (the side arms of a portal take 3/4 of the band).</p>
           <Seg v-model="s.storeys" label="Storeys" :options="[[0, 'Auto'], [1, 'One'], [2, 'Two']]" />
           <Slider id="span" v-model="s.span" label="Span" :min="0.6" :max="1.6" :step="0.05" :out="`× ${s.span.toFixed(2)}`" />
@@ -163,7 +211,7 @@ async function copy(what: 'svg' | 'link') {
           </div>
         </Section>
 
-        <Section id="details" title="Details" :keys="GROUPS.details">
+        <Section v-if="!hub" id="details" title="Details" :keys="GROUPS.details">
           <p class="note">The chance of each detail, where it fits.</p>
           <Slider id="braces" v-model="s.braces" label="Braces" :min="0" :max="1" :step="0.05" :out="pct(s.braces)" />
           <Slider id="secondaries" v-model="s.secondaries" label="Secondary beams" :min="0" :max="1" :step="0.05" :out="pct(s.secondaries)" />
@@ -198,7 +246,7 @@ async function copy(what: 'svg' | 'link') {
           </template>
         </Section>
 
-        <Section id="seeds" title="Good seeds">
+        <Section v-if="!hub" id="seeds" title="Good seeds">
           <GoodSeeds />
         </Section>
 
@@ -224,9 +272,9 @@ async function copy(what: 'svg' | 'link') {
     </aside>
 
     <main class="sheet">
-      <Drawing ref="drawing" :built="built" :replay="replay" />
+      <Drawing ref="drawing" :built="built" :replay="replay" :note="note" />
       <dl class="titleblock">
-        <div><dt>Column</dt><dd>{{ column }}</dd></div>
+        <div><dt>{{ hub ? 'Test' : 'Column' }}</dt><dd>{{ column }}</dd></div>
         <div><dt>Solver</dt><dd>{{ built ? `${built.r.nodes} nodes, ${built.r.solves} solves` : '' }}</dd></div>
         <div><dt>Drawing</dt><dd>{{ stats.draw }}</dd></div>
         <div><dt>Time</dt><dd>{{ stats.ms }}</dd></div>

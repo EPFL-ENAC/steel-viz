@@ -3,6 +3,9 @@
   server only) this branch and the base branch side by side, in the same
   viewer. Both panes read the same angle. Zoom and pan go from one WebGL view
   to the other when the base viewer can take them.
+  With a hub test, the base reads the same record with its own reader, so a
+  change of hub.ts shows too. The arrow keys ← → then go to the previous and
+  next test (HubTest.vue), Shift turns the drawing.
 -->
 <script setup lang="ts">
 import { computed, ref, shallowRef, watch } from 'vue';
@@ -11,8 +14,10 @@ import type { Frame } from '../webgl.ts';
 import { here, loadBase, type Engine } from './engine.ts';
 import Pane from './Pane.vue';
 import { dev, params, s, stats, turnTo, type Built } from './state.ts';
+import { current } from './tests.ts';
 
-const props = defineProps<{ built: Built | null; replay: number }>();
+// note: why the main pane has no drawing (a hub test this branch can't draw)
+const props = defineProps<{ built: Built | null; replay: number; note?: string }>();
 
 const compare = computed(() => !!(s.compare && dev.value));
 const turning = ref(false);
@@ -23,8 +28,9 @@ const hint = computed(() => {
   const gl = s.viewer !== 'svg' && mine.value?.hasGL !== false;
   // an older base viewer has no setFrame(): only the angle follows
   const follows = theirs.value?.canFrame() ? ', both follow' : `, ${baseName.value} does not follow`;
-  if (compare.value) return gl ? `Drag to turn both. In 3D: right drag to move, wheel to zoom${follows}` : 'Drag to turn both';
-  return { '3d': 'Drag to turn, right drag to move, wheel to zoom, double click to see it all', svg: 'Drag to turn', both: 'Drag either one to turn. In 3D: right drag to move, wheel to zoom' }[gl ? s.viewer : 'svg'];
+  const keys = s.specimen ? '. ← →: the next test, Shift ← →: turn' : '';
+  if (compare.value) return (gl ? `Drag to turn both. In 3D: right drag to move, wheel to zoom${follows}` : 'Drag to turn both') + keys;
+  return { '3d': 'Drag to turn, right drag to move, wheel to zoom, double click to see it all', svg: 'Drag to turn', both: 'Drag either one to turn. In 3D: right drag to move, wheel to zoom' }[gl ? s.viewer : 'svg'] + keys;
 });
 
 // ---- the base branch: its engine, and the same settings built with it
@@ -40,9 +46,14 @@ watch(compare, (on) => {
     (e) => (baseNote.value = `${baseName.value} does not build: ${e.message}`),
   );
 }, { immediate: true });
-watch([() => props.built, base, compare], () => {
+// a hub test: what the base made of it last, so it builds once per test
+let baseTest: { E: Engine; record: unknown; detail: string } | null = null;
+watch([() => props.built, base, compare, current], () => {
   const [b, E] = [props.built, base.value];
-  if (!b || !E || !compare.value) return void (baseBuilt.value = null);
+  if (!E || !compare.value) return void ((baseBuilt.value = null), (baseTest = null));
+  if (s.specimen) return buildTest(E, b);
+  baseTest = null;
+  if (!b) return void (baseBuilt.value = null);
   try {
     const t0 = performance.now();
     const r = E.generate(params(), E.catalog(s.family), s.detail);
@@ -53,6 +64,36 @@ watch([() => props.built, base, compare], () => {
     baseNote.value = `${baseName.value} fails on these settings: ${e.message}`;
   }
 });
+
+// the base draws the hub test on show, with its own reader. A note says why not.
+function buildTest(E: Engine, b: Built | null) {
+  const c = current.value;
+  if (!c?.record) {
+    baseBuilt.value = null;
+    baseNote.value = c?.error ?? 'Loading the test…';
+    return;
+  }
+  if (baseTest?.E === E && baseTest.record === c.record && baseTest.detail === s.detail) return;
+  const fit = baseTest?.record !== c.record;
+  baseTest = { E, record: c.record, detail: s.detail };
+  baseBuilt.value = null;
+  if (!E.toSpecimen) return void (baseNote.value = `${baseName.value} has no specimen input`);
+  let spec;
+  try {
+    spec = E.toSpecimen(c.record);
+  } catch (e: any) {
+    return void (baseNote.value = `${baseName.value} can't read this test: ${e.message}`);
+  }
+  try {
+    const t0 = performance.now();
+    const r = E.generate({ specimen: spec }, E.catalog(spec.family ?? 'aisc'), s.detail);
+    if (r.st.form !== 'specimen') return void (baseNote.value = `${baseName.value} can't draw this kind of test`);
+    baseBuilt.value = { r, ms: performance.now() - t0, animate: b?.animate ?? false, fit };
+    baseNote.value = '';
+  } catch (e: any) {
+    baseNote.value = `${baseName.value} fails on this test: ${e.message}`;
+  }
+}
 
 // ---- what differs: the parts by id, then their faces and bolts
 const shape = (p: Part) => JSON.stringify([p.faces, p.dots]);
@@ -105,6 +146,8 @@ const KEYS: Record<string, [number, number]> = { ArrowLeft: [-15, 0], ArrowRight
 function key(e: KeyboardEvent) {
   const k = KEYS[e.key];
   if (!k) return;
+  // a hub test: ← → go to the window, for the next test (HubTest.vue)
+  if (s.specimen && k[0] && !e.shiftKey) return;
   e.preventDefault();
   turnTo(s.az + k[0], s.el + k[1]);
 }
@@ -119,7 +162,7 @@ defineExpose({ svg: () => mine.value?.svg() ?? '', diff });
     :style="{ '--px': `${s.size}px` }"
     tabindex="0"
     role="img"
-    aria-label="Generated steel structure. Drag, or use the arrow keys, to turn it."
+    :aria-label="s.specimen ? 'A hub test in its rig. Drag, or use Shift and the arrow keys, to turn it.' : 'Generated steel structure. Drag, or use the arrow keys, to turn it.'"
     @pointerdown="down"
     @pointermove="move"
     @pointerup="up"
@@ -134,6 +177,7 @@ defineExpose({ svg: () => mine.value?.svg() ?? '', diff });
       :replay="replay"
       :turning="turning"
       :label="compare ? dev?.branch : undefined"
+      :note="note"
       @frame="toTheirs"
     />
     <template v-if="compare">

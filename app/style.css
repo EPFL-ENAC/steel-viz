@@ -126,6 +126,10 @@ input[type="range"]:hover::-moz-range-thumb { background: var(--primary); }
 .drawing.compare .pane.v-both { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); }
 .drawing.compare .pane.v-both .gl { border-right: 0; border-bottom: var(--border-w) solid var(--border); }
 .note-pane { place-items: center; padding: var(--space-3); }
+/* a hub test with no drawing: the note over the pane, the drawing hidden */
+.pane { position: relative; }
+.pane.noted > :is(.gl, .svg) { visibility: hidden; }
+.pane-note { position: absolute; inset: 0; display: grid; place-items: center; padding: var(--space-4); text-align: center; overflow-wrap: anywhere; }
 .drawing.compare .pane > :is(.gl, .svg)::before, .drawing.v-both .pane > :is(.gl, .svg)::before {
   content: attr(data-label); position: absolute; top: var(--space-2); left: var(--space-3); z-index: 1;
   font-size: var(--fs-xs); color: var(--fg-muted); pointer-events: none;
@@ -152,6 +156,24 @@ input[type="range"]:hover::-moz-range-thumb { background: var(--primary); }
 .titleblock dd { margin: 0; font-family: var(--font-mono); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .titleblock .ids summary { cursor: pointer; font-size: var(--fs-xs); color: var(--fg-muted); }
 .titleblock .ids p { margin: var(--space-1) 0 0; }
+
+/* ---- seed or hub test, and the test of the rail (HubTest.vue) */
+.mode { padding: var(--space-2) var(--space-3); border-bottom: var(--border-w) solid var(--border); }
+.walk { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: var(--space-2); align-items: center; }
+.walk .num { text-align: center; }
+.source-note { border-left: 0.1875rem solid var(--border-strong); padding-left: var(--space-2); }
+.test { display: grid; gap: var(--space-2); min-width: 0; }
+.test p { margin: 0; }
+.test-id { overflow-wrap: anywhere; }
+.test-id span { color: var(--fg-muted); font-size: var(--fs-xs); }
+.test-error { border-left: 0.1875rem solid var(--warning-fg); padding: var(--space-1) var(--space-2); background: var(--bg-subtle); font-family: var(--font-mono); font-size: var(--fs-xs); overflow-wrap: anywhere; }
+.test dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0.125rem var(--space-2); margin: 0; font-size: var(--fs-xs); }
+.test dt { color: var(--fg-muted); }
+.test dd { margin: 0; font-family: var(--font-mono); overflow-wrap: anywhere; }
+.test-notes { margin: var(--space-1) 0 0; padding-left: var(--space-3); font-size: var(--fs-xs); }
+.record summary { cursor: pointer; font-size: var(--fs-xs); color: var(--fg-muted); }
+.record dl { margin-top: var(--space-1); max-height: 20rem; overflow: auto; }
+.paste { font-family: var(--font-mono); font-size: var(--fs-xs); resize: vertical; min-width: 0; }
 
 /* ---- analysis */
 .status { display: inline-flex; align-items: center; gap: var(--space-1); font-size: var(--fs-xs); font-weight: var(--w-bold); }
