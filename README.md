@@ -359,6 +359,49 @@ A link test of our own, as JSON (`stiffeners` in mm from the first link end, `fr
 
 `ebf.test.ts` covers the two hub files of `specimens/` (`Hjelmstad_and_Popov_1983_4` TF1, `Volynkin_and_Clifton_2016_AL-4C` TF4), every config with a short, a mid and a long link at every level of detail, the frame sizes, the stiffener rule, and the errors.
 
+### Deformed shape of a test
+
+A hub test has measured responses: the drift against the actuator force, the panel zone shear, the beam moment against the chord rotation. In the playground, a test with response files plays its loading protocol in the 3D view. The specimen deforms, the rig follows, and the zones that work take a color. Today this is for the beam-to-column tests (`connections`).
+
+The responses are one or two numbers for each step, not a field of displacements. So the shape is a schematic model that matches the measured numbers. It isn't a measured shape. The rail says so and shows the scale factor. The displacements are multiplied by it. "Auto" takes the smallest of 1, 2, 5, 10 and 20 that brings the largest drift to about 0.1 rad.
+
+How the steps line up: if all the files of a test have the same row count, row i is step i. If not, each file gets a pseudo time, its total travel in x from 0 to 1. The steps are the rows of `Global`, and the other files are read at the same pseudo time. This works because a protocol is cycles of growing amplitude, but it's an approximation. A long file is thinned to 2000 steps, and its turning points stay. Only on a very noisy file do the smallest ones go.
+
+The connection model is in `deform-connection.ts`. The column turns with the drift θ, the panel zone shears by γ, and the beam bends by its chord rotation θb. The column takes what is left, θ − γ − θb. A beam loaded test turns all of it back about the foot pin, so the top pin stays in place and the beam tips move. A column loaded test keeps the turn, so the top actuator moves the column and the tip links turn.
+
+A test doesn't always have all the files. The rail lists what we estimate instead:
+
+- No `Panel_zone` file: the elastic distortion V / (G d_c t_cw), at most θ / 2.
+- No beam file: half of what is left of the drift goes to the beam, half to the column. The moment comes from the actuator force.
+
+The colors come from the data, and the rail shows each value next to its color:
+
+- Beam hinge, in orange: |M| / Mp at the column face, over one beam depth. Mp is `z_xb` times the beam yield stress. An RBS test uses the Z of the full beam, because the cut isn't drawn yet.
+- Panel zone, in blue: |V| / Rn, between the beam flanges. Rn is `r_n_pl_m_aisc`, else `r_n_pl_n_aisc`, else `r_n_el_n_aisc`.
+
+A test with a missing capacity has no zone for it, and the rail says why.
+
+The SVG export stays the undeformed drawing. "Copy SVG at this step" gives one deformed frame, drawn by `renderHLR` from `deformParts()`.
+
+The files in `specimens/responses/` are copies from resslab-hub-data, which is public domain. They are the examples of the tests and of the static build. The dev server reads all the others from the hub data.
+
+#### How a table adds its deformed shape
+
+The dev server, the rail, the chart and the viewer read `DEFORMS` in `deforms.ts`. They have no rule for a table. To add a table (braces, columns, HSS columns, EBF links), do these three things:
+
+1. Write `deform-<table>.ts` with a `DeformTable`: its `responses` (the folders in `resslab-hub-data/<table>/`), its `shape()` and its `autoScale()`. `shape()` gives one `Move` for each member and each rig part that moves, then calls `follow()`: a part with no move takes the move of the part it stands on.
+2. Add one line to `DEFORMS`.
+3. Copy the response files of its example tests to `specimens/responses/<table>/<Folder>/<id>.csv`, and add a test to `deform.test.ts`.
+
+A `Move` is the same for all tables, and the vertex shader does the same math as `movePoint()`:
+
+- `knots`: a bend along the axis. Each knot gives the deflection `w`, the slope `t` and the turn `r` of the cross section. If `r` equals `t`, sections stay square to the axis (bending). If not, the part shears (a panel zone, later an EBF link).
+- `A`, `B`, `split`: two rigid moves, blended along the axis. A pin has its tongue on `B` and its ears on `A`. An actuator has its cylinder on `A` and its rod on `B`, so it gets longer. A pinned link has a linear blend.
+
+A `Zone` is a box with a level (1 is the capacity), a `slot` for its color, a label and the ratio it shows. `ResponseSpec.slot` gives the chart the same color. `deform-connection.ts` is the example to copy.
+
+### The drawing
+
 The output is an SVG line drawing with the hidden lines removed. The SVG can also build itself step by step, as an animation.
 
 Two renderers:
@@ -415,6 +458,8 @@ Files:
 - `specimen.ts`, `specimens/`: a real test as input (the `Specimen` type, the section lookup), and hub records as examples and test data.
 - `hub.ts`: reads a record of the hub test tables as a `Specimen` (`toSpecimen` and one reader for each table).
 - `hub-count.ts`, `hub.test.ts`: read every row of resslab-hub-data and count what we can draw (`node hub-count.ts [folder]`). See "How many hub tests we draw".
+- `deform.ts`: the deformed shape of a test, for all tables: how a part moves (`Move`, `movePoint`), the response files (`readResponse`), the steps (`protocol`). See "Deformed shape of a test".
+- `deforms.ts`, `deform-connection.ts`: the tables that have a deformed shape, and the shape of a beam-to-column test. `deform.test.ts` checks them.
 - `rig.ts`: the test rig parts (reaction blocks, pins, links, actuators, rollers, rig frame members).
 - `steel.ts`: geometry (profiles, copes, plates, clevis, bolts), camera and the painter renderer.
 - `clash.ts`: do two parts go through each other (each part as a few boxes).
@@ -440,8 +485,8 @@ The repo is also the package `@epfl-enac/steel-viz`. It is not on npm. The hub t
 
 It has two entries:
 
-- `@epfl-enac/steel-viz`: the light entry. `generate`, `loadCatalog`, the exact drawing `renderHLR`, the painter `render`, `timeline`, `camera`, `VIEWS`, and the specimen input (`toSpecimen`, `fromHubConnection`, `fromHubBrace`, `fromHubColumn`, `fromHubHssColumn`, `fromHubEbf`). It loads no package. `package.test.ts` checks it. Use it for the loading animation and the SVG drawings.
-- `@epfl-enac/steel-viz/3d`: `createViewer` (the WebGL view). It loads no package either, but it is bigger. Import it with a dynamic `import()`, only on the page that needs it, so it stays out of the main bundle.
+- `@epfl-enac/steel-viz`: the light entry. `generate`, `loadCatalog`, the exact drawing `renderHLR`, the painter `render`, `timeline`, `camera`, `VIEWS`, and the specimen input (`toSpecimen`, `fromHubConnection`, `fromHubBrace`, `fromHubColumn`, `fromHubHssColumn`, `fromHubEbf`). It loads no package. `package.test.ts` checks it. Use it for the loading animation and the SVG drawings. For the deformed shape: `DEFORMS`, `readResponse`, `protocol`, `deformParts`, `movePoint`, `follow`.
+- `@epfl-enac/steel-viz/3d`: `createViewer` (the WebGL view). It loads no package either, but it is bigger. Import it with a dynamic `import()`, only on the page that needs it, so it stays out of the main bundle. `viewer.deform(state)` draws a `DeformState`, and `viewer.deform(null)` gives back the undeformed drawing.
 
 The package has no section table. The hub has the same CSV files (ours are copies of them), so it passes their text to `loadCatalog()`:
 
@@ -494,6 +539,7 @@ At the top of the rail, "Seed / Hub test" picks what to draw. "Hub test" draws a
 - Pick the table, search a test by its id (or the name, for the EBF links), and walk the tests with Prev and Next, or ← and →. Shift ← → turns the view.
 - The rail shows what the reader made of the record (the key fields and the notes), or its error. A row we can't draw stays in the list, and the sheet shows its error.
 - "Paste a record" takes a hub record as JSON, or our own `Specimen`. The browser keeps it.
+- A test with response files gets the "Deformed shape" block: play, a slider over the steps, the scale, a chart of one response with a dot on the step, and the level of each zone. `app/dev-plugin.ts` serves the files read only at `/__dev/hub/<table>/responses/<id>`. A static build has the files of `specimens/responses/` only. In "Compare with main", the right pane stays undeformed.
 - The URL hash keeps the test: `specimen=<table>/<id>`. The seed settings are hidden. "Compare with main" reads the record with the reader of `main`, and says in its pane when `main` can't draw the test.
 
 The controls are in a rail of sections you can fold: test, structure, layout, details, view, animation, good seeds, analysis. A section says how many of its settings are not on their default, and has a button to reset them. The browser keeps which sections are open. The rail uses the EPFL design tokens and CSS, copied in `app/epfl/` (see its README). The dark theme is ours. On a phone, the drawing comes first and the rail under it.

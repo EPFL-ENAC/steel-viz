@@ -1,5 +1,8 @@
 /* The playground on the EPFL tokens (app/epfl/): rem and var(--…) only, flat
    surfaces, borders and no shadows, 2px radius, a 2px focus outline. */
+/* The working zones of a test, in the 3D view and in its chart. Not the red:
+   it is the hovered part. The dark values are in app/epfl/dark.css. */
+:root { --zone-moment: #d97706; --zone-shear: #2563eb; }
 html, body, #app { height: 100%; }
 body {
   margin: 0;
@@ -174,6 +177,25 @@ input[type="range"]:hover::-moz-range-thumb { background: var(--primary); }
 .record summary { cursor: pointer; font-size: var(--fs-xs); color: var(--fg-muted); }
 .record dl { margin-top: var(--space-1); max-height: 20rem; overflow: auto; }
 .paste { font-family: var(--font-mono); font-size: var(--fs-xs); resize: vertical; min-width: 0; }
+
+/* ---- the measured response of the test (Response.vue) */
+.response { display: grid; gap: var(--space-2); min-width: 0; padding-top: var(--space-2); border-top: var(--border-w) solid var(--border); }
+.chart { position: relative; }
+.chart svg { display: block; width: 100%; height: auto; cursor: crosshair; touch-action: none; }
+.chart text { font-size: 0.625rem; fill: var(--fg-muted); font-family: var(--font-mono); }
+.chart .axis { stroke: var(--border); stroke-width: 1; }
+.chart .all { fill: none; stroke: var(--border-strong); stroke-width: 1; }
+.chart .played { fill: none; stroke: var(--series); stroke-width: 2; stroke-linejoin: round; }
+.chart .now { fill: var(--series); stroke: var(--bg); stroke-width: 2; }
+.chart .near { fill: none; stroke: var(--fg); stroke-width: 1.5; }
+.chart-tip { position: absolute; top: 0; right: 0; padding: 0 var(--space-1); background: var(--bg); border: var(--border-w) solid var(--border); font-family: var(--font-mono); font-size: 0.625rem; color: var(--fg); pointer-events: none; }
+.readout { font-family: var(--font-mono); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
+.player { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: var(--space-2); align-items: center; }
+.player input { min-width: 0; width: 100%; }
+.test .zones { grid-template-columns: minmax(0, 1fr) 4rem auto; align-items: center; }
+.test .zones dd { font-variant-numeric: tabular-nums; text-align: right; }
+.test .zones .bar { height: 0.5rem; background: var(--bg-muted); }
+.zones .bar i { display: block; height: 100%; }
 
 /* ---- analysis */
 .status { display: inline-flex; align-items: center; gap: var(--space-1); font-size: var(--fs-xs); font-weight: var(--w-bold); }

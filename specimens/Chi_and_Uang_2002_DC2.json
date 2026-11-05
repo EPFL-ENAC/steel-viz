@@ -18,5 +18,12 @@
   "n_dp": 0,
   "slab": false,
   "reference": "Chi, B., and Uang, C.-M. (2002). “Cyclic response and design recommendations of reduced beam section moment connections with deep columns.” Journal of Structural Engineering, 128(4), 464–473. https://doi.org/10.1061/(ASCE)0733-9445(2002)128:4(464).",
-  "link": "https://doi.org/10.1061/(ASCE)0733-9445(2002)128:4(464)"
+  "link": "https://doi.org/10.1061/(ASCE)0733-9445(2002)128:4(464)",
+  "z_xb": 9520884.184,
+  "f_yb": 344.7379543,
+  "f_yb_mill": "NA",
+  "f_yb_avg": 379.8241715,
+  "r_n_pl_m_aisc": 3891.221266,
+  "r_n_pl_n_aisc": 3092.720555,
+  "r_n_el_n_aisc": 2812.388848
 }

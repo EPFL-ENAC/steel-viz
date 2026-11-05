@@ -76,6 +76,18 @@ The specimen input draws four tables of the hub, each test in its test rig. `nod
 - [x] A specimen input in the playground: paste a hub record, or pick one from a list.
   Done: "Hub test" at the top of the rail. Pick a table, search a test, walk them with ← and →, or paste a record. The rail shows what the reader made of it, or its error.
 
+## Deformed shape
+
+Play the measured response of a hub test in the 3D view. `deform.ts` is the base, each table is one branch on it. The README says how a table adds its shape.
+
+- [x] Beam-to-column tests (`connections`): the shape, the rig, the zones (beam hinge, panel zone), the chart.
+- [ ] Brace tests (`braces`).
+- [ ] Column tests and HSS column tests (`columns`, `hss_columns`).
+- [ ] EBF link tests (`eccentric_braced_frames`). A link shears: use `r` different from `t` in its knots, like the panel zone.
+- [ ] RBS: the hinge at the cut, with Z of the cut section. Today it's at the column face, with Z of the full beam. Needs the RBS cut above.
+- [ ] Doubler plates in the panel zone: the elastic estimate of the distortion uses the column web alone.
+- [ ] `--step` in the CLI, for one deformed frame. The playground has "Copy SVG at this step".
+
 ## Playground
 
 - [x] Compare with main in 3D too, not only in SVG: two views side by side, they turn, zoom and move together.

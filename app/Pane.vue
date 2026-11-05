@@ -10,6 +10,7 @@ import type { RenderOpts } from '../steel.ts';
 import type { Frame, Viewer } from '../webgl.ts';
 import { anim, type Engine } from './engine.ts';
 import { describe, type Tip } from './info.ts';
+import { deformed } from './response.ts';
 import { s, stats, turnTo, type Built } from './state.ts';
 
 const props = defineProps<{
@@ -58,7 +59,15 @@ const labels = computed(() => {
 const two = (gl: boolean) => (s.weights ? s.weights === 'two' : !gl);
 
 const css = (k: string, d: string) => getComputedStyle(document.documentElement).getPropertyValue(k).trim() || d;
-const paint = () => viewer?.setColors({ bg: css('--bg', '#ffffff'), fg: css('--fg', '#212121'), accent: css('--primary', '#ff0000'), rig: css('--fg-muted', '#9e9e9e') });
+const paint = () => viewer?.setColors({ bg: css('--bg', '#ffffff'), fg: css('--fg', '#212121'), accent: css('--primary', '#ff0000'), rig: css('--fg-muted', '#9e9e9e'), zones: [css('--zone-moment', '#d97706'), css('--zone-shear', '#2563eb')] });
+
+// the deformed shape of the test, on the structure the viewer shows. Only the
+// main pane: the base pane stays the undeformed drawing.
+function bend() {
+  if (!props.main || !viewer) return;
+  const d = deformed.value;
+  viewer.deform?.(d && d.r === inViewer ? d.state : null);
+}
 
 // fast: the painter's trick, while the angle moves
 function draw(animate = false, fast = false) {
@@ -73,6 +82,7 @@ function draw(animate = false, fast = false) {
       viewer.show(b.r.parts);
       if (b.fit) viewer.setFrame?.(null); // a new hub test: forget the zoom of the last one
       inViewer = b.r;
+      bend();
     }
     viewer.setWeights(two(true));
     if (!fromViewer || fromViewer[0] !== s.az || fromViewer[1] !== s.el) viewer.view(s.az, s.el);
@@ -102,6 +112,7 @@ watch(() => props.built, (b) => draw(b?.animate), { flush: 'post' });
 watch(() => props.replay, () => draw(true), { flush: 'post' });
 watch(() => [s.weights, s.size, mode.value], () => draw(), { flush: 'post' });
 watch(mode, () => (tip.value = null));
+watch(deformed, bend, { flush: 'post' });
 // a new angle: the fast drawing now, the exact one when it stops moving
 let exact = 0;
 watch(

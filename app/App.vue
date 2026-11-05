@@ -15,6 +15,7 @@ import Section from './Section.vue';
 import Seg from './Seg.vue';
 import Slider from './Slider.vue';
 import { BUILD_KEYS, GROUPS, catalog, dev, params, s, setView, stats, turnTo, type Built } from './state.ts';
+import { shownTest } from './response.ts';
 import { current, setMode } from './tests.ts';
 
 const CONN = (c: ConnType) => CONNS[c].label;
@@ -26,6 +27,7 @@ const note = ref(''); // why the sheet has no drawing: a hub test we can't draw
 function build(animate: boolean) {
   if (s.specimen) return buildTest(animate);
   shownRecord = null;
+  shownTest.value = null;
   note.value = '';
   try {
     const t0 = performance.now();
@@ -45,6 +47,7 @@ function buildTest(animate: boolean) {
   shownRecord = c?.record ?? null;
   error.value = ''; // an error of the seed
   const none = (why: string) => {
+    shownTest.value = null;
     built.value = null;
     note.value = why;
     stats.draw = stats.ms = '';
@@ -54,6 +57,7 @@ function buildTest(animate: boolean) {
   try {
     const t0 = performance.now();
     const r = generate({ specimen: c.spec }, catalog(c.spec.family ?? 'aisc'), s.detail as any);
+    shownTest.value = { r, c };
     built.value = { r, ms: performance.now() - t0, animate, fit };
     note.value = '';
   } catch (e: any) {
