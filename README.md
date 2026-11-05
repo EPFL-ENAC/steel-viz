@@ -104,7 +104,7 @@ node cli.ts --seed 5 --form portal --storeys 2 --bracing chevron --conn welded -
 node cli.ts --seed 5 --form tree --arm-length 0.5,0.9 --arm-height 0.6,1
 ```
 
-A setting can give a mechanism (the status says so), never a clash or a floating part (`params.test.ts`, 25 seeds for each case).
+A setting can give a mechanism (the status says so), never a clash or a floating part (`params-*.test.ts`, 25 seeds for each case).
 
 Parts must not go through each other. A secondary beam is coped (its flanges cut back) where it meets the flanges of its arm, and its plate fits between those flanges. A brace stays above the arms under it on the same face of its column, and is long enough that its two gussets don't touch. `clash.ts` checks this with boxes, and `geometry.test.ts` runs it on every form, 240 structures, and on 72 more with every member in its other shape (`shapeP` 1).
 
