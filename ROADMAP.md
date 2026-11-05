@@ -9,6 +9,11 @@ What we plan to do next. A checked item is done.
 - [ ] Tee chords with the stem up, and the gussets on the stem.
 - [ ] Double angle truss diagonals, unequal angles, single angle braces (the `L` section exists now, for the X bracing).
 - [x] X bracing in a bay: flat bars, rods with a turnbuckle, or single angles bolted where they cross. Tension only in the solver (`xP`, `xKind`, `--bracing x`).
+- [x] Round tube braces (CHS and pipes), on a knife plate or an end cap plate (`roundP`, `--round-tubes`), with our own CHS tables.
+- [ ] Move the round tube tables to RESSLab Hub too, when the hub has one.
+- [ ] Round tube tree columns. Not easy: every joint on a column (beam ends, continuity plates, splices, base plate) needs a flat face. A round column needs new joints for each one (through plates, ring stiffeners).
+- [ ] Round tube truss diagonals.
+- [ ] End cap plates on smaller tubes. Today a cap needs D >= 114 mm (`CAP_MIN_D`), so it is rare. A narrower tab (one row of bolts) would let it go lower.
 - [x] Bolted beam splice and posts.
 - [x] More kinds of beam end connections: clip angles, seated, stiffened seat, tee, stiffened end plate (`CONNS` in `steel.ts`, `connKindsP`, `--conn-kinds`).
 - [x] Skewed arms on trees: 30 or 45 degrees off a column flange, with a skewed end plate or a weld (`skewP`, `--skew`, `skew.ts`).
@@ -29,6 +34,7 @@ What we plan to do next. A checked item is done.
 - [x] Buckling: `alphaCr` of the whole structure, and member checks with buckling (AISC 360-22 E3, F2, H1-1).
 - [ ] Notional loads (small side loads for the frame imperfections, EC3 5.3).
 - [ ] A shear check.
+- [ ] D / t of a round tube (local buckling). Today F8 takes Fy Z for every tube, also the thin ones.
 - [ ] Checks for the channels, double angles and tees: lateral torsional buckling (F2 for a channel, F9 for a tee) and flexural-torsional buckling (E4). Today they take their full plastic moment.
 - [ ] EC3 member checks for the `eu` family. Today the AISC formulas size both.
 - [ ] A lateral brace for the bottom chord of a cantilever truss. Without it, eu tree 19 stays under `alphaCr` 3 (and eu tree 7 with `--shapes 0`).

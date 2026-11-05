@@ -3,8 +3,8 @@
 // ourselves: the AISC table's `a` and `iy` columns are not in mm, the EU one
 // is fine, so the safe path is the same formulas for both.
 
-// I: W, IPE, HE. RHS: square tube. ROD: round bar. CHS: round tube (no table
-// has one, only a specimen gives it). C: channel. 2L: two angles back to back,
+// I: W, IPE, HE. RHS: square tube. ROD: round bar. CHS: round tube (round
+// HSS and pipes in aisc). C: channel. 2L: two angles back to back,
 // ANGLE_GAP apart (equal legs in the tables). T: a tee, half an I.
 // L: one equal angle, FB: a flat bar. Both sit where the +v angle of a 2L
 // is, their back on v = ANGLE_GAP / 2: a plate in the middle (gusset_lap)
@@ -34,12 +34,13 @@ export const ANGLE_GAP = 12;
 // channels, angles (double angles), tees: the shapes some braces,
 // secondaries and truss chords get (see shapeP in generate.ts).
 // flats, singles (one angle), rods: the X braces.
+// pipes: the round tubes of some braces (see roundP in generate.ts).
 // all: every I section and tube of the table, with no filter (a real
 // specimen can use a W36 or a rectangular tube).
 export type Family = 'aisc' | 'eu';
 export type Catalog = {
   family: Family; beams: Section[]; columns: Section[]; tubes: Section[]; rods: Section[];
-  channels: Section[]; angles: Section[]; tees: Section[]; flats: Section[]; singles: Section[]; all: Section[];
+  channels: Section[]; angles: Section[]; tees: Section[]; flats: Section[]; singles: Section[]; pipes: Section[]; all: Section[];
 };
 
 export function iSection(id: string, d: number, bf: number, tf: number, tw: number): Section {
@@ -237,10 +238,10 @@ export function parseCsv(text: string): Record<string, string>[] {
 
 const byArea = (a: Section, b: Section) => a.A - b.A;
 
-// i: the I-section table, hss: the tube table, channels and angles: the
-// shape tables, all raw CSV text. Without the shape tables (an older caller),
-// the channels, angles and tees lists are empty.
-export function loadCatalog(family: Family, i: string, hss: string, channels = '', angles = ''): Catalog {
+// i: the I-section table, hss: the tube table, channels, angles and pipes:
+// the shape tables, all raw CSV text. Without the shape tables (an older
+// caller, the hub), the channels, angles and pipes lists are empty.
+export function loadCatalog(family: Family, i: string, hss: string, channels = '', angles = '', pipes = ''): Catalog {
   const allShapes = parseCsv(i)
     .filter((r) => (family === 'aisc' ? /^W\d/.test(r.id) : /^(IPE|HE) /.test(r.id)))
     .map((r) => iSection(r.id, +r.d, +r.bf, +r.tf, +r.tw))
@@ -262,6 +263,9 @@ export function loadCatalog(family: Family, i: string, hss: string, channels = '
     flats: FLATS[family].map(([id, b, t]) => flatBar(id, b, t)).sort(byArea),
     // equal angles, L2 to L6 and L 50 to L 150: a single X brace
     singles: (angles ? parseCsv(angles) : []).filter((r) => r.d === r.b && +r.d >= 50 && +r.d <= 155).map((r) => singleAngle(r.id, +r.d, +r.t)).sort(byArea),
+    // round tubes from 60 to 300 mm, like the square ones. Not in `all`: a
+    // specimen finds its round tube by its sizes, not in a table.
+    pipes: (pipes ? parseCsv(pipes) : []).map((r) => chsSection(r.id, +r.d, +r.t)).filter((s) => s.d >= 60 && s.d <= 300).sort(byArea),
     all: [...allShapes, ...allTubes],
   };
 }

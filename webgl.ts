@@ -11,7 +11,9 @@
 // come from a second pass, with the same rule as hlr.ts: the depth and the
 // part of every pixel go to a texture, and a screen pass draws a thick line
 // on the near side of a jump in depth bigger than DEEP, or of any jump to
-// another part behind.
+// another part behind. With one weight, only the round parts (rods, round
+// tubes) get it, as thin lines: their faces have no long edges, so without it
+// only their ends show.
 import { add, cross, dot, mul, norm, sub, type V } from './vec.ts';
 import { BOLT_MS, buildEnd, camera, timeline, type Part } from './steel.ts';
 import { triangles } from './triangles.ts';
@@ -21,6 +23,9 @@ const R = 17; // bolt head, corner to centre, mm
 const DEEP = 50; // mm: a jump in depth bigger than this makes an outline
 const THIN = 1; // px
 const THICK = 2.25; // px
+const ONE = 1.6; // px, the lines with one weight
+// a rod or a round tube: its long sides have no line of their own
+const round = (p: Part) => p.info?.sec?.kind === 'ROD' || p.info?.sec?.kind === 'CHS';
 
 // rig: the lines of the test rig (default: half way between fg and bg)
 export type Colors = { bg: string; fg: string; accent: string; rig?: string };
@@ -138,7 +143,7 @@ void main() {
 const OUTLINE_FS = `${TOP}
 uniform sampler2D tDepth, tId;
 uniform vec2 texel;
-uniform float deep, touch, width;
+uniform float deep, touch, width, only;
 in vec2 vUv;
 out vec4 o;
 float D(vec2 d) { return texture(tDepth, vUv + d * texel).r; }
@@ -147,7 +152,9 @@ void main() {
   float c = D(vec2(0.0));
   if (c >= 1.0) discard; // background
   vec3 id = I(vec2(0.0));
-  bool bolt = id.b > 0.5; // a bolt head gets thin lines only
+  bool bolt = id.b > 0.75; // a bolt head gets thin lines only
+  // with one weight (only = 1), the round parts (blue at 0.5) alone
+  if (only > 0.5 && abs(id.b - 0.5) > 0.25) discard;
   float hit = 0.0;
   for (int k = 1; k <= 12; k++) {
     float r = float(k);
@@ -252,7 +259,7 @@ export function createViewer(
   // X, Y, Z: right, up and toward the eye, as three.js lookAt() made them.
   const cam = { left: -1, right: 1, top: 1, bottom: -1, near: 1, far: 10, eye: [0, 0, 0] as V, X: [1, 0, 0] as V, Y: [0, 1, 0] as V, Z: [0, 0, 1] as V };
   // what the outline and down passes need
-  let [deep, touch, outWidth] = [0, 0, 2];
+  let [deep, touch, outWidth, thinWidth] = [0, 0, 2, 1];
   let texel: [number, number] = [1, 1];
   let px: [number, number] = [1, 1];
 
@@ -461,7 +468,8 @@ export function createViewer(
     gl.disable(gl.BLEND);
     gl.enable(gl.DEPTH_TEST);
     gl.depthMask(true);
-    if (two) {
+    const outlines = two || pieces.some((p) => p.visible && p.id[2] === 0.5);
+    if (outlines) {
       // depth and part ids, faces only
       bind(rt);
       gl.clearColor(0, 0, 0, 1);
@@ -478,7 +486,8 @@ export function createViewer(
       gl.uniform2f(outlineP.u.texel, ...texel);
       gl.uniform1f(outlineP.u.deep, deep);
       gl.uniform1f(outlineP.u.touch, touch);
-      gl.uniform1f(outlineP.u.width, outWidth);
+      gl.uniform1f(outlineP.u.width, two ? outWidth : thinWidth);
+      gl.uniform1f(outlineP.u.only, two ? 0 : 1);
       gl.bindVertexArray(null);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       gl.enable(gl.DEPTH_TEST);
@@ -494,7 +503,7 @@ export function createViewer(
     fills(M, false);
     gl.disable(gl.POLYGON_OFFSET_FILL);
     lines(M);
-    if (two) {
+    if (outlines) {
       gl.disable(gl.DEPTH_TEST);
       gl.enable(gl.BLEND);
       gl.useProgram(downP.p);
@@ -530,6 +539,7 @@ export function createViewer(
     setSize(lt, rw, rh);
     texel = [1 / rw, 1 / rh];
     outWidth = THICK * pr * ss;
+    thinWidth = ONE * pr * ss;
     px = [1 / (w * pr), 1 / (h * pr)];
     if (fitted && pieces.length) reset();
     else place();
@@ -610,8 +620,9 @@ export function createViewer(
       const p: Piece = {
         part, base, per: part.dots.length ? heads / part.dots.length : 0,
         fill: fillBuf(tri), lines: seg.length ? lineBuf(seg) : undefined,
-        // blue marks the bolts: a head (13 mm high) gets no outline
-        id: [((pi + 1) & 255) / 255, ((pi + 1) >> 8) / 255, part.kind === 'bolts' ? 1 : 0],
+        // blue marks the bolts (a head, 13 mm high, gets no outline) and the
+        // round parts (outlined with one weight too)
+        id: [((pi + 1) & 255) / 255, ((pi + 1) >> 8) / 255, part.kind === 'bolts' ? 1 : round(part) ? 0.5 : 0],
         off: [0, 0, 0], visible: true, color: fg, width: THIN,
       };
       lineStyle(p);
@@ -748,7 +759,7 @@ export function createViewer(
   function lineStyle(p: Piece) {
     const on = p.part === hovered;
     p.color = on || p.part.accent ? accent : p.part.kind === 'rig' ? rig : fg;
-    p.width = (two ? THIN : 1.6) * (on ? 2 : 1);
+    p.width = (two ? THIN : ONE) * (on ? 2 : 1);
   }
   const setHover = (part: Part | null, x = 0, y = 0) => {
     if (part !== hovered) {

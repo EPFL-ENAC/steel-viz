@@ -17,7 +17,7 @@ It builds a steel structure from a seed, in one of three forms:
 
 Each bay storey gets its own bracing: none (moment connections), knee braces at both ends, a chevron (two braces up to the middle of the beam), one diagonal, or an X (two diagonals that cross, see "X bracing"). `--form` picks the form (`mix` lets the seed pick it, a tree seed gives the same tree in both).
 
-A small frame solver checks that the structure stands up. If it does not, the generator adds a brace or changes a pinned connection to a moment connection. Then it sizes each member from the AISC or EU section tables in `sections/`. The I and tube tables are copies of RESSLab Hub (from `frontend/src/assets/connection/` and `frontend/src/assets/hss/` in the hub). Copy them again when the hub changes them. The channel and angle tables are ours until the hub has them. `sections/README.md` says where they come from and how to make them again. The tees are not in a table: a tee is an I cut in two (`W16X50` gives `WT8X25`, `IPE 300` gives `1/2 IPE 300`).
+A small frame solver checks that the structure stands up. If it does not, the generator adds a brace or changes a pinned connection to a moment connection. Then it sizes each member from the AISC or EU section tables in `sections/`. The I and tube tables are copies of RESSLab Hub (from `frontend/src/assets/connection/` and `frontend/src/assets/hss/` in the hub). Copy them again when the hub changes them. The channel, angle and round tube tables are ours until the hub has them. `sections/README.md` says where they come from and how to make them again. The tees are not in a table: a tee is an I cut in two (`W16X50` gives `WT8X25`, `IPE 300` gives `1/2 IPE 300`).
 
 Some members get another shape, from a draw of their own. `shapeP` gives the chance (0.35 by default, `--shapes` in the CLI, "Channels, angles, tees" in the playground):
 
@@ -29,12 +29,19 @@ Some members get another shape, from a draw of their own. `shapeP` gives the cha
 
 The sizing rules are the same for both shapes: L / r under 200 for a brace, a secondary fits between the flanges of its arm, the same depth limits for a chord. A tee chord gets only one continuity plate in the column and no stiffener at the truss nodes, because it has no bottom flange. Each draw is seeded from the member id, so it takes nothing from the other draws. With `--shapes 0`, a seed gives only I, tube and rod members, as before these shapes.
 
+Some arm braces are round tubes (CHS and pipes, 60 to 300 mm), from a draw of their own. `roundP` gives the chance (0.3 by default, `--round-tubes` in the CLI, "Round tube braces" in the playground). It is one draw per arm, on its own stream, keyed by the arm, so with `roundP` 0 a seed gives the same parts as before. A double angle comes first: a round tube only takes the place of a square tube. A round tube brace has one of two ends, from the same draw:
+
+- Slotted tube on a knife plate (`gusset`): the same end as a square tube. The knife plate goes into a slot cut in the tube.
+- End cap plate (`gusset_cap`): a round plate welded on the tube end, and a tab welded on the cap, bolted on the gusset with the same 4 bolts. No slot. Only on a tube of 114 mm or more: on a smaller one, the tab (wide enough for the bolts) would be much wider than the tube. Braces are sized from their forces and are mostly 60 to 90 mm, so this end is rare.
+
+A round tube has 12 sides in the drawings (a rod has 16). With 12, no line runs along the tube, and the width changes by 3 % only with the view. Its long sides have no line of their own: the outline comes from the renderer (`hlr.ts`, and the outline pass of the 3D view, also with one weight).
+
 The sizing works in two steps, with public formulas from EC3 (Eurocode 3) and AISC 360-22:
 
 1. The whole structure: the solver finds the elastic critical load factor `alphaCr`. It is how many times the load the structure takes before it buckles as a whole (a buckling analysis with the geometric stiffness, in `solver.ts`). The moments are then multiplied by `1 / (1 - 1/alphaCr)`, for the sway effects (EC3 5.2.2). This rule needs `alphaCr >= 3`. If it is lower, the member with the most strain energy in the buckling mode gets a heavier section, and the solver runs again.
 2. Each member, in `checks.ts`: flexural buckling (AISC E3), lateral torsional buckling of I sections (F2), weak axis bending (F6), and the two together with the axial force (H1-1). The buckling length is the member length, because step 1 already has the sway. The ratio must stay under 0.6. There are no AISC phi factors, the 0.6 is the margin.
 
-Not checked: shear, local buckling of thin plates (E7, F3), torsional buckling (E4), and notional loads (the small side loads for the frame imperfections). The channels, double angles and tees take their full plastic moment: no lateral torsional buckling for them (F2 for a channel, F9 for a tee), and E4 is the check that matters most for a double angle or a tee. Cb is 1, which is on the safe side for cantilevers. The same AISC formulas size the EU sections too. A few trees with a cantilever truss stay under `alphaCr` 3 (eu tree 19 of the 240 structures of the tests, and also eu tree 7 with `shapeP` 0): the bottom chord sways out of the truss plane, and nothing braces it sideways. The log says it.
+Not checked: shear, local buckling of thin plates (E7, F3), torsional buckling (E4), and notional loads (the small side loads for the frame imperfections). The channels, double angles and tees take their full plastic moment: no lateral torsional buckling for them (F2 for a channel, F9 for a tee), and E4 is the check that matters most for a double angle or a tee. A round tube takes Fy Z too (F8, no lateral torsional buckling), but D / t is not checked: F8 takes Fy Z only for a compact tube, D / t up to 0.07 E / Fy (about 40), and 15 AISC and 5 EU tubes of the tables are thinner. Cb is 1, which is on the safe side for cantilevers. The same AISC formulas size the EU sections too. A few trees with a cantilever truss stay under `alphaCr` 3 (eu tree 19 of the 240 structures of the tests, and also eu tree 7 with `shapeP` 0): the bottom chord sways out of the truss plane, and nothing braces it sideways. The log says it.
 
 Then come the small details, from a random draw of their own, so a seed keeps the same structure:
 
@@ -157,6 +164,7 @@ Arms, height and load are not the only knobs. These `Params` in `generate.ts` ch
 | `colSpliceP` | 0.6 | `--col-splice` | Details | the chance of a column splice |
 | `connKindsP` | 0.35 | `--conn-kinds` | Details, more connection kinds | the chance that a beam end gets one of the newer kinds (see "Beam end connections") |
 | `skewP` | 0.3 | `--skew` | Details, skewed arms | the chance that a tree arm leaves its column at 30 or 45 degrees (see "Skewed arms"). 0 gives the trees of before. |
+| `roundP` | 0.3 | `--round-tubes` | Details, round tube braces | the chance that the braces of an arm are round tubes |
 
 ```sh
 node cli.ts --seed 5 --form portal --storeys 2 --bracing chevron --conn welded --span 1.4
@@ -165,7 +173,7 @@ node cli.ts --seed 5 --form tree --arm-length 0.5,0.9 --arm-height 0.6,1
 
 A setting can give a mechanism (the status says so), never a clash or a floating part (`params-*.test.ts`, 25 seeds for each case).
 
-Parts must not go through each other. A secondary beam is coped (its flanges cut back) where it meets the flanges of its arm, and its plate fits between those flanges. A brace stays above the arms under it on the same face of its column, and is long enough that its two gussets don't touch. `clash.ts` checks this with boxes, and `geometry.test.ts` runs it on every form, 240 structures, and on 72 more with every member in its other shape (`shapeP` 1).
+Parts must not go through each other. A secondary beam is coped (its flanges cut back) where it meets the flanges of its arm, and its plate fits between those flanges. A brace stays above the arms under it on the same face of its column, and is long enough that its two gussets don't touch. `clash.ts` checks this with boxes, and `geometry.test.ts` runs it on every form, 240 structures, on 72 more with every member in its other shape (`shapeP` 1), and on 72 more with round tube braces (`roundP` 1).
 
 It can also draw a real test of RESSLab Hub instead of a seed: a specimen. For now it draws four kinds of test, each one in its test rig:
 
@@ -358,7 +366,7 @@ Two renderers:
 - `hlr.ts` (the default): exact hidden lines, in plain TypeScript (no package). It puts the triangles of all faces in a grid on the screen, and cuts out of each edge the pieces that are behind a triangle. It takes about 25 to 30 ms for one structure (about 1550 faces).
 - `render` in `steel.ts` (`--painter`): the painter's trick, ported from `sculpture_render.py` (resslab-hub, branch `feat/logo-aisc`). About 5 ms, but some lines are wrong. The playground uses it only while you drag the view in an SVG mode.
 
-The playground also has a 3D view (`webgl.ts`, the "3D" choice, on by default). It is for looking at the structure, not for export. It runs in plain WebGL2, with no three.js, and builds the geometry once per structure, so you can turn it, move it and zoom with every bolt shown, at the frame rate of the screen. Faces are filled with the background and the GPU depth buffer hides the hidden lines. Edges are thin lines: each segment is a small quad with round ends, drawn as instances and sized in the vertex shader (as three's `LineSegments2` did before). A second pass gives the thick outlines with the same rule as `hlr.ts` (a jump in depth over 50 mm, or another part behind), read from a depth and part-id texture. That pass works per pixel, so it runs at about 3 samples per CSS px (2x on a 1x screen) and is averaged down, or the outlines would show stair steps. Bolt heads get thin lines only. The build animation plays in 3D too, on the same `timeline()`. The lines are close to the exact drawing but not the same (no gaps, no merged lines). "Copy SVG" always gives the exact drawing from `hlr.ts`, for the current view.
+The playground also has a 3D view (`webgl.ts`, the "3D" choice, on by default). It is for looking at the structure, not for export. It runs in plain WebGL2, with no three.js, and builds the geometry once per structure, so you can turn it, move it and zoom with every bolt shown, at the frame rate of the screen. Faces are filled with the background and the GPU depth buffer hides the hidden lines. Edges are thin lines: each segment is a small quad with round ends, drawn as instances and sized in the vertex shader (as three's `LineSegments2` did before). A second pass gives the thick outlines with the same rule as `hlr.ts` (a jump in depth over 50 mm, or another part behind), read from a depth and part-id texture. With one weight, this pass runs only on the rods and the round tubes, at the thin width: their long sides have no line of their own. That pass works per pixel, so it runs at about 3 samples per CSS px (2x on a 1x screen) and is averaged down, or the outlines would show stair steps. Bolt heads get thin lines only. The build animation plays in 3D too, on the same `timeline()`. The lines are close to the exact drawing but not the same (no gaps, no merged lines). "Copy SVG" always gives the exact drawing from `hlr.ts`, for the current view.
 
 The "3D / SVG / Both" switch picks the viewer. "SVG" shows the exact drawing, at full size or at a px size. "Both" puts the 3D view on the left and the exact drawing on the right, with the same view. When you turn one, the other follows. While you drag, the SVG uses the fast painter drawing, then the exact one when you let go.
 
@@ -397,7 +405,7 @@ pnpm build                                            # the playground as a stat
 Files:
 
 - `vec.ts`: vector helpers.
-- `sections.ts`: section properties (I, tube, rod, round tube, channel, double angle, tee) from the CSV tables. The rods and the tees are made in code. No table has a round tube (CHS): only a specimen gives one.
+- `sections.ts`: section properties (I, tube, rod, round tube, channel, double angle, tee) from the CSV tables. The rods and the tees are made in code. The round tubes (CHS and pipes) are in `Catalog.pipes`, not in `all`, so a specimen finds its section by name as before.
 - `sections/`, `tables.ts`: the CSV tables (see `sections/README.md`), and how Node reads them.
 - `solver.ts`: 3D frame solver (6 DOF per node, pinned ends, finds mechanisms), and the buckling analysis (`alphaCr`).
 - `checks.ts`: the member checks (AISC 360-22 E3, F2, F6, H1-1).
@@ -450,7 +458,7 @@ const { svg } = render(parts, { az, el, animate: true }); // an SVG that builds 
 
 For the EU family, pass `european-sections.csv` and `hss-european-sections.csv` with `'eu'`. A test of the hub goes through `toSpecimen(record)` (or `fromHubConnection`, `fromHubBrace`, `fromHubColumn`, `fromHubHssColumn`, `fromHubEbf`), then `generate({ specimen }, catalog)`.
 
-The hub has no channel or angle table, so this catalog has no channels and no double angles: the braces and the secondary beams keep their tube and I sections. The tees still come, because they are made from the I table. To get the same drawing as here, also pass the channel and angle CSV files of `sections/` (`loadCatalog('aisc', iCsv, hssCsv, channelCsv, angleCsv)`). For no other shape at all, pass `shapeP: 0` to `generate()`.
+The hub has no channel, angle or round tube table, so this catalog has no channels, no double angles and no round tubes: the braces and the secondary beams keep their tube and I sections. The tees still come, because they are made from the I table. To get the same drawing as here, also pass the channel, angle and round tube CSV files of `sections/` (`loadCatalog('aisc', iCsv, hssCsv, channelCsv, angleCsv, chsCsv)`). For no other shape at all, pass `shapeP: 0` and `roundP: 0` to `generate()`.
 
 A tree of today can have skewed arms (`skewP`, 0.3 by default), and a bay an X (`xP`, 0.3 by default). The logo is an exported SVG, so it doesn't change. To export the same seed again with the same look, pass `skewP: 0` and `xP: 0`.
 

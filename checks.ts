@@ -2,7 +2,8 @@
 // generate.ts keeps its own margin, LIMIT):
 // - E3: flexural buckling of a member in compression, about both axes.
 // - F2: lateral torsional buckling of an I section bent about its strong axis
-//   (doubly symmetric, compact). Tubes and rods: no LTB, Mn = Fy Z (F7, F11).
+//   (doubly symmetric, compact). Tubes and rods: no LTB, Mn = Fy Z (F7, F8
+//   for a round tube, F11).
 // - F6: weak axis bending of an I section, Mn = Fy Z.
 // - H1-1: axial force and bending together.
 //
@@ -13,7 +14,8 @@
 //
 // Not checked: shear, local buckling of slender plates (E7, F3), torsional
 // and flexural-torsional buckling (E4), Cb > 1 (Cb = 1 is the safe side for
-// cantilevers and unbraced spans).
+// cantilevers and unbraced spans), D / t of a round tube (F8 takes Fy Z only
+// for a compact one, D / t up to 0.07 E / Fy, about 40).
 import { E } from './solver.ts';
 import type { Section } from './sections.ts';
 

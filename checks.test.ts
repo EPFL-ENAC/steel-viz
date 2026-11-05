@@ -13,6 +13,16 @@ const ipe = iSection('IPE 300', 300, 150, 10.7, 7.1);
 const aisc = loadCatalog('aisc', ...readTables('aisc'));
 const W = (id: string) => aisc.all.find((s) => s.id === id)!;
 
+// a round tube of the table: E3 with r = sqrt(I / A), and Fy Z (F8, no LTB)
+test('E3 and F8 on a round tube', () => {
+  const s = aisc.pipes.find((x) => x.id === 'Pipe4STD')!;
+  const r = Math.sqrt(s.Is / s.A);
+  const L = 3000;
+  const Fe = (Math.PI ** 2 * E) / (L / r) ** 2;
+  near(compression(s, L, fy), 0.658 ** (fy / Fe) * fy * s.A);
+  near(strongMoment(s, 10000, fy), fy * s.Ws);
+});
+
 test('E3: a very short member reaches Fy A', () => {
   near(compression(ipe, 10, fy), fy * ipe.A);
 });
