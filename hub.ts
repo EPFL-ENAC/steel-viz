@@ -309,16 +309,29 @@ export function fromHubEbf(rec: HubRecord): LinkSpecimen {
 }
 
 // ------------------------------------------------------------- any record
+// The hub tables we read: [table, a field only this table has, its reader].
+// The table names are the keys of HUB_TABLES (tables.ts).
+export const READERS: [string, string, (rec: HubRecord) => Specimen][] = [
+  ['connections', 'specimen_type', fromHubConnection],
+  ['braces', 'brace_angle', fromHubBrace],
+  ['columns', 'axis_of_bending', fromHubColumn],
+  ['hss_columns', 'test_configuration', fromHubHssColumn],
+  ['eccentric_braced_frames', 'link_loc', fromHubEbf],
+];
+
+// The hub table of a record, '' for our own Specimen (or not an object).
+export function hubTable(json: unknown): string {
+  if (!json || typeof json !== 'object' || Array.isArray(json)) return '';
+  return READERS.find(([, field]) => field in json)?.[0] ?? '';
+}
+
 // a JSON object: our own Specimen, or a hub record (the reader is picked from
 // a field only its table has)
 export function toSpecimen(json: unknown): Specimen {
   if (!json || typeof json !== 'object' || Array.isArray(json)) throw new Error('a specimen must be a JSON object');
   const o = json as HubRecord;
-  if ('specimen_type' in o) return fromHubConnection(o);
-  if ('brace_angle' in o) return fromHubBrace(o);
-  if ('axis_of_bending' in o) return fromHubColumn(o);
-  if ('test_configuration' in o) return fromHubHssColumn(o);
-  if ('link_loc' in o) return fromHubEbf(o);
+  const reader = READERS.find(([, field]) => field in o);
+  if (reader) return reader[2](o);
   if (o.test === 'brace') return o as BraceSpecimen;
   if (o.test === 'column') return o as ColumnSpecimen;
   if (o.test === 'link') return o as LinkSpecimen;

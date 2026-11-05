@@ -1,13 +1,13 @@
 // Real specimens: the two hub records in specimens/, and hand-written ones.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { loadCatalog, type Family } from './sections.ts';
 import { floating, generate } from './generate.ts';
 import { clashes } from './clash.ts';
-import { readTables } from './tables.ts';
+import { HUB_TABLES, readTables } from './tables.ts';
 import { findSection, type ConnSpecimen } from './specimen.ts';
-import { fromHubConnection, toSpecimen } from './hub.ts';
+import { READERS, fromHubConnection, hubTable, toSpecimen } from './hub.ts';
 import { geo, memberFaces } from './steel.ts';
 
 const cats = { aisc: loadCatalog('aisc', ...readTables('aisc')), eu: loadCatalog('eu', ...readTables('eu')) };
@@ -118,6 +118,18 @@ test('a hub record that we cannot draw throws a clear error', () => {
   assert.throws(() => fromHubConnection({ ...base, h_c: 'NR' }), /h_c is missing/);
   assert.throws(() => toSpecimen([]), /JSON object/);
   assert.throws(() => toSpecimen({ foo: 1 }), /not a specimen/);
+});
+
+// the playground groups the files of specimens/ by hubTable(), and asks the
+// dev server for the tables of HUB_TABLES: the names must be the same
+test('hubTable: a table for every file of specimens/, the names of HUB_TABLES', () => {
+  assert.deepEqual(READERS.map(([t]) => t), Object.keys(HUB_TABLES));
+  for (const f of readdirSync(new URL('./specimens/', import.meta.url)).filter((f) => f.endsWith('.json')))
+    assert.ok(Object.hasOwn(HUB_TABLES, hubTable(record(f.slice(0, -5)))), `${f}: no hub table`);
+  assert.equal(hubTable({ column: 'W14X90', beams: [] }), '');
+  assert.equal(hubTable({ test: 'brace', section: 'W8X35' }), '');
+  assert.equal(hubTable([]), '');
+  assert.equal(hubTable(null), '');
 });
 
 test('findSection: table names written the hub way, built-up names, errors', () => {

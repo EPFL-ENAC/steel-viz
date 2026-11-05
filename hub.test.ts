@@ -1,12 +1,12 @@
-// Every row of the RESSLab Hub tables (HUB_TABLES in hub-count.ts): a row
+// Every row of the RESSLab Hub tables (HUB_TABLES in tables.ts): a row
 // that reads draws with no clash and no floating part, a row that doesn't
 // read throws one of the two known errors (errorKind). It needs a copy of
 // resslab-hub-data next to the repo, so it is skipped in CI.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { loadCatalog } from './sections.ts';
-import { readTables } from './tables.ts';
-import { HUB_TABLES, countTable, findHubData } from './hub-count.ts';
+import { HUB_TABLES, findHubData, readTables } from './tables.ts';
+import { countTable } from './hub-count.ts';
 
 const dir = findHubData();
 const cat = loadCatalog('aisc', ...readTables('aisc'));
