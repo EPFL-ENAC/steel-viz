@@ -12,4 +12,5 @@ noClash([
   ['all braces, secondaries, posts, splices', { braceP: 1, secondaryP: 1, postP: 1, beamSpliceP: 1 }],
   ['skewed arms', { skewP: 1, form: 'tree' }],
   ['round tube braces', { roundP: 1, braceP: 1 }],
+  ['short arm braces', { form: 'tree', braceP: 1, shortBraceP: 1 }],
 ]);

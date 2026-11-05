@@ -55,6 +55,10 @@ export type Params = {
   // double angles from shapeP), from a stream of its own. 0: no round tube,
   // so the same parts as before round tubes.
   roundP: number;
+  // the chance that a tree arm with no room for a full brace gets a short one
+  // (shortBrace), from a stream of its own. 0: no short brace, so the same
+  // parts as before short braces.
+  shortBraceP: number;
   // The look of the structure. The seed still takes the same draws, then a
   // value set here replaces what it drew: at their default, every seed gives
   // the same structure as before these settings.
@@ -76,7 +80,7 @@ export type Params = {
   specimen?: Specimen; // a real test: seed, form, arms, height, braceP and secondaryP are not used
 };
 export const DEFAULTS: Params = {
-  seed: 1, arms: 8, height: 2500, load: 100, fy: 345, braceP: 0.3, secondaryP: 0.35, postP: 0.3, beamSpliceP: 0.3, connKindsP: 0.35, shapeP: 0.35, skewP: 0.3, gableP: 0.35, roundP: 0.3,
+  seed: 1, arms: 8, height: 2500, load: 100, fy: 345, braceP: 0.3, secondaryP: 0.35, postP: 0.3, beamSpliceP: 0.3, connKindsP: 0.35, shapeP: 0.35, skewP: 0.3, gableP: 0.35, roundP: 0.3, shortBraceP: 0.5,
   storeys: 0, spanK: 1, bracing: 'auto', xP: 0.3, xKind: 'auto', armL: [0.3, 0.7], armZ: [0.35, 0.95], conn: 'auto', trussK: 1, rodP: 0.4, colSpliceP: 0.6,
   seg: 400, form: 'mix',
 };
@@ -128,7 +132,7 @@ function braceList(p: Params, cat: Catalog, a: Arm): { list: Section[]; cap: boo
 // the depth of the arm.
 // x: one of the two diagonals of an X (see addX). cap: a round tube brace
 // gets end cap plates (see braceList).
-type Brace = { a: number; zb: number; sec: Section; end: 0 | 1; x?: XKind; cap?: boolean };
+type Brace = { a: number; zb: number; sec: Section; end: 0 | 1; x?: XKind; cap?: boolean; short?: boolean };
 // An arm starts on column `col`. A bay beam also ends on column `to`.
 // splice: a bolted splice in a bay beam, that far along it (geometry only).
 // face and skew: a skewed arm (skewArms) leaves the column face `face` (0 or
@@ -251,7 +255,7 @@ function tree(p: Params, cat: Catalog, rng: () => number): Structure {
   }
   arms.sort((a, b) => a.z - b.z);
   arms.forEach((a, i) => (a.id = `arm${i + 1}`));
-  for (const a of arms) if (rng() < p.braceP) addBrace(a, arms, cat);
+  for (const a of arms) if (rng() < p.braceP) addBrace(a, arms, cat) || shortBrace(p, a, arms, cat);
   return { form: 'tree', H, col: mid(cat.columns), cols: [{ x: [0, 0, 0] }], arms, secs: secondaries(p, cat, rng, arms) };
 }
 
@@ -360,6 +364,34 @@ function addBrace(a: Arm, arms: Arm[], cat: Catalog, end: 0 | 1 = 0, reach = 0.5
   if (d < BRACE_MIN) return false;
   a.braces.push({ a: r50(d), zb: a.z - a.sec.d - d, sec: mid(cat.tubes), end });
   return true;
+}
+
+// A short knee brace, for a tree arm with no room for a full one: at the
+// default height, 1 m never fits. Its gussets are small (gusset_small), and it
+// goes closer to the floor and to the arm below. One draw per arm, on a stream
+// of its own. The column and the arm are not sized yet, so the rule takes the
+// limits that size() keeps while the arm has a short brace (depth, col, tubeD).
+const SHORT = { floor: 500, gap: 450, depth: 310, col: 400, tubeD: 150, reach: 0.6, tube: 250, margin: 25 };
+const hasShortBrace = (a: Arm) => a.braces.some((b) => b.short);
+function shortBrace(p: Params, a: Arm, arms: Arm[], cat: Catalog): boolean {
+  if (p.shortBraceP <= 0 || mulberry32(p.seed * 25165843 + fnv1a(`${a.id}-short`))() >= p.shortBraceP) return false;
+  const bearing = faceOf(a);
+  const below = faces(arms).filter((f) => f.a !== a && f.col === a.col && f.bearing === bearing && f.z < a.z).map((f) => f.z + SHORT.gap);
+  const dz = a.z - SHORT.depth - Math.max(SHORT.floor, ...below);
+  const face = (bearing % 180 === 0 ? SHORT.col / 2 : mid(cat.columns).tw / 2) + SHORT.margin;
+  const floor50 = (x: number) => Math.floor(x / 50) * 50;
+  const reach = floor50(SHORT.reach * a.L);
+  // 45 degrees if the tube is long enough, or else flatter, down to about 30
+  for (const k of [1, 1.25, 1.5, 1.75]) {
+    const along = Math.min(reach, floor50(k * dz));
+    const d = k === 1 ? along : dz;
+    if (along <= 0 || d <= 0 || d / along > 1.01 || d / along < 0.55) continue;
+    const L = Math.hypot(along, d);
+    if (L - ((face + SETBACK.gusset_small) * L) / along - (SETBACK.gusset_small * L) / d < SHORT.tube) continue;
+    a.braces.push({ a: along, zb: a.z - SHORT.depth - d, sec: mid(cat.tubes), end: 0, short: true });
+    return true;
+  }
+  return false;
 }
 
 // ------------------------------------------------------------- trusses and rods
@@ -500,7 +532,7 @@ function addTrussesAndRods(st: Structure, p: Params, cat: Catalog, rng: () => nu
     if (r >= P || (a.to === undefined && a.L < 1400) || a.gable) continue;
     const tr = trussFor(st, a, cat, rng);
     // drawn as for a square arm, so the next arms keep their draws
-    if (!tr || a.skew) continue;
+    if (!tr || a.skew || hasShortBrace(a)) continue;
     a.truss = tr;
     a.braces = [];
     added = true;
@@ -1039,7 +1071,7 @@ function size(st: Structure, m: Model, res: Forces[], cat: Catalog, p: Params, c
   };
   for (const a of st.arms) {
     // a top chord keeps the clear height of its truss
-    a.sec = choose(cat.beams, a.id, a.sec, (s) => s.d >= 200 && (!a.truss || a.truss.D - s.d >= a.truss.hMin));
+    a.sec = choose(cat.beams, a.id, a.sec, (s) => s.d >= 200 && (!a.truss || a.truss.D - s.d >= a.truss.hMin) && (!hasShortBrace(a) || s.d <= SHORT.depth));
     const tr = a.truss;
     if (tr) {
       const chords = shaped(p, chordId(a)) ? orOld(cat.tees, cat.beams) : cat.beams;
@@ -1062,7 +1094,7 @@ function size(st: Structure, m: Model, res: Forces[], cat: Catalog, p: Params, c
     a.braces.forEach((b, k) => {
       const L = Math.hypot(b.a, drop(a, b));
       if (b.x) return void (b.sec = choose(xList(cat, b.x), braceId(a, k), b.sec, xRule(b.x, L)));
-      b.sec = choose(braces.list, braceId(a, k), b.sec, (s) => L / s.rmin < 200);
+      b.sec = choose(braces.list, braceId(a, k), b.sec, (s) => L / s.rmin < 200 && (!b.short || s.d <= SHORT.tubeD));
       if (braces.cap) b.cap = true;
     });
   }
@@ -1072,7 +1104,8 @@ function size(st: Structure, m: Model, res: Forces[], cat: Catalog, p: Params, c
   }
   const needClear = webClear(st.arms);
   const colL = m.len.get('column')!;
-  st.col = choose(cat.columns, 'column', st.col, (c) => c.d - 2 * c.tf >= needClear && c.d >= 250 && colL / c.rmin < 200);
+  const shortOnFlange = st.arms.some((a) => a.bearing % 180 === 0 && hasShortBrace(a));
+  st.col = choose(cat.columns, 'column', st.col, (c) => c.d - 2 * c.tf >= needClear && c.d >= 250 && colL / c.rmin < 200 && (!shortOnFlange || c.d <= SHORT.col));
   // the upper shaft is sized by sizeTop, here it is only checked
   const top = worst.get('column-top');
   if (st.splice && top) maxRatio = Math.max(maxRatio, ratioOf(st.splice.sec, top, p.fy, m.len.get('column-top')!));
@@ -1112,6 +1145,7 @@ function braceConn(b: Brace): ConnType {
   const s = b.sec;
   if (s.kind === '2L' || s.kind === 'L' || s.kind === 'FB') return 'gusset_lap';
   if (s.kind === 'ROD') return 'clevis';
+  if (b.short) return 'gusset_small';
   return s.kind === 'CHS' && b.cap && s.d >= CAP_MIN_D ? 'gusset_cap' : 'gusset';
 }
 
@@ -1914,6 +1948,8 @@ export function generate(p0: Partial<Params>, cat: Catalog, detail: Detail = 'bo
     dropSplicesOnGussets(st, p, log);
   }
   skewEnds(st, log);
+  // flange plates reach the arm gusset of a short brace
+  for (const a of st.arms) if (a.conn === 'flange_plates' && hasShortBrace(a)) a.conn = 'end_plate';
   if (swaps.length) keepFits(st, p, swaps, log);
   if (ok) logGable(st, p, log);
   log.push(alphaLog(alpha, amp));
