@@ -36,6 +36,7 @@ const DEFAULTS = {
   armZmin: GEN.armZ[0],
   armZmax: GEN.armZ[1],
   conn: 'auto',
+  gable: GEN.gableP, // the chance of a pitched roof on a one storey portal
   // details: the chance of each one
   braces: GEN.braceP,
   secondaries: GEN.secondaryP,
@@ -67,7 +68,7 @@ export type Key = keyof Settings;
 // the keys of each section of the rail: what it counts as changed, and resets
 export const GROUPS = {
   structure: ['form', 'arms', 'height', 'load', 'family', 'shapes'],
-  layout: ['storeys', 'span', 'bracing', 'xKind', 'armLmin', 'armLmax', 'armZmin', 'armZmax', 'conn'],
+  layout: ['storeys', 'span', 'bracing', 'xKind', 'armLmin', 'armLmax', 'armZmin', 'armZmax', 'conn', 'gable'],
   details: ['braces', 'secondaries', 'posts', 'splices', 'trusses', 'rods', 'xBraces', 'colSplice', 'connKinds', 'skew'],
   view: ['viewer', 'compare', 'view', 'az', 'el', 'weights', 'detail', 'size'],
   animation: ['duration', 'speed'],
@@ -126,7 +127,7 @@ export const params = (): Partial<Params> => ({
   shapeP: SHAPE_P[s.shapes] ?? GEN.shapeP, fy: s.family === 'eu' ? 355 : 345,
   storeys: s.storeys as Params['storeys'], spanK: s.span, bracing: s.bracing as Params['bracing'],
   xKind: s.xKind as Params['xKind'], xP: s.xBraces,
-  armL: [s.armLmin, s.armLmax], armZ: [s.armZmin, s.armZmax], conn: s.conn as Params['conn'],
+  armL: [s.armLmin, s.armLmax], armZ: [s.armZmin, s.armZmax], conn: s.conn as Params['conn'], gableP: s.gable,
   braceP: s.braces, secondaryP: s.secondaries, postP: s.posts, beamSpliceP: s.splices,
   trussK: s.trusses, rodP: s.rods, colSpliceP: s.colSplice, connKindsP: s.connKinds, skewP: s.skew,
 });

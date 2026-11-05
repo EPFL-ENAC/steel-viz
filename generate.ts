@@ -23,6 +23,7 @@ import { BEAM_CONNS, findSection, type BraceSpecimen, type ColumnSpecimen, type 
 import { buildBrace, buildColumn, buildLink } from './bench.ts';
 import { actuator, block, clevis, hingeSize, link } from './rig.ts';
 import { cutBoxes, cutEnd, skewHardware } from './skew.ts';
+import { drawGable, eaveDepth, gableLog, gableModel, gableParts, thrust, type Gable } from './gable.ts';
 
 export type Detail = 'members' | 'plates' | 'bolts';
 export type Params = {
@@ -47,6 +48,9 @@ export type Params = {
   // degrees, from a stream of its own (skewArms). 0: every arm square, as
   // before skewed arms.
   skewP: number;
+  // the chance that a one storey portal gets a pitched roof (gable.ts),
+  // from a stream of its own. 0: flat beams only, as before.
+  gableP: number;
   // The look of the structure. The seed still takes the same draws, then a
   // value set here replaces what it drew: at their default, every seed gives
   // the same structure as before these settings.
@@ -68,7 +72,7 @@ export type Params = {
   specimen?: Specimen; // a real test: seed, form, arms, height, braceP and secondaryP are not used
 };
 export const DEFAULTS: Params = {
-  seed: 1, arms: 8, height: 2500, load: 100, fy: 345, braceP: 0.3, secondaryP: 0.35, postP: 0.3, beamSpliceP: 0.3, connKindsP: 0.35, shapeP: 0.35, skewP: 0.3,
+  seed: 1, arms: 8, height: 2500, load: 100, fy: 345, braceP: 0.3, secondaryP: 0.35, postP: 0.3, beamSpliceP: 0.3, connKindsP: 0.35, shapeP: 0.35, skewP: 0.3, gableP: 0.35,
   storeys: 0, spanK: 1, bracing: 'auto', xP: 0.3, xKind: 'auto', armL: [0.3, 0.7], armZ: [0.35, 0.95], conn: 'auto', trussK: 1, rodP: 0.4, colSpliceP: 0.6,
   seg: 400, form: 'mix',
 };
@@ -110,7 +114,7 @@ type Brace = { a: number; zb: number; sec: Section; end: 0 | 1; x?: XKind };
 // 180) at `skew` degrees, so its bearing is face + skew.
 type Arm = {
   id: string; col: number; to?: number; z: number; bearing: number; L: number; conn: ConnType; conn2?: ConnType; sec: Section; braces: Brace[];
-  truss?: Truss; rod?: Rod; post?: Post; splice?: number; face?: number; skew?: number;
+  truss?: Truss; rod?: Rod; post?: Post; splice?: number; face?: number; skew?: number; gable?: Gable;
 };
 // A post on the top flange of a beam, `a` along it, `h` high from the top of
 // the beam to the top of its cap plate. Free at the top, where it brings a
@@ -132,6 +136,9 @@ const rodId = (a: Arm) => `${a.id}-rod`;
 const postId = (a: Arm) => `${a.id}-post`;
 const farId = (a: Arm) => `${a.id}-far`;
 const drop = (a: Arm, b: Brace) => a.z - a.sec.d - b.zb;
+// how deep a beam is on its column: a gable rafter with its haunch is deeper
+const depth = (a: Arm) => (a.gable ? eaveDepth(a) : a.sec.d);
+const eaveSec = (a: Arm): Section => (a.gable ? { ...a.sec, d: depth(a) } : a.sec);
 const braceId = (a: Arm, i: number) => `${a.id}-brace${i ? i + 1 : ''}`;
 type Secondary = { id: string; arm: number; a: number; side: 1 | -1; L: number; conn: ConnType; sec: Section };
 type Col = { x: V };
@@ -430,13 +437,38 @@ function rodFor(st: Structure, a: Arm, cat: Catalog, rng: () => number): Rod | u
   return { a: at, zr, sec: cat.rods[Math.floor(cat.rods.length / 2)] };
 }
 
+// ------------------------------------------------------------- gable
+// A pitched roof on a one storey portal (gable.ts), from a stream of its
+// own. On the bay beam: no brace (it would go through the haunch or the
+// ridge), no secondary beam on it, moment end plates at both eaves.
+function addGable(st: Structure, p: Params, log: string[]) {
+  const bays = st.arms.filter((a) => a.to !== undefined);
+  if (st.form !== 'portal' || p.gableP <= 0 || bays.length !== 1) return;
+  const a = bays[0];
+  const g = drawGable(mulberry32(p.seed * 179424673 + 29), a.L, p.gableP);
+  if (!g) return;
+  const i = st.arms.indexOf(a);
+  Object.assign(a, { gable: g, braces: [], conn: 'end_plate', conn2: 'end_plate' });
+  st.secs = st.secs.filter((s) => s.arm !== i);
+  log.push(`${a.id}: gable roof, slope ${g.slope}°, haunch ${g.haunch.kind === 'cut' ? 'cut from an I' : 'welded plates'}`);
+}
+// the final rise, haunch and thrust (one more solve)
+function logGable(st: Structure, p: Params, log: string[]) {
+  for (const a of st.arms) {
+    if (!a.gable) continue;
+    const m = model(st, p);
+    const r = solve(m.nodes, m.elems);
+    log.push(gableLog(a, colFace(st, a.bearing), r.ok ? thrust(a, m.nodes, m.elems, m.owner, r.axial) : NaN));
+  }
+}
+
 // trusses first, so a rod knows the chords above it
 function addTrussesAndRods(st: Structure, p: Params, cat: Catalog, rng: () => number, log: string[]): boolean {
   let added = false;
   for (const a of st.arms) {
     const r = rng();
     const P = p.trussK * (a.to === undefined ? TRUSS_P.arm : st.form === 'box' ? TRUSS_P.box : TRUSS_P.bay);
-    if (r >= P || (a.to === undefined && a.L < 1400)) continue;
+    if (r >= P || (a.to === undefined && a.L < 1400) || a.gable) continue;
     const tr = trussFor(st, a, cat, rng);
     // drawn as for a square arm, so the next arms keep their draws
     if (!tr || a.skew) continue;
@@ -446,7 +478,7 @@ function addTrussesAndRods(st: Structure, p: Params, cat: Catalog, rng: () => nu
     log.push(`${a.id}: truss, ${tr.webs.length} diagonals, ${tr.D} mm deep`);
   }
   for (const a of st.arms) {
-    if (rng() >= p.rodP) continue;
+    if (rng() >= p.rodP || a.gable) continue;
     const rod = rodFor(st, a, cat, rng);
     if (!rod || a.skew) continue;
     a.rod = rod;
@@ -475,7 +507,7 @@ function addPosts(st: Structure, p: Params, cat: Catalog, rng: () => number, log
     if (rng() >= p.postP) continue;
     const h0 = r50(400 + 500 * rng());
     const at = rng();
-    if (a.truss || a.rod) continue;
+    if (a.truss || a.rod || a.gable) continue;
     const bay = a.to !== undefined;
     if (bay && a.z !== topZ) continue;
     const h = bay ? h0 : Math.min(h0, Math.floor((roomAbove(st, a) - a.z) / 50) * 50);
@@ -540,7 +572,7 @@ function addBeamSplices(st: Structure, p: Params, rng: () => number, log: string
   st.arms.forEach((a, i) => {
     const r = rng();
     const pick = rng();
-    if (r >= P || a.to === undefined || a.truss || a.L < SPLICE_BEAM_MIN) return;
+    if (r >= P || a.to === undefined || a.truss || a.gable || a.L < SPLICE_BEAM_MIN) return;
     const end = colFace(st, a.bearing) + 350 + SPLICE_HALF;
     const busy: [number, number][] = [
       ...a.braces.map((b): [number, number] => {
@@ -760,7 +792,9 @@ function model(st: Structure, p: Params): Model {
       owner.push(who);
     }
   });
+  const gableL = new Map<string, number>();
   st.arms.forEach((a, i) => {
+    if (a.gable) return void gableL.set(a.id, gableModel(a, st.cols[a.col].x, st.cols[a.to!].x, hdir(a.bearing), colFace(st, a.bearing), chain, w(a.sec) + p.load));
     const h = hdir(a.bearing);
     const o = start(st, a);
     const at = new Set([0, a.L]);
@@ -820,6 +854,7 @@ function model(st: Structure, p: Params): Model {
     const who = owner[i];
     if (who !== 'column' && who !== 'column-top') lengths.set(who, (lengths.get(who) ?? 0) + len(sub(nodes[e.j].x, nodes[e.i].x)));
   });
+  for (const [who, L] of gableL) lengths.set(who, L); // one rafter, not both
   return { nodes, elems, owner, nodeOwner, len: lengths, tension };
 }
 
@@ -1209,6 +1244,7 @@ function moreKinds(st: Structure, p: Params, log: string[]): Swap[] {
   };
   for (const a of st.arms) {
     if (a.skew) continue; // it keeps its end plate or weld
+    if (a.gable) continue; // the eaves keep their end plates
     // on a column: its flange or its web
     const fit: Fit = a.bearing % 180 === 0 ? 'flange' : 'web';
     swap(`${a.id}-from`, () => `${a.id}-from-conn`, a.conn, fit, (c) => (a.conn = c));
@@ -1255,7 +1291,7 @@ function pickSplice(st: Structure, p: Params, rng: () => number): { sp: Splice; 
   for (const a of st.arms) {
     // an extended end plate reaches 90 mm past the flanges, flange plates 16
     const [lo, hi] = past(a.conn, a.conn2);
-    busy.push([a.z - a.sec.d - lo, a.z + hi]);
+    busy.push([a.z - depth(a) - lo, a.z + hi]);
     for (const b of a.braces) busy.push([b.zb - 300, b.zb + 300]);
     if (a.truss) {
       const zc = a.z - a.truss.D;
@@ -1277,7 +1313,16 @@ function pickSplice(st: Structure, p: Params, rng: () => number): { sp: Splice; 
 // and a double angle is wide.
 // The shafts are the ones parts() builds: the lower one up to the splice,
 // the upper one above it.
+// A gable rafter can get deeper after pickSplice() (alphaCr), so its eave
+// plate and haunch can reach down to the splice.
+function eaveHits(st: Structure, sp: Splice): boolean {
+  const [below, above] = sp.kind === 'bearing' ? [0, BEARING_T] : [SPLICE_HALF, SPLICE_HALF];
+  const eave = (a: Arm) => a.z - depth(a) - past(a.conn, a.conn2)[0] - SPLICE_GAP;
+  return st.arms.some((a) => a.gable && sp.z + above > eave(a) && sp.z - below < a.z);
+}
+
 function spliceHits(st: Structure, sp: Splice): boolean {
+  if (eaveHits(st, sp)) return true;
   return st.cols.some((c, ci) => {
     const at = (h: number) => add(c.x, [0, 0, h]);
     const lo = geo(colId(ci), st.col, c.x, at(sp.z), false);
@@ -1415,6 +1460,13 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
   };
   for (const a of st.arms) {
     const h = hdir(a.bearing);
+    if (a.gable) {
+      const [S, Sj] = [colAt(a.col, a.z - a.sec.d / 2), colAt(a.to!, a.z - a.sec.d / 2)];
+      const r = gableParts(a, { o0: st.cols[a.col].x, o1: st.cols[a.to!].x, h, f: supportFace(S, h), s0: S.id, s1: Sj.id, seg, plates, bolts });
+      armGeo.set(a.id, r.near);
+      for (const q of r.parts) out.push({ ...q, step: step++ });
+      continue;
+    }
     const o = armStart(st, a);
     const zm = a.z - a.sec.d / 2;
     const S = colAt(a.col, zm);
@@ -1560,7 +1612,7 @@ function details(
     const levels: number[] = [];
     // each beam end on a column: column, connection, bearing, top of steel, section
     const beamEnds = st.arms.flatMap((a) => [
-      [a.col, a.conn, faceOf(a), a.z, a.sec], [a.to, a.conn2, a.bearing + 180, a.z, a.sec],
+      [a.col, a.conn, faceOf(a), a.z, eaveSec(a)], [a.to, a.conn2, a.bearing + 180, a.z, eaveSec(a)],
       ...(a.truss ? [[a.col, a.truss.conn, faceOf(a), a.z - a.truss.D, a.truss.chord], [a.to, a.truss.conn2, a.bearing + 180, a.z - a.truss.D, a.truss.chord]] : []),
     ] as [number | undefined, ConnType | undefined, number, number, Section][]);
     for (const [ci2, conn, bearing, zt, sec] of st.continuity === false ? [] : beamEnds) {
@@ -1670,6 +1722,7 @@ export function generate(p0: Partial<Params>, cat: Catalog, detail: Detail = 'bo
   const skewLog = form === 'tree' ? skewArms(st, p) : [];
   const t1 = performance.now();
   const log: string[] = [...skewLog];
+  addGable(st, p, log);
   let solves = 0;
   let ok = false;
   let ratio = 0;
@@ -1789,6 +1842,10 @@ export function generate(p0: Partial<Params>, cat: Catalog, detail: Detail = 'bo
       if (f && alpha >= Math.min(ALPHA_MIN, before.alpha)) {
         ratio = size(st, m, f, cat, p, true);
         log.push(`splice at ${st.splice.z} mm (${st.splice.kind}), ${st.col.id} below, ${st.splice.sec.id} above`);
+        if (eaveHits(st, st.splice)) {
+          log.push('splice: in the way of the deeper gable eave, left out');
+          st.splice = undefined;
+        }
       } else st.splice = undefined;
     }
     if (!st.splice) {
@@ -1803,6 +1860,7 @@ export function generate(p0: Partial<Params>, cat: Catalog, detail: Detail = 'bo
   }
   skewEnds(st, log);
   if (swaps.length) keepFits(st, p, swaps, log);
+  if (ok) logGable(st, p, log);
   log.push(alphaLog(alpha, amp));
   log.push(`${sized} sizing passes, final max ratio ${ratio.toFixed(2)} (limit ${LIMIT})`);
   const t2 = performance.now();
