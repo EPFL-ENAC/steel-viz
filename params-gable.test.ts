@@ -1,6 +1,6 @@
 // node --test
-// The gable portal: with gableP 0 no gable, with gableP 1 no clash and no
-// floating part.
+// The gable portal: with gableP 0 no gable, with gableP 1 and long spans no
+// clash and no floating part. The plain case is in geometry-gable.test.ts.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { generate } from './generate.ts';
@@ -19,6 +19,5 @@ test('gableP 0 gives no gable', () => {
 });
 
 noClash([
-  ['gable portals', { form: 'portal', storeys: 1, gableP: 1 }],
   ['gable portals, long spans, all details', { form: 'portal', storeys: 1, gableP: 1, spanK: 1.6, braceP: 1, secondaryP: 1, colSpliceP: 1 }],
 ]);
