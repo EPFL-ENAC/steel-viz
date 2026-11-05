@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { loadCatalog } from './sections.ts';
-import { floating, generate, type Form } from './generate.ts';
+import { floating, generate, X_KINDS, type Form } from './generate.ts';
 import { clashes } from './clash.ts';
 import { readTables } from './tables.ts';
 import { triangles } from './triangles.ts';
@@ -86,10 +86,11 @@ test('no beam splice or post when their chances are 0', () => {
       }
 });
 
-// which kind of section each brace, secondary and truss chord got
+// which kind of section each brace, secondary and truss chord got (not the
+// X diagonals: shapeP doesn't pick theirs)
 function shapes(st: ReturnType<typeof generate>['st']) {
   return [
-    ...st.arms.flatMap((a) => [...a.braces.map((b) => `brace ${b.sec.kind}`), ...(a.truss ? [`chord ${a.truss.chord.kind}`] : [])]),
+    ...st.arms.flatMap((a) => [...a.braces.filter((b) => !b.x).map((b) => `brace ${b.sec.kind}`), ...(a.truss ? [`chord ${a.truss.chord.kind}`] : [])]),
     ...st.secs.map((s) => `secondary ${s.sec.kind}`),
   ];
 }
@@ -211,4 +212,40 @@ test('skewed arms', () => {
       });
     }
   assert.ok(n > 40, `only ${n} skewed arms`);
+});
+
+// X bracing: two diagonals that cross (or one plain diagonal when the second
+// one doesn't fit), tension only in the check, and the crossing details
+test('X bracing: every kind, both families, no clash', () => {
+  const KIND = { flat: 'FB', rod: 'ROD', angle: 'L' } as const;
+  for (const name of names)
+    for (const xKind of X_KINDS) {
+      let xs = 0;
+      for (const over of [{ form: 'portal', storeys: 2 }, { form: 'box' }] as const)
+        for (let seed = 1; seed <= 15; seed++) {
+          const r = generate({ seed, bracing: 'x', xKind, ...over }, cats[name]);
+          const at = `${name} ${over.form} ${xKind} seed ${seed}`;
+          assert.deepEqual(clashes(r.parts), [], at);
+          assert.deepEqual(floating(r.parts), [], at);
+          const ids = new Set(r.parts.map((q) => q.id));
+          for (const a of r.st.arms) {
+            const x = a.braces.flatMap((b, k) => (b.x ? [[b, k] as const] : []));
+            assert.ok(x.length === 0 || x.length === 2, `${at} ${a.id}: ${x.length} X diagonals`);
+            if (!x.length) continue;
+            xs++;
+            for (const [b, k] of x) {
+              const id = `${a.id}-brace${k ? k + 1 : ''}`;
+              assert.equal(b.sec.kind, KIND[xKind], `${at} ${id}`);
+              if (xKind === 'rod') assert.ok(ids.has(`${id}-turnbuckle`), `${at} ${id}: no turnbuckle`);
+              if (!r.ok) continue;
+              const m = r.members[id];
+              assert.ok(m, `${at} ${id}: no check`);
+              assert.equal(m.Nc, 0, `${at} ${id}`);
+              assert.ok(m.ratio <= 0.6, `${at} ${id}: ratio ${m.ratio.toFixed(2)}`);
+            }
+            if (xKind !== 'rod') assert.ok(ids.has(`${a.id}-x-filler`), `${at} ${a.id}: no filler`);
+          }
+        }
+      assert.ok(xs > 10, `${name} ${xKind}: only ${xs} X`);
+    }
 });

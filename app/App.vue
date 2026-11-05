@@ -200,6 +200,7 @@ async function copy(what: 'svg' | 'link') {
           <Seg v-model="s.storeys" label="Storeys" :options="[[0, 'Auto'], [1, 'One'], [2, 'Two']]" />
           <Slider id="span" v-model="s.span" label="Span" :min="0.6" :max="1.6" :step="0.05" :out="`× ${s.span.toFixed(2)}`" />
           <Seg v-model="s.bracing" label="Bracing" :options="[['auto', 'Auto'], ...BRACING_KINDS.map((b) => [b, b[0].toUpperCase() + b.slice(1)] as [string, string])]" />
+          <Seg v-model="s.xKind" label="X kind" :options="[['auto', 'Auto'], ['flat', 'Flat bars'], ['rod', 'Rods'], ['angle', 'Angles']]" />
           <RangeSlider id="armL" v-model:lo="s.armLmin" v-model:hi="s.armLmax" label="Arm length" :min="0.1" :max="1" :step="0.05" :out="band(s.armLmin, s.armLmax)" />
           <RangeSlider id="armZ" v-model:lo="s.armZmin" v-model:hi="s.armZmax" label="Arm height on the column" :min="0.2" :max="1" :step="0.05" :out="band(s.armZmin, s.armZmax)" />
           <div class="field">
@@ -219,6 +220,7 @@ async function copy(what: 'svg' | 'link') {
           <Slider id="splices" v-model="s.splices" label="Beam splices" :min="0" :max="1" :step="0.05" :out="pct(s.splices)" />
           <Slider id="trusses" v-model="s.trusses" label="Trusses" :min="0" :max="2.5" :step="0.1" :out="`× ${s.trusses.toFixed(1)}`" />
           <Slider id="rods" v-model="s.rods" label="Tension rods" :min="0" :max="1" :step="0.05" :out="pct(s.rods)" />
+          <Slider id="xBraces" v-model="s.xBraces" label="X braces" :min="0" :max="1" :step="0.05" :out="pct(s.xBraces)" />
           <Slider id="colSplice" v-model="s.colSplice" label="Column splice" :min="0" :max="1" :step="0.05" :out="pct(s.colSplice)" />
           <Slider id="connKinds" v-model="s.connKinds" label="More connection kinds" :min="0" :max="1" :step="0.05" :out="pct(s.connKinds)" />
           <Slider id="skew" v-model="s.skew" label="Skewed arms" :min="0" :max="1" :step="0.05" :out="pct(s.skew)" />

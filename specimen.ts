@@ -14,7 +14,7 @@
 // hub.ts reads the records of the hub tables into these types.
 //
 // No three.js here: this file only needs the section formulas.
-import { chsSection, doubleAngleOf, iSection, rhsSection, rodSection, teeSection, type Catalog, type Family, type Section } from './sections.ts';
+import { chsSection, doubleAngleOf, flatBar, iSection, rhsSection, rodSection, teeSection, type Catalog, type Family, type Section } from './sections.ts';
 import { BEAM_CONN_KINDS, type ConnType } from './steel.ts';
 
 // A name from the section tables ('W14X82', 'HE 300 B', also written
@@ -24,12 +24,14 @@ import { BEAM_CONN_KINDS, type ConnType } from './steel.ts';
 // - CHS (round tube): diameter d, wall t. ROD (round bar): diameter d.
 // - 2L (two angles back to back): d the leg along the gap, b the outstanding
 //   leg of one angle, t the thickness
+// - FB (flat bar): width b, thickness t
 export type SectionRef =
   | string
   | { id: string; shape?: 'I' | 'RHS' | 'T'; d: number; bf: number; tf: number; tw: number }
   | { id: string; shape: 'CHS'; d: number; t: number }
   | { id: string; shape: 'ROD'; d: number }
-  | { id: string; shape: '2L'; d: number; b: number; t: number };
+  | { id: string; shape: '2L'; d: number; b: number; t: number }
+  | { id: string; shape: 'FB'; b: number; t: number };
 
 export type SpecimenBeam = {
   section: SectionRef;
@@ -164,6 +166,12 @@ export function findSection(ref: SectionRef, cat: Catalog): Section {
     positive(id, { d, b, t });
     if (t >= Math.min(d, b)) throw new Error(`section ${id}: the angles are too thick for their legs (d ${d}, b ${b}, t ${t})`);
     return doubleAngleOf(id, d, b, t);
+  }
+  if (typeof ref !== 'string' && ref.shape === 'FB') {
+    const { id, b, t } = ref;
+    positive(id, { b, t });
+    if (t >= b) throw new Error(`section ${id}: the bar is thicker than it is wide (b ${b}, t ${t})`);
+    return flatBar(id, b, t);
   }
   if (typeof ref !== 'string') {
     const { id, d, bf, tf, tw } = ref;

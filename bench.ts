@@ -27,7 +27,7 @@
 // The `eccentric_braced_frames` table: one EBF link, alone or in a frame.
 // See buildLink.
 import type { V } from './vec.ts';
-import type { Catalog, Section } from './sections.ts';
+import { ANGLE_GAP, type Catalog, type Section } from './sections.ts';
 import { boxOf, flat, geo, memberBoxes, memberFaces, stiffener, type P2, type Part } from './steel.ts';
 import { actuator, block, clevis, crosshead, hingeSize, rigMember, rigSection, roller, seat, type RigOpts } from './rig.ts';
 import { LINK_CONFIGS, findSection, type BraceSpecimen, type ColumnSpecimen, type LinkSpecimen } from './specimen.ts';
@@ -359,7 +359,10 @@ export function buildBrace(p: Params, spec: BraceSpecimen, cat: Catalog, detail:
   braces.forEach((b, i) => {
     const [bot, tp] = b.ends;
     const on = bot.build(c, add, undefined, bottomRig[i]);
-    const gm = geo(b.id, sec, at(b.x, plus(bot.W, bot.uin, bot.start)), at(b.x, plus(tp.W, tp.uin, tp.start)), false);
+    let gm = geo(b.id, sec, at(b.x, plus(bot.W, bot.uin, bot.start)), at(b.x, plus(tp.W, tp.uin, tp.start)), false);
+    // a flat bar is on the +v side of its axis (sections.ts): move it to the middle of its end plates
+    const x = sec.kind === 'FB' ? b.x - (ANGLE_GAP / 2 + sec.tw / 2) * gm.v[0] : b.x;
+    if (x !== b.x) gm = geo(b.id, sec, at(x, plus(bot.W, bot.uin, bot.start)), at(x, plus(tp.W, tp.uin, tp.start)), false);
     add({ id: b.id, step: 0, supports: [on], kind: 'member', from: Z, faces: memberFaces(gm, p.seg), boxes: memberBoxes(gm), dots: [], info: { type: 'Brace', sec, L } });
     tp.build(c, add, b.id, topRig);
   });

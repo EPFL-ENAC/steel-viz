@@ -7,7 +7,8 @@ What we plan to do next. A checked item is done.
 - [x] Channel, angle and WT profiles (C, L and T sections), with their own section tables. Double angle braces, channel secondaries and tee truss chords (`shapeP`, `--shapes`).
 - [ ] Move the channel and angle tables to RESSLab Hub when the hub needs them (its `steel_braces.csv` has angle and channel braces). Paired worktree and a hub pull request, then the usual rule: change them in the hub first.
 - [ ] Tee chords with the stem up, and the gussets on the stem.
-- [ ] Double angle truss diagonals, unequal angles, single angle braces.
+- [ ] Double angle truss diagonals, unequal angles, single angle braces (the `L` section exists now, for the X bracing).
+- [x] X bracing in a bay: flat bars, rods with a turnbuckle, or single angles bolted where they cross. Tension only in the solver (`xP`, `xKind`, `--bracing x`).
 - [x] Bolted beam splice and posts.
 - [x] More kinds of beam end connections: clip angles, seated, stiffened seat, tee, stiffened end plate (`CONNS` in `steel.ts`, `connKindsP`, `--conn-kinds`).
 - [x] Skewed arms on trees: 30 or 45 degrees off a column flange, with a skewed end plate or a weld (`skewP`, `--skew`, `skew.ts`).
@@ -54,8 +55,9 @@ The specimen input draws four tables of the hub, each test in its test rig. `nod
 - [ ] The concrete slab (`slab`).
 - [ ] Continuity plates as thick as in the test (`t_cp`). Today they take the thickness of the column flange.
 - [ ] "Exterior - Frame" (one test in the hub, Del_Caprio_et_al_2014_RBS-A).
-- [x] Brace tests (`braces`), SB, SBF and DBF: 279 of 294.
-- [ ] Angle, Double Channel and Flat Bar braces (8, 5 and 2 tests). `findSection` knows the I sections, the tees, the tubes, the round tubes, the rods and the double angles, but not these.
+- [x] Brace tests (`braces`), SB, SBF and DBF: 281 of 294 (the 2 flat bars too).
+- [ ] Angle and Double Channel braces (8 and 5 tests). `findSection` knows the I sections, the tees, the tubes, the round tubes, the rods, the double angles and the flat bars, but not these.
+- [ ] The single `Angle` braces (8 tests): `singleAngle()` in `sections.ts` gives the section, but they need their own reader in `hub.ts` and the offset of an angle on its end plates, like the flat bar in `bench.ts`.
 - [ ] The gusset outline of a brace from `l_1t` to `l_8b`, when someone tells us what the 8 lengths are. Today the gussets have a generic outline.
 - [x] Column tests (`columns`): 153 of 153.
 - [x] HSS column tests (`hss_columns`), CF, DC and 3PB: 284 of 284. How we read `length__mm` is our own guess (RESSLab-Team/resslab-hub-data#75).

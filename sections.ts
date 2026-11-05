@@ -6,15 +6,18 @@
 // I: W, IPE, HE. RHS: square tube. ROD: round bar. CHS: round tube (no table
 // has one, only a specimen gives it). C: channel. 2L: two angles back to back,
 // ANGLE_GAP apart (equal legs in the tables). T: a tee, half an I.
-export type Kind = 'I' | 'RHS' | 'ROD' | 'CHS' | 'C' | '2L' | 'T';
+// L: one equal angle, FB: a flat bar. Both sit where the +v angle of a 2L
+// is, their back on v = ANGLE_GAP / 2: a plate in the middle (gusset_lap)
+// fits them like a 2L (an X brace, see generate.ts).
+export type Kind = 'I' | 'RHS' | 'ROD' | 'CHS' | 'C' | '2L' | 'T' | 'L' | 'FB';
 
 export type Section = {
   id: string;
   kind: Kind;
-  d: number; // depth (2L: the leg along the gap)
-  bf: number; // flange width (RHS: width, ROD and CHS: the diameter, 2L: both outstanding legs and the gap)
-  tf: number; // flange thickness (RHS and CHS: wall, 2L: angle thickness)
-  tw: number; // web thickness (RHS and CHS: wall, 2L: angle thickness)
+  d: number; // depth (2L and L: the leg along the gap, FB: the width)
+  bf: number; // flange width (RHS: width, ROD and CHS: the diameter, 2L: both outstanding legs and the gap, L: the outstanding leg, FB: the thickness)
+  tf: number; // flange thickness (RHS and CHS: wall, 2L and L: angle thickness, FB: the thickness)
+  tw: number; // web thickness (RHS and CHS: wall, 2L and L: angle thickness, FB: the thickness)
   A: number;
   Is: number; // strong axis inertia (bending in the depth direction)
   Iw: number; // weak axis inertia
@@ -30,12 +33,13 @@ export const ANGLE_GAP = 12;
 // beams, columns, tubes, rods: what the random generator picks from.
 // channels, angles (double angles), tees: the shapes some braces,
 // secondaries and truss chords get (see shapeP in generate.ts).
+// flats, singles (one angle), rods: the X braces.
 // all: every I section and tube of the table, with no filter (a real
 // specimen can use a W36 or a rectangular tube).
 export type Family = 'aisc' | 'eu';
 export type Catalog = {
   family: Family; beams: Section[]; columns: Section[]; tubes: Section[]; rods: Section[];
-  channels: Section[]; angles: Section[]; tees: Section[]; all: Section[];
+  channels: Section[]; angles: Section[]; tees: Section[]; flats: Section[]; singles: Section[]; all: Section[];
 };
 
 export function iSection(id: string, d: number, bf: number, tf: number, tw: number): Section {
@@ -97,6 +101,14 @@ export function rects(s: Section): Rect[] {
       const g = ANGLE_GAP / 2;
       return [[-w, -g, -h, -h + tf], [g, w, -h, -h + tf], [-g - tw, -g, -h + tf, h], [g, g + tw, -h + tf, h]];
     }
+    case 'L': {
+      const g = ANGLE_GAP / 2;
+      return [[g, g + s.bf, -h, -h + tf], [g, g + tw, -h + tf, h]];
+    }
+    case 'FB': {
+      const g = ANGLE_GAP / 2;
+      return [[g, g + s.bf, -h, h]];
+    }
     default:
       return [[-w, w, -h, h]];
   }
@@ -140,8 +152,27 @@ export function rectProps(rs: Rect[]) {
 
 function shaped(id: string, kind: Kind, d: number, bf: number, tf: number, tw: number): Section {
   const s: Section = { id, kind, d, bf, tf, tw, A: 0, Is: 0, Iw: 0, J: 0, Ws: 0, Ww: 0, rmin: 0 };
-  return { ...s, ...rectProps(rects(s)) };
+  const r = { ...s, ...rectProps(rects(s)) };
+  return kind === 'L' ? { ...r, rmin: angleRmin(rects(s), r) } : r;
 }
+
+// One angle is not symmetric: its weakest axis is at 45 degrees (r_z, or iv
+// in the EN tables), below the radius about v or w. The smallest principal
+// inertia, from the product of inertia of the rects about the centroid.
+function angleRmin(rs: Rect[], p: { A: number; Is: number; Iw: number }): number {
+  const box = rs.map(([v0, v1, w0, w1]) => ({ a: (v1 - v0) * (w1 - w0), v: (v0 + v1) / 2, w: (w0 + w1) / 2 }));
+  const cv = box.reduce((s, r) => s + r.a * r.v, 0) / p.A;
+  const cw = box.reduce((s, r) => s + r.a * r.w, 0) / p.A;
+  const Ivw = box.reduce((s, r) => s + r.a * (r.v - cv) * (r.w - cw), 0);
+  const Imin = (p.Is + p.Iw) / 2 - Math.hypot((p.Is - p.Iw) / 2, Ivw);
+  return Math.sqrt(Imin / p.A);
+}
+
+// one equal angle (leg x leg x t): L4X4X1/2, L 100x100x10 (an X brace)
+export const singleAngle = (id: string, leg: number, t: number) => shaped(id, 'L', leg, leg, t, t);
+
+// a flat bar, b wide and t thick (an X brace, a specimen brace FB 35.3x3.3)
+export const flatBar = (id: string, b: number, t: number) => shaped(id, 'FB', b, t, t, t);
 
 // a channel: C, MC, UPN, UPE (parallel flanges of the mean thickness)
 export const channelSection = (id: string, d: number, bf: number, tf: number, tw: number) => shaped(id, 'C', d, bf, tf, tw);
@@ -167,6 +198,12 @@ export function teeOf(s: Section): Section {
 const RODS: Record<Family, [string, number][]> = {
   aisc: [['3/4', 0.75], ['7/8', 0.875], ['1', 1], ['1-1/4', 1.25], ['1-1/2', 1.5], ['1-3/4', 1.75], ['2', 2]].map(([n, x]) => [`ROD ${n}"`, (x as number) * 25.4]),
   eu: [16, 20, 24, 27, 30, 36, 42, 48].map((x) => [`M${x} rod`, x]),
+};
+
+// flat bars, the tables have none: inches for AISC, mm for EU, t at most b / 4
+const FLATS: Record<Family, [string, number, number][]> = {
+  aisc: [2, 3, 4, 5, 6].flatMap((b) => ([['1/4', 0.25], ['3/8', 0.375], ['1/2', 0.5], ['5/8', 0.625], ['3/4', 0.75]] as const).filter(([, t]) => t <= b / 4).map(([n, t]): [string, number, number] => [`FB ${b}x${n}`, b * 25.4, t * 25.4])),
+  eu: [50, 60, 80, 100, 120, 150].flatMap((b) => [6, 8, 10, 12, 15, 20].filter((t) => t <= b / 4).map((t): [string, number, number] => [`FL ${b}x${t}`, b, t])),
 };
 
 // A CSV text (RFC 4180) as one object per row, keyed by the header. A quoted
@@ -222,6 +259,9 @@ export function loadCatalog(family: Family, i: string, hss: string, channels = '
     // equal angles, L3 to L8 and L 75 to L 200: one bolt line fits in the leg
     angles: (angles ? parseCsv(angles) : []).filter((r) => r.d === r.b && +r.d >= 75 && +r.d <= 210).map((r) => doubleAngle(r.id, +r.d, +r.t)).sort(byArea),
     tees: shapes.map(teeOf).sort(byArea),
+    flats: FLATS[family].map(([id, b, t]) => flatBar(id, b, t)).sort(byArea),
+    // equal angles, L2 to L6 and L 50 to L 150: a single X brace
+    singles: (angles ? parseCsv(angles) : []).filter((r) => r.d === r.b && +r.d >= 50 && +r.d <= 155).map((r) => singleAngle(r.id, +r.d, +r.t)).sort(byArea),
     all: [...allShapes, ...allTubes],
   };
 }

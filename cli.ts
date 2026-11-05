@@ -2,7 +2,8 @@
 //   [--detail members|plates|bolts] [--arms 5] [--height 6000] [--load 20]
 //   [--form mix|tree|portal|box] [--animate] [--frames] [--painter] [--flat] [--size px]
 //   [--shapes 0.35] (the chance of a channel, double angle or tee member, 0 for none)
-//   the look (see Params in generate.ts): [--storeys 0|1|2] [--span 1] [--bracing auto|none|knee|chevron|diagonal]
+//   the look (see Params in generate.ts): [--storeys 0|1|2] [--span 1] [--bracing auto|none|knee|chevron|diagonal|x]
+//   [--x-kind auto|flat|rod|angle] [--x-braces 0.3] (the chance that an auto diagonal is an X)
 //   [--conn auto|shear_tab|end_plate|flange_plates|welded|clip_angles|seated|stiffened_seat|tee|end_plate_stiffened]
 //   [--arm-length 0.3,0.7] [--arm-height 0.35,0.95]
 //   [--braces 0.3] [--secondaries 0.35] [--posts 0.3] [--beam-splices 0.3] [--trusses 1] [--rods 0.4] [--col-splice 0.6] [--conn-kinds 0.35] [--skew 0.3]
@@ -40,7 +41,8 @@ const r = generate(
     seed: +opt('seed', '1'), form: opt('form', 'mix') as Params['form'], arms: num('arms', DEFAULTS.arms), height: num('height', DEFAULTS.height),
     load: num('load', DEFAULTS.load), shapeP: num('shapes', DEFAULTS.shapeP), fy: family === 'eu' ? 355 : 345, specimen: spec,
     storeys: num('storeys', DEFAULTS.storeys) as Params['storeys'], spanK: num('span', DEFAULTS.spanK),
-    bracing: opt('bracing', DEFAULTS.bracing) as Params['bracing'], conn: opt('conn', DEFAULTS.conn) as Params['conn'],
+    bracing: opt('bracing', DEFAULTS.bracing) as Params['bracing'], xKind: opt('x-kind', DEFAULTS.xKind) as Params['xKind'], xP: num('x-braces', DEFAULTS.xP),
+    conn: opt('conn', DEFAULTS.conn) as Params['conn'],
     armL: pair('arm-length', DEFAULTS.armL), armZ: pair('arm-height', DEFAULTS.armZ),
     braceP: num('braces', DEFAULTS.braceP), secondaryP: num('secondaries', DEFAULTS.secondaryP), postP: num('posts', DEFAULTS.postP),
     beamSpliceP: num('beam-splices', DEFAULTS.beamSpliceP), trussK: num('trusses', DEFAULTS.trussK), rodP: num('rods', DEFAULTS.rodP),
