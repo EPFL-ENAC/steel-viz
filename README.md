@@ -441,8 +441,13 @@ The build animation (`--animate`) shows the parts put in place, like on a site. 
 
 To find a structure that works as a logo, `score.ts` gives each one a score from 0 to 1. It looks at the big shapes from the chosen view: do they fill a square, does the weight sit on the columns, how many members, how many members cross each other. `pick.ts` scans many seeds and lists the best ones (450 structures take about 2 s). In the playground, "Find good seeds" does the same for 200 seeds and shows the best 8.
 
+To find a structure that works as a teaching sculpture, `score.ts` also gives its variety: how many different kinds of detail it shows, from a fixed list of 28 (`VARIETY_KINDS`). One kind is one detail a student can point at and name: a beam end kind, a splice, a truss, a tension rod, a post, foot gussets, a member shape, a kind of X brace. On the default seeds it goes from 4 to 16, with a mean of about 7.6. A box shows the most. Some kinds are rare: a round tube only gets its end caps from 114 mm, so only about 1 seed in 300 has them.
+
+The logo score and the variety have almost nothing to do with each other, so a seed can be good at one and bad at the other. The mix takes half of each, and counts 12 kinds or more as a full variety. `pick.ts --by logo|variety|mix` says what to sort by (logo if you don't give it). "Find good seeds" has the same choice in "Sort by", and a new sort uses the last scan again. The Analysis section of the playground shows the variety of the current seed, with its kinds.
+
 ```sh
 node pick.ts --count 150 --arms 4,5,6 --top 12 --sheet best.html  # best.html shows the 12 best drawings
+node pick.ts --by variety --top 12 --sheet v.html                 # the seeds with the most kinds of detail
 ```
 
 It needs Node 24 or newer. Node runs the `.ts` files directly. Install the deps once (Vite and Vue for the playground, esbuild for a test, TypeScript for the type check):
@@ -474,7 +479,7 @@ Files:
 - `rig.ts`: the test rig parts (reaction blocks, pins, links, actuators, rollers, rig frame members).
 - `steel.ts`: geometry (profiles, copes, plates, clevis, bolts), camera and the painter renderer.
 - `clash.ts`: do two parts go through each other (each part as a few boxes).
-- `score.ts`, `pick.ts`: the logo score, and the scan over many seeds.
+- `score.ts`, `pick.ts`: the logo score and the variety, and the scan over many seeds.
 - `hlr.ts`: the exact hidden-line renderer, with bolt heads as real hex solids. No package. `hlr.test.ts` checks it on small cases.
 - `webgl.ts`: the 3D view of the playground, in plain WebGL2.
 - `triangles.ts`: the triangles of a flat face, for `webgl.ts` and `hlr.ts`.
