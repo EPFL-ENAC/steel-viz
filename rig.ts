@@ -10,17 +10,18 @@
 // No three.js here.
 import { add, cross, len, mul, norm, sub, type V } from './vec.ts';
 import { rodSection, type Catalog, type Section } from './sections.ts';
-import { box3, boxOf, flat, geo, memberBoxes, memberFaces, type Box, type Face, type P2, type Part } from './steel.ts';
+import { box3, boxOf, flat, geo, isRound, memberBoxes, memberFaces, type Box, type Face, type P2, type Part } from './steel.ts';
 
 // step, supports: as for any part. type: the name in the tooltip. from: the
 // direction it comes from in the build animation (default: from above).
 export type RigOpts = { step: number; supports?: string[]; type?: string; from?: V };
 
-type Solid = { faces: Face[]; boxes: Box[] };
-const join = (...ss: Solid[]): Solid => ({ faces: ss.flatMap((s) => s.faces), boxes: ss.flatMap((s) => s.boxes) });
+// round: it has a round bar (see Part.round)
+type Solid = { faces: Face[]; boxes: Box[]; round?: boolean };
+const join = (...ss: Solid[]): Solid => ({ faces: ss.flatMap((s) => s.faces), boxes: ss.flatMap((s) => s.boxes), round: ss.some((s) => s.round) });
 
 function rigPart(id: string, s: Solid, o: RigOpts, type: string): Part {
-  return { id, step: o.step, faces: s.faces, dots: [], supports: o.supports ?? [], boxes: s.boxes, kind: 'rig', from: o.from ?? [0, 0, 1], info: { type: o.type ?? type } };
+  return { id, step: o.step, faces: s.faces, dots: [], supports: o.supports ?? [], boxes: s.boxes, kind: 'rig', from: o.from ?? [0, 0, 1], info: { type: o.type ?? type }, round: s.round };
 }
 
 const rect = (a: number, b: number): P2[] => [[-a / 2, -b / 2], [a / 2, -b / 2], [a / 2, b / 2], [-a / 2, b / 2]];
@@ -36,7 +37,7 @@ const arc = (y: number, r: number, a0: number, a1: number, n = 8): P2[] =>
 function bar(sec: Section, p0: V, p1: V, w?: V): Solid {
   const g = geo('rig', sec, p0, p1, false);
   if (w) [g.w, g.v] = [w, cross(w, g.u)];
-  return { faces: memberFaces(g, 1e9), boxes: memberBoxes(g) };
+  return { faces: memberFaces(g, 1e9), boxes: memberBoxes(g), round: isRound(sec) };
 }
 
 // ------------------------------------------------------------- pin joint

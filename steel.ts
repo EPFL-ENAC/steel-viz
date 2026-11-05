@@ -27,8 +27,12 @@ export type Kind = 'base' | 'column' | 'plate' | 'member' | 'bolts' | 'rig';
 // plate, bolts). sec, L (mm), conn (one per end): for a member. member: its
 // id in the solver model, the key of Result.members (all columns are 'column').
 export type PartInfo = { type: string; of?: string; sec?: Section; L?: number; conn?: string[]; member?: string };
+// round: the part has a round bar (a rod, a round tube, a pin). Its long sides
+// have no line of their own, so the 3D view outlines it, also with one weight
+// (webgl.ts). Set where the bar is built (isRound).
 export type Part = {
   id: string; step: number; faces: Face[]; dots: Dot[]; supports: string[]; boxes?: Box[]; accent?: boolean; kind?: Kind; from?: V; info?: PartInfo;
+  round?: boolean;
 };
 
 // Less detail when the drawing is small: at 160 px or less bolts are only
@@ -372,8 +376,11 @@ function piece(s: Section, f: Flanged, side: 'top' | 'bot', depth: number, split
 const smooth = (fs: Face[]) =>
   fs.map((f) => (f.pts.length === 4 ? { ...f, edges: f.edges.filter(([i, j]) => !((i === 1 && j === 2) || (i === 3 && j === 0))) } : f));
 
+// a rod or a round tube: memberFaces smooths it, and its part gets round
+export const isRound = (s: Section) => s.kind === 'ROD' || s.kind === 'CHS';
+
 export function memberFaces(g: Geo, seg: number, cuts: number[] = []): Face[] {
-  if (g.sec.kind === 'ROD' || g.sec.kind === 'CHS') return smooth(prism(g.p0, g.p1, g.polys, g.u, g.v, g.w, seg, g.sh, cuts));
+  if (isRound(g.sec)) return smooth(prism(g.p0, g.p1, g.polys, g.u, g.v, g.w, seg, g.sh, cuts));
   const f = flanged(g.sec);
   if (!g.copes.length || !f) return prism(g.p0, g.p1, g.polys, g.u, g.v, g.w, seg, g.sh, cuts);
   const L = len(sub(g.p1, g.p0));
