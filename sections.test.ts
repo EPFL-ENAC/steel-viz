@@ -2,7 +2,7 @@
 // values of their source, and the catalog lists.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { iSection, loadCatalog, rectProps, rects, type Section } from './sections.ts';
+import { chsSection, iSection, loadCatalog, rectProps, rects, type Section } from './sections.ts';
 import { readTables } from './tables.ts';
 
 const cats = { aisc: loadCatalog('aisc', ...readTables('aisc')), eu: loadCatalog('eu', ...readTables('eu')) };
@@ -39,6 +39,18 @@ test('the new shapes are close to the values of their source', () => {
     near(s.A, A, 0.05, `${s.id} A`);
     near(s.Is, Is, 0.05, `${s.id} Is`);
   }
+});
+
+test('a round tube: the EN 10210 values', () => {
+  // CHS 168.3x7.1: 35.9 cm2, I 1170 cm4, Wpl 185 cm3, i 5.71 cm
+  const s = chsSection('CHS 168.3x7.1', 168.3, 7.1);
+  near(s.A, 3590, 0.01, 'A');
+  near(s.Is, 11.7e6, 0.01, 'I');
+  assert.equal(s.Iw, s.Is);
+  near(s.Ws, 185e3, 0.01, 'Wpl');
+  near(s.rmin, 57.1, 0.01, 'i');
+  // no table has one: the random generator never picks it
+  for (const cat of Object.values(cats)) assert.ok(!cat.all.some((x) => x.kind === 'CHS'));
 });
 
 test('the catalogs have the shape lists, with unique ids', () => {

@@ -6,7 +6,7 @@ import { CONNS, type ConnType, type Part } from '../steel.ts';
 
 export type Tip = { title: string; id: string; rows: [string, string][]; warn?: boolean };
 
-const SHAPE: Record<Section['kind'], string> = { I: 'I', C: 'channel', T: 'tee', '2L': 'double angle', RHS: 'tube', ROD: 'round bar' };
+const SHAPE: Record<Section['kind'], string> = { I: 'I', C: 'channel', T: 'tee', '2L': 'double angle', RHS: 'tube', ROD: 'round bar', CHS: 'round tube' };
 // the beam end kinds have their label in the catalog, these say more
 const CONN: Record<string, string> = {
   gusset: 'gusset, knife plate', gusset_small: 'small gusset', gusset_lap: 'gusset between the angles', clevis: 'clevis and pin',
@@ -19,6 +19,7 @@ const n1 = (x: number) => (Math.round(x * 10) / 10).toString();
 function dims(s: Section): string {
   switch (s.kind) {
     case 'ROD': return `Ø ${n1(s.d)} mm`;
+    case 'CHS': return `Ø ${n1(s.d)}, t ${n1(s.tf)} mm`;
     case 'RHS': return `${n1(s.d)} × ${n1(s.bf)}, t ${n1(s.tf)} mm`;
     case '2L': return `2 L ${n1(s.d)} × ${n1(s.d)}, t ${n1(s.tf)} mm`;
     default: return `d ${n1(s.d)}, bf ${n1(s.bf)}, tw ${n1(s.tw)}, tf ${n1(s.tf)} mm`;
@@ -28,7 +29,7 @@ const conns = (cs: string[]) => [...new Set(cs)].map((c) => CONN[c] ?? CONNS[c a
 
 export function describe(part: Part, r: Result): Tip {
   const info = part.info ?? { type: part.kind ?? 'part' };
-  const tip: Tip = { title: info.type, id: part.id, rows: [] };
+  const tip: Tip = { title: part.kind === 'rig' ? `${info.type} (test rig)` : info.type, id: part.id, rows: [] };
   const row = (k: string, v: string) => tip.rows.push([k, v]);
   // the part this one belongs to, by its type and id
   if (info.of) {

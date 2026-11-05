@@ -15,7 +15,7 @@ import { DEFAULTS, floating, generate, type Detail, type Params } from './genera
 import { render as painter, VIEWS } from './steel.ts';
 import { renderHLR } from './hlr.ts';
 import { readTables } from './tables.ts';
-import { toSpecimen } from './specimen.ts';
+import { toSpecimen } from './hub.ts';
 
 
 const args = process.argv.slice(2);
@@ -62,8 +62,12 @@ const beams = r.st.arms.map((a) => `${a.sec.id} ${a.conn}${a.braces.map((b) => '
 console.log(
   [
     `${out}: ${spec ? `specimen ${spec.id}` : `seed ${opt('seed', '1')}`}, ${family}, view ${view}, detail ${detail}, ${render === painter ? 'painter' : 'hlr'}`,
-    spec
-      ? `  structure: specimen, column ${r.st.col.id} ${r.st.H} mm high, ${r.st.arms.length} beam${r.st.arms.length === 1 ? '' : 's'} (${beams})${r.st.continuity === false ? ', no continuity plates' : ''}`
+    r.st.brace
+      ? `  structure: specimen, brace test ${r.st.brace.frame}, ${r.st.col.id} ${r.st.brace.L} mm at ${r.st.brace.angle}°, ${r.st.brace.ends} ends`
+      : r.st.columnTest
+      ? `  structure: specimen, column test ${r.st.columnTest.ends}, ${r.st.col.id} ${r.st.columnTest.L} mm, pushed at ${r.st.columnTest.angle}° from the web`
+      : spec
+      ? `  structure: specimen, column ${r.st.col.id} ${r.st.H} mm high, ${r.st.arms.length} beam${r.st.arms.length === 1 ? '' : 's'} (${beams})${r.st.continuity === false ? ', no continuity plates' : ''}, ${r.st.load} loaded`
       : `  structure: ${r.st.form}, ${r.st.cols.length} × column ${r.st.col.id}, ${r.st.arms.length} arms (${beams})` +
         (r.st.secs.length ? `, ${r.st.secs.length} secondary (${r.st.secs.map((s) => `${s.sec.id} ${s.conn}`).join('; ')})` : ''),
     `  solver: ${r.ok ? 'stable' : 'MECHANISM'}, ${r.nodes} nodes, ${r.solves} solves, max ratio ${r.ratio.toFixed(2)}, alphaCr ${r.alpha === Infinity ? '-' : r.alpha.toFixed(1)}`,

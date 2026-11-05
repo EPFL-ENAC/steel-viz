@@ -1,18 +1,32 @@
-// A real test specimen, drawn from its sections instead of a seed.
-//
-// v1 draws a beam-to-column subassembly: one column, and one or two beams on
-// it. That is what the `connection` table of RESSLab Hub describes (99 of its
-// 100 tests). fromHubConnection() reads one record of that table, as the hub
-// API gives it (numbers, null) or as a row of connections.csv (strings, NA).
+// A real test specimen, drawn from its sections instead of a seed. `test`
+// says which kind of test:
+// - connection (the default): a beam-to-column subassembly, one column and
+//   one or two beams on it (the `connection` table of RESSLab Hub). It goes
+//   to buildSpecimen in generate.ts.
+// - brace: one brace, alone or in a test frame (the `braces` table). It goes
+//   to buildBrace in bench.ts.
+// - column: one column, standing on a floor block, pushed at its top, or
+//   lying on two rollers and pushed at mid span (the `columns` and
+//   `hss_columns` tables). It goes to buildColumn in bench.ts.
+// hub.ts reads the records of the hub tables into these types.
 //
 // No three.js here: this file only needs the section formulas.
-import { iSection, rhsSection, type Catalog, type Family, type Section } from './sections.ts';
+import { chsSection, doubleAngleOf, iSection, rhsSection, rodSection, teeSection, type Catalog, type Family, type Section } from './sections.ts';
 import { BEAM_CONN_KINDS, type ConnType } from './steel.ts';
 
 // A name from the section tables ('W14X82', 'HE 300 B', also written
 // 'W14x82', 'HEB 300'), a built-up name ('H-700x300x13x24': d x bf x tw x tf),
-// or the dimensions in mm.
-export type SectionRef = string | { id: string; shape?: 'I' | 'RHS'; d: number; bf: number; tf: number; tw: number };
+// or the dimensions in mm:
+// - I, RHS, T: depth d, width bf, flange tf, web tw (a tee: d is the full depth)
+// - CHS (round tube): diameter d, wall t. ROD (round bar): diameter d.
+// - 2L (two angles back to back): d the leg along the gap, b the outstanding
+//   leg of one angle, t the thickness
+export type SectionRef =
+  | string
+  | { id: string; shape?: 'I' | 'RHS' | 'T'; d: number; bf: number; tf: number; tw: number }
+  | { id: string; shape: 'CHS'; d: number; t: number }
+  | { id: string; shape: 'ROD'; d: number }
+  | { id: string; shape: '2L'; d: number; b: number; t: number };
 
 export type SpecimenBeam = {
   section: SectionRef;
@@ -22,14 +36,68 @@ export type SpecimenBeam = {
   connection: ConnType; // one of BEAM_CONNS: shear_tab, end_plate, flange_plates, welded, ...
 };
 
-export type Specimen = {
+export type ConnSpecimen = {
+  test?: 'connection';
   id: string; // the hub id, for example 'Chi_and_Uang_2002_DC2'
   family?: Family; // the section table for section names (default aisc)
   column: { section: SectionRef; height: number };
   beams: SpecimenBeam[]; // [] gives a column alone
   continuity?: boolean; // plates across the column at the beam flanges (default true)
+  // what the actuators push (default beam): the beam tips, or the column top
+  // (then the beam tips stand on links). See specimenRig in generate.ts.
+  load?: 'beam' | 'column';
   notes?: string[]; // what we draw differently from the real test, copied into the log
 };
+
+// A brace test. The brace is in a vertical plane, `angle` above the
+// horizontal, `length` between its two work points.
+// - frame SB: the brace alone, its bottom end on a floor block, its top end
+//   under a loading beam that an actuator pushes.
+// - SBF: the brace in a one bay frame of the rig, from a foot corner to the
+//   opposite top corner.
+// - DBF: two braces in an X in the same frame (each one `length` long).
+// - ends gusset: a gusset plate at each end, the tube on it from `clear / 2`
+//   before the end. fixed: an end plate on a seat. pin: an end plate on a
+//   pin joint (the work point is the pin).
+export type BraceSpecimen = {
+  test: 'brace';
+  id: string;
+  family?: Family;
+  section: SectionRef;
+  length: number; // mm, between the work points (l_b)
+  clear?: number; // mm, between the two gussets (l_b_clear)
+  angle: number; // degrees above the horizontal
+  ends: 'gusset' | 'fixed' | 'pin';
+  plates?: { top?: number; bottom?: number }; // mm, the thickness of the gussets or the end plates
+  frame: 'SB' | 'SBF' | 'DBF';
+  notes?: string[];
+};
+
+// A column test. The column stands on a floor block, an end plate at each
+// end. A loading head on its top plate, pushed sideways by an actuator.
+// Vertical actuators above the head bring the axial load.
+// - ends fixed-free: the top is free to turn (one vertical actuator).
+// - fixed-fixed: the top is held straight (two vertical actuators side by side).
+// - fixed-flexible: the top turns against a spring (drawn like fixed-free).
+// - 3pb (three-point bending): the column lies on two rollers `length`
+//   apart, an actuator pushes it down at mid span. The axial load comes from
+//   an actuator at one end, against a reaction block at the other end.
+// angle: between the push and the web (0: strong axis bending, 90: weak axis).
+// For a tube the web is the side along its depth d.
+export type ColumnSpecimen = {
+  test: 'column';
+  id: string;
+  family?: Family;
+  section: SectionRef;
+  length: number; // mm, between the end plates (l_c), or for 3pb between the rollers
+  ends: 'fixed-free' | 'fixed-fixed' | 'fixed-flexible' | '3pb';
+  angle: number; // degrees
+  axial?: boolean; // false: no axial load, so no axial actuator (default true)
+  plates?: { top?: number; bottom?: number }; // mm, the end plate thickness (3pb: bottom at the pin end, top at the actuator end)
+  notes?: string[];
+};
+
+export type Specimen = ConnSpecimen | BraceSpecimen | ColumnSpecimen;
 
 // the kinds a beam end of a specimen can have
 export const BEAM_CONNS: ConnType[] = BEAM_CONN_KINDS;
@@ -44,12 +112,35 @@ const key = (s: string) => {
 // H-700x300x13x24, H500X200X10X16, BH 400x200x8x13: d x bf x tw x tf
 const BUILT_UP = /^(?:BH|H|I)?[-\s]*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)$/i;
 
+const positive = (id: string, xs: Record<string, number>) => {
+  for (const [k, v] of Object.entries(xs))
+    if (!(typeof v === 'number' && v > 0)) throw new Error(`section ${id}: ${k} must be a number above 0, not ${JSON.stringify(v)}`);
+};
+
 export function findSection(ref: SectionRef, cat: Catalog): Section {
+  if (typeof ref !== 'string' && ref.shape === 'CHS') {
+    const { id, d, t } = ref;
+    positive(id, { d, t });
+    if (2 * t >= d) throw new Error(`section ${id}: the wall is too thick for its size (d ${d}, t ${t})`);
+    return chsSection(id, d, t);
+  }
+  if (typeof ref !== 'string' && ref.shape === 'ROD') {
+    positive(ref.id, { d: ref.d });
+    return rodSection(ref.id, ref.d);
+  }
+  if (typeof ref !== 'string' && ref.shape === '2L') {
+    const { id, d, b, t } = ref;
+    positive(id, { d, b, t });
+    if (t >= Math.min(d, b)) throw new Error(`section ${id}: the angles are too thick for their legs (d ${d}, b ${b}, t ${t})`);
+    return doubleAngleOf(id, d, b, t);
+  }
   if (typeof ref !== 'string') {
     const { id, d, bf, tf, tw } = ref;
-    for (const [k, v] of Object.entries({ d, bf, tf, tw }))
-      if (!(typeof v === 'number' && v > 0)) throw new Error(`section ${id}: ${k} must be a number above 0, not ${JSON.stringify(v)}`);
-    if (2 * tf >= d || (ref.shape !== 'RHS' && tw >= bf)) throw new Error(`section ${id}: the plates are too thick for its size (d ${d}, bf ${bf}, tf ${tf}, tw ${tw})`);
+    positive(id, { d, bf, tf, tw });
+    // a tee has one flange, an I two
+    const thick = ref.shape === 'T' ? tf >= d : 2 * tf >= d;
+    if (thick || (ref.shape !== 'RHS' && tw >= bf)) throw new Error(`section ${id}: the plates are too thick for its size (d ${d}, bf ${bf}, tf ${tf}, tw ${tw})`);
+    if (ref.shape === 'T') return teeSection(id, d, bf, tf, tw);
     return ref.shape === 'RHS' ? rhsSection(id, d, bf, tf) : iSection(id, d, bf, tf, tw);
   }
   const k = key(ref);
@@ -62,76 +153,4 @@ export function findSection(ref: SectionRef, cat: Catalog): Section {
   }
   const other = cat.family === 'aisc' ? 'eu' : 'aisc';
   throw new Error(`section "${ref}" is not in the ${cat.family} table (try the ${other} family, or give its dimensions: { id, d, bf, tf, tw })`);
-}
-
-// ------------------------------------------------------------- hub records
-// connection_type in the hub: what we draw for it, and what it leaves out
-const HUB_CONN: Record<string, [ConnType, string?]> = {
-  'WUF-W': ['welded'],
-  'WUF-B': ['welded', 'WUF-B: the bolted shear tab on the beam web is not drawn yet'],
-  RBS: ['welded', 'RBS: the cut in the beam flanges is not drawn yet'],
-  BFP: ['flange_plates'],
-  WFP: ['flange_plates', 'WFP: the flange plates are welded, drawn bolted'],
-  BEEP: ['end_plate'],
-  KBB: ['flange_plates', 'KBB: the Kaiser bracket is drawn as bolted flange plates'],
-};
-
-const MISSING = new Set(['', 'NA', 'NR', 'N/A', 'NULL']);
-// the hub turns inches into mm with some float noise (359.9999996): keep 3 decimals
-const mm = (x: number) => Math.round(x * 1000) / 1000;
-
-// one record of the hub `connection` table: an API object or a CSV row
-export function fromHubConnection(rec: Record<string, unknown>): Specimen {
-  const id = String(rec.id ?? rec.specimen_designation ?? 'specimen').trim();
-  const value = (f: string) => {
-    const v = rec[f];
-    if (typeof v === 'number') return v;
-    if (typeof v === 'string' && !MISSING.has(v.trim().toUpperCase())) return Number(v);
-    return NaN;
-  };
-  const num = (f: string) => {
-    const x = value(f);
-    if (!Number.isFinite(x)) throw new Error(`${id}: ${f} is missing (${JSON.stringify(rec[f] ?? null)})`);
-    return mm(x);
-  };
-  const type = String(rec.specimen_type ?? '').trim();
-  const sub = /^(Exterior|Interior)\b.*\bSubassembly$/i.exec(type);
-  if (!sub) throw new Error(`${id}: specimen type "${type}" is not supported yet (only beam-to-column subassemblies)`);
-  const interior = sub[1].toLowerCase() === 'interior';
-
-  // the name when it looks like a section name, else the dimensions
-  const section = (name: unknown, d: number, bf: number, tf: number, tw: number): SectionRef => {
-    const n = typeof name === 'string' ? name.trim() : '';
-    const named = /^[A-Za-z]{1,4}[\s-]?\d/.test(n);
-    return { id: named ? n : `H ${d}x${bf}x${tw}x${tf}`, d, bf, tf, tw };
-  };
-  const column = section(rec.section_c, num('d_c'), num('b_cf'), num('t_cf'), num('t_cw'));
-  const beam = section(rec.section_b, num('d_b'), num('b_bf'), num('t_bf'), num('t_bw'));
-  const height = num('h_c');
-  // l_b: from the column axis to the beam tip for an exterior test, the whole span for an interior one
-  const lb = num('l_b');
-
-  const notes: string[] = [];
-  const ct = String(rec.connection_type ?? '').trim();
-  const [connection, note] = HUB_CONN[ct] ?? ['welded', `connection type "${ct}" is not known, drawn welded`];
-  if (note) notes.push(note);
-  const ndp = value('n_dp');
-  if (ndp > 0) notes.push(`${ndp} doubler plate${ndp > 1 ? 's' : ''} on the column web, not drawn yet`);
-  const slab = rec.slab;
-  if (slab === true || (typeof slab === 'string' && /^(YES|TRUE)$/i.test(slab.trim()))) notes.push('the concrete slab is not drawn yet');
-  const tcp = value('t_cp');
-
-  const beams: SpecimenBeam[] = (interior ? [0, 180] as const : [0] as const).map((bearing) => ({
-    section: beam, bearing, length: interior ? lb / 2 : lb, connection,
-  }));
-  return { id, column: { section: column, height }, beams, continuity: tcp > 0, notes };
-}
-
-// a JSON file: our own Specimen, or a hub connection record (it has a specimen_type)
-export function toSpecimen(json: unknown): Specimen {
-  if (!json || typeof json !== 'object' || Array.isArray(json)) throw new Error('a specimen must be a JSON object');
-  const o = json as Record<string, unknown>;
-  if ('specimen_type' in o) return fromHubConnection(o);
-  if ('column' in o) return { beams: [], ...(o as Partial<Specimen>) } as Specimen;
-  throw new Error('not a specimen: no "column" (a Specimen) and no "specimen_type" (a hub connection record)');
 }

@@ -3,17 +3,18 @@
 // ourselves: the AISC table's `a` and `iy` columns are not in mm, the EU one
 // is fine, so the safe path is the same formulas for both.
 
-// I: W, IPE, HE. RHS: square tube. ROD: round bar. C: channel. 2L: two equal
-// angles back to back, ANGLE_GAP apart. T: a tee, half an I.
-export type Kind = 'I' | 'RHS' | 'ROD' | 'C' | '2L' | 'T';
+// I: W, IPE, HE. RHS: square tube. ROD: round bar. CHS: round tube (no table
+// has one, only a specimen gives it). C: channel. 2L: two angles back to back,
+// ANGLE_GAP apart (equal legs in the tables). T: a tee, half an I.
+export type Kind = 'I' | 'RHS' | 'ROD' | 'CHS' | 'C' | '2L' | 'T';
 
 export type Section = {
   id: string;
   kind: Kind;
-  d: number; // depth (2L: the leg)
-  bf: number; // flange width (RHS: width, 2L: both legs and the gap)
-  tf: number; // flange thickness (RHS: wall, 2L: angle thickness)
-  tw: number; // web thickness (RHS: wall, 2L: angle thickness)
+  d: number; // depth (2L: the leg along the gap)
+  bf: number; // flange width (RHS: width, ROD and CHS: the diameter, 2L: both outstanding legs and the gap)
+  tf: number; // flange thickness (RHS and CHS: wall, 2L: angle thickness)
+  tw: number; // web thickness (RHS and CHS: wall, 2L: angle thickness)
   A: number;
   Is: number; // strong axis inertia (bending in the depth direction)
   Iw: number; // weak axis inertia
@@ -64,6 +65,15 @@ export function rodSection(id: string, D: number): Section {
   const A = (Math.PI * D * D) / 4;
   const I = (Math.PI * D ** 4) / 64;
   return { id, kind: 'ROD', d: D, bf: D, tf: D / 2, tw: D / 2, A, Is: I, Iw: I, J: 2 * I, Ws: D ** 3 / 6, Ww: D ** 3 / 6, rmin: D / 4 };
+}
+
+// a round tube: outside diameter D, wall t
+export function chsSection(id: string, D: number, t: number): Section {
+  const Di = D - 2 * t;
+  const A = (Math.PI * (D ** 2 - Di ** 2)) / 4;
+  const I = (Math.PI * (D ** 4 - Di ** 4)) / 64;
+  const W = (D ** 3 - Di ** 3) / 6;
+  return { id, kind: 'CHS', d: D, bf: D, tf: t, tw: t, A, Is: I, Iw: I, J: 2 * I, Ws: W, Ww: W, rmin: Math.sqrt(I / A) };
 }
 
 // A rectangle of a section, [v0, v1, w0, w1], in the member frame: v across,
@@ -136,8 +146,15 @@ function shaped(id: string, kind: Kind, d: number, bf: number, tf: number, tw: n
 // a channel: C, MC, UPN, UPE (parallel flanges of the mean thickness)
 export const channelSection = (id: string, d: number, bf: number, tf: number, tw: number) => shaped(id, 'C', d, bf, tf, tw);
 
+// two angles back to back, ANGLE_GAP apart: `long` is the leg along the gap,
+// `short` the outstanding leg of one angle (a specimen brace, 2 L89x64x6.4)
+export const doubleAngleOf = (id: string, long: number, short: number, t: number) => shaped(id, '2L', long, 2 * short + ANGLE_GAP, t, t);
+
 // two equal angles (leg x leg x t) back to back: 2L4X4X1/2, 2L 100x100x10
-export const doubleAngle = (id: string, leg: number, t: number) => shaped(`2${id}`, '2L', leg, 2 * leg + ANGLE_GAP, t, t);
+export const doubleAngle = (id: string, leg: number, t: number) => doubleAngleOf(`2${id}`, leg, leg, t);
+
+// a tee from its dimensions: d the full depth, flange bf x tf, stem tw (a specimen brace, WT125x33.5)
+export const teeSection = (id: string, d: number, bf: number, tf: number, tw: number) => shaped(id, 'T', d, bf, tf, tw);
 
 // half an I: W16X50 gives WT8X25, IPE 300 gives 1/2 IPE 300
 export function teeOf(s: Section): Section {
@@ -152,15 +169,33 @@ const RODS: Record<Family, [string, number][]> = {
   eu: [16, 20, 24, 27, 30, 36, 42, 48].map((x) => [`M${x} rod`, x]),
 };
 
+// A CSV text (RFC 4180) as one object per row, keyed by the header. A quoted
+// cell can hold commas, new lines and "" for a quote: the hub tables have them
+// (a reference on many lines). Cells are trimmed, empty lines skipped, the
+// line ends can be \n or \r\n, a BOM at the start is dropped.
 export function parseCsv(text: string): Record<string, string>[] {
-  const lines = text.trim().split(/\r?\n/);
-  const head = lines[0].split(',');
-  return lines.slice(1).map((l) => {
-    const cells = l.split(',');
-    const row: Record<string, string> = {};
-    head.forEach((h, i) => (row[h] = (cells[i] ?? '').replace(/"/g, '').trim()));
-    return row;
-  });
+  const rows: string[][] = [];
+  let [row, cell, quoted] = [[] as string[], '', false];
+  const s = text.replace(/^﻿/, '');
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (quoted) {
+      if (ch !== '"') cell += ch;
+      else if (s[i + 1] === '"') [cell, i] = [cell + '"', i + 1];
+      else quoted = false;
+    } else if (ch === '"') quoted = true;
+    else if (ch === ',') [row, cell] = [[...row, cell], ''];
+    else if (ch === '\n' || ch === '\r') {
+      if (ch === '\r' && s[i + 1] === '\n') i++;
+      rows.push([...row, cell]);
+      [row, cell] = [[], ''];
+    } else cell += ch;
+  }
+  rows.push([...row, cell]);
+  const [head, ...body] = rows.filter((r) => r.some((c) => c.trim()));
+  if (!head) return [];
+  const keys = head.map((h) => h.trim());
+  return body.map((cells) => Object.fromEntries(keys.map((k, i) => [k, (cells[i] ?? '').trim()])));
 }
 
 const byArea = (a: Section, b: Section) => a.A - b.A;
