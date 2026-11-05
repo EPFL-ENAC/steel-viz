@@ -141,15 +141,15 @@ test('every part has its info, every member its check', () => {
 // n corners (fewer when a corner sits on a straight side), and no flat one.
 // The faces with 5 corners or more are the ends of I, C, L and T sections
 // (concave) and the bolt heads.
+const area = (pts: V[]) => {
+  const n: V = [0, 0, 0];
+  for (let i = 0; i < pts.length; i++) {
+    const c = cross(pts[i], pts[(i + 1) % pts.length]);
+    for (let k = 0; k < 3; k++) n[k] += c[k] / 2;
+  }
+  return len(n);
+};
 test('triangles cover every face', () => {
-  const area = (pts: V[]) => {
-    const n: V = [0, 0, 0];
-    for (let i = 0; i < pts.length; i++) {
-      const c = cross(pts[i], pts[(i + 1) % pts.length]);
-      for (let k = 0; k < 3; k++) n[k] += c[k] / 2;
-    }
-    return len(n);
-  };
   let big = 0;
   for (const name of names)
     for (const form of forms)
@@ -172,4 +172,43 @@ test('triangles cover every face', () => {
             if (f.pts.length > 4) big++;
           }
   assert.ok(big > 0, 'no face with 5 corners or more');
+});
+
+// Skewed arms on trees: they stand, nothing clashes, and they keep only what
+// a skewed end can carry. The triangles cover the cut end of each one.
+test('skewed arms', () => {
+  let n = 0;
+  for (const name of names)
+    for (let seed = 1; seed <= 40; seed++) {
+      const r = generate({ seed, form: 'tree', skewP: 1 }, cats[name]);
+      const at = `${name} tree seed ${seed}`;
+      assert.ok(r.ok, `${at}: mechanism`);
+      assert.deepEqual(clashes(r.parts), [], at);
+      assert.deepEqual(floating(r.parts), [], at);
+      r.st.arms.forEach((a, i) => {
+        if (!a.skew) return;
+        n++;
+        const arm = `${at} ${a.id}`;
+        assert.ok(a.face === 0 || a.face === 180, `${arm}: face ${a.face}`);
+        assert.ok([30, 45].includes(Math.abs(a.skew)), `${arm}: skew ${a.skew}`);
+        assert.equal(a.bearing, (a.face + a.skew + 360) % 360, arm);
+        assert.ok(a.conn === 'end_plate' || a.conn === 'welded', `${arm}: ${a.conn}`);
+        assert.ok(!a.braces.length && !a.truss && !a.rod, `${arm}: a brace, truss or rod`);
+        assert.ok(!r.st.secs.some((q) => q.arm === i), `${arm}: a secondary`);
+        const ids = r.parts.map((q) => q.id).filter((id) => id.startsWith(`${a.id}-`));
+        assert.deepEqual(ids.filter((id) => /-(brace|rod|chord|web)/.test(id)), [], arm);
+        for (const f of r.parts.find((q) => q.id === a.id)!.faces) {
+          const out: number[] = [];
+          triangles(f.pts, out);
+          let sum = 0;
+          for (let k = 0; k < out.length; k += 9) {
+            const [p, q, c] = [0, 3, 6].map((o) => out.slice(k + o, k + o + 3) as V);
+            sum += len(cross(sub(q, p), sub(c, p))) / 2;
+          }
+          const want = area(f.pts);
+          assert.ok(Math.abs(sum - want) <= 1e-6 * want + 1e-6, `${arm}: area ${sum}, not ${want}`);
+        }
+      });
+    }
+  assert.ok(n > 40, `only ${n} skewed arms`);
 });

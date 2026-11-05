@@ -8,8 +8,8 @@ import { DEFAULTS, generate } from './generate.ts';
 import { OLD, cat, kinds } from './params-check.ts';
 
 test('the look settings at their default change nothing', () => {
-  const { storeys, spanK, bracing, armL, armZ, conn, trussK, rodP, colSpliceP, connKindsP } = DEFAULTS;
-  const set = { storeys, spanK, bracing, armL, armZ, conn, trussK, rodP, colSpliceP, connKindsP };
+  const { storeys, spanK, bracing, armL, armZ, conn, trussK, rodP, colSpliceP, connKindsP, skewP } = DEFAULTS;
+  const set = { storeys, spanK, bracing, armL, armZ, conn, trussK, rodP, colSpliceP, connKindsP, skewP };
   for (let seed = 1; seed <= 30; seed++) assert.deepEqual(generate({ seed, ...set }, cat).parts, generate({ seed }, cat).parts, `seed ${seed}`);
 });
 
@@ -26,6 +26,18 @@ test('more connection kinds at 0 change nothing', () => {
       assert.deepEqual(kinds(off).filter((k) => !OLD.includes(k)), [], `${form} seed ${seed}`);
       const members = (r: typeof on) => r.parts.filter((q) => q.kind === 'member').map((q) => [q.id, q.boxes, q.info?.sec?.id, q.info?.L]);
       assert.deepEqual(members(off), members(on), `${form} seed ${seed}`);
+    }
+});
+
+// With skewP 0 no arm is skewed: every arm is square to the column (the
+// branch was checked against main once, part by part).
+test('skewed arms at 0 change nothing', () => {
+  for (const form of ['tree', 'portal', 'box'] as const)
+    for (let seed = 1; seed <= 20; seed++) {
+      const r = generate({ seed, form, skewP: 0 }, cat);
+      const at = `${form} seed ${seed}`;
+      assert.ok(r.st.arms.every((a) => a.bearing % 90 === 0 && a.face === undefined && a.skew === undefined), at);
+      assert.ok(r.parts.every((q) => !/skewed/.test(q.info?.type ?? '')), at);
     }
 });
 

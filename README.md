@@ -78,9 +78,29 @@ The column splice keeps clear of the seats and the end plates. A new kind that w
 
 A detail plate that would go through another part is left out. For example, a continuity plate on the side of the web where another beam frames in.
 
+### Skewed arms
+
+A tree arm can leave a column flange face at 30 or 45 degrees, not at a right angle. It comes from a draw of its own (`skewP`, 0.3 by default, `--skew` in the CLI, "Skewed arms" in the playground). Each arm takes one draw, keyed by its id, like the member shapes. `skewArms()` in `generate.ts` picks the arms, `skew.ts` draws the end.
+
+The end of the beam is cut at the skew, so it lies flat on the flange. Two details:
+
+- Skewed end plate: the plate lies flat on the column flange, and the cut end of the beam is welded to it. It is extended like the square end plate, with 4 rows of 2 bolts. The two bolt lines are centred on the column, so every bolt goes through its flange.
+- Welded: the cut end is welded right on the flange. If the cut end is wider than the column flange (`bf / cos(skew)`), it gets the end plate.
+
+Only an arm on a flange face (0 or 180) can be skewed. The web is too thin, and too deep between the flanges. 60 degrees is out: the cut end would be 2 times as wide as the beam flange. A pinned end (shear tab) doesn't work on a cantilever, so a skewed arm always has a moment end.
+
+On a skewed arm:
+
+- The post and the beam splice follow the arm.
+- No brace and no secondary beam: an arm that has one is not skewed.
+- No truss and no rod: the draw still happens, so the other arms keep their draws, but the result is dropped.
+- It doesn't turn toward a web face where an arm with a secondary beam is less than 900 mm higher or lower. Then it turns the other way, or stays square.
+
+The solver keeps the arm on a line through the column axis. The drawn arm goes through the middle of the flange face, so it is shifted to the side by `(d/2) * sin(skew)` (100 to 150 mm). The solver ignores this shift. Only trees get skewed arms. Bay beams and specimens stay square. With `skewP` at 0, a seed gives the same parts as before skewed arms (`params.test.ts` checks it). `geometry.test.ts` checks 80 trees with `skewP` 1.
+
 ### The look settings
 
-Arms, height and load are not the only knobs. These `Params` in `generate.ts` change the look too. Each one has an auto or default value. At that value the seed takes the same draws, so it gives the same structure as before (`params.test.ts` checks it on 30 seeds). When you set one, the seed still takes its draw, then the value replaces it.
+Arms, height and load are not the only knobs. These `Params` in `generate.ts` change the look too. Each one has an auto or default value. At that value the seed takes the same draws, so it gives the same structure as before (`params.test.ts` checks it on 30 seeds). Only `skewP` is different: at its default, some trees get skewed arms. Set it to 0 for the trees of before. When you set one, the seed still takes its draw, then the value replaces it.
 
 | param | default | CLI | playground | what it does |
 |---|---|---|---|---|
@@ -98,6 +118,7 @@ Arms, height and load are not the only knobs. These `Params` in `generate.ts` ch
 | `rodP` | 0.4 | `--rods` | Details | the chance of a tension rod |
 | `colSpliceP` | 0.6 | `--col-splice` | Details | the chance of a column splice |
 | `connKindsP` | 0.35 | `--conn-kinds` | Details, more connection kinds | the chance that a beam end gets one of the newer kinds (see "Beam end connections") |
+| `skewP` | 0.3 | `--skew` | Details, skewed arms | the chance that a tree arm leaves its column at 30 or 45 degrees (see "Skewed arms"). 0 gives the trees of before. |
 
 ```sh
 node cli.ts --seed 5 --form portal --storeys 2 --bracing chevron --conn welded --span 1.4
@@ -342,6 +363,7 @@ Files:
 - `solver.ts`: 3D frame solver (6 DOF per node, pinned ends, finds mechanisms), and the buckling analysis (`alphaCr`).
 - `checks.ts`: the member checks (AISC 360-22 E3, F2, F6, H1-1).
 - `generate.ts`: topology, the fix loop, trusses and rods, posts and beam splices, and the sizing. Also the specimen path (`buildSpecimen`), and it sends a brace test, a column test (also HSS) or a link test to `bench.ts`.
+- `skew.ts`: the end of a skewed arm: the cut end, its clash boxes, the skewed end plate.
 - `bench.ts`: a brace test, a column test or an EBF link test in its rig (`buildBrace`, `buildColumn`: standing, or lying for 3PB, `buildLink`).
 - `specimen.ts`, `specimens/`: a real test as input (the `Specimen` type, the section lookup), and hub records as examples and test data.
 - `hub.ts`: reads a record of the hub test tables as a `Specimen` (`toSpecimen` and one reader for each table).
@@ -390,6 +412,8 @@ const { svg } = render(parts, { az, el, animate: true }); // an SVG that builds 
 For the EU family, pass `european-sections.csv` and `hss-european-sections.csv` with `'eu'`. A test of the hub goes through `toSpecimen(record)` (or `fromHubConnection`, `fromHubBrace`, `fromHubColumn`, `fromHubHssColumn`, `fromHubEbf`), then `generate({ specimen }, catalog)`.
 
 The hub has no channel or angle table, so this catalog has no channels and no double angles: the braces and the secondary beams keep their tube and I sections. The tees still come, because they are made from the I table. To get the same drawing as here, also pass the channel and angle CSV files of `sections/` (`loadCatalog('aisc', iCsv, hssCsv, channelCsv, angleCsv)`). For no other shape at all, pass `shapeP: 0` to `generate()`.
+
+A tree of today can have skewed arms (`skewP`, 0.3 by default). The logo is an exported SVG, so it doesn't change. To export the same seed again with the same look, pass `skewP: 0`.
 
 The package has no dependency, so the hub installs nothing else. For the 3D view:
 

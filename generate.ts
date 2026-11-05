@@ -21,6 +21,7 @@ import { overlap, own } from './clash.ts';
 import { BEAM_CONNS, findSection, type BraceSpecimen, type ColumnSpecimen, type ConnSpecimen, type LinkSpecimen, type Specimen } from './specimen.ts';
 import { buildBrace, buildColumn, buildLink } from './bench.ts';
 import { actuator, block, clevis, hingeSize, link } from './rig.ts';
+import { cutBoxes, cutEnd, skewHardware } from './skew.ts';
 
 export type Detail = 'members' | 'plates' | 'bolts';
 export type Params = {
@@ -41,6 +42,10 @@ export type Params = {
   // of an arm (double angles), a secondary beam (a channel), a truss bottom
   // chord (a tee). 0: only I, tubes and rods, as before these shapes.
   shapeP: number;
+  // the chance that a tree arm on a column flange leaves it at 30 or 45
+  // degrees, from a stream of its own (skewArms). 0: every arm square, as
+  // before skewed arms.
+  skewP: number;
   // The look of the structure. The seed still takes the same draws, then a
   // value set here replaces what it drew: at their default, every seed gives
   // the same structure as before these settings.
@@ -58,7 +63,7 @@ export type Params = {
   specimen?: Specimen; // a real test: seed, form, arms, height, braceP and secondaryP are not used
 };
 export const DEFAULTS: Params = {
-  seed: 1, arms: 8, height: 2500, load: 100, fy: 345, braceP: 0.3, secondaryP: 0.35, postP: 0.3, beamSpliceP: 0.3, connKindsP: 0.35, shapeP: 0.35,
+  seed: 1, arms: 8, height: 2500, load: 100, fy: 345, braceP: 0.3, secondaryP: 0.35, postP: 0.3, beamSpliceP: 0.3, connKindsP: 0.35, shapeP: 0.35, skewP: 0.3,
   storeys: 0, spanK: 1, bracing: 'auto', armL: [0.3, 0.7], armZ: [0.35, 0.95], conn: 'auto', trussK: 1, rodP: 0.4, colSpliceP: 0.6,
   seg: 400, form: 'mix',
 };
@@ -95,9 +100,11 @@ const orOld = (xs: Section[], old: Section[]) => (xs.length ? xs : old);
 type Brace = { a: number; zb: number; sec: Section; end: 0 | 1 };
 // An arm starts on column `col`. A bay beam also ends on column `to`.
 // splice: a bolted splice in a bay beam, that far along it (geometry only).
+// face and skew: a skewed arm (skewArms) leaves the column face `face` (0 or
+// 180) at `skew` degrees, so its bearing is face + skew.
 type Arm = {
   id: string; col: number; to?: number; z: number; bearing: number; L: number; conn: ConnType; conn2?: ConnType; sec: Section; braces: Brace[];
-  truss?: Truss; rod?: Rod; post?: Post; splice?: number;
+  truss?: Truss; rod?: Rod; post?: Post; splice?: number; face?: number; skew?: number;
 };
 // A post on the top flange of a beam, `a` along it, `h` high from the top of
 // the beam to the top of its cap plate. Free at the top, where it brings a
@@ -145,6 +152,8 @@ const colId = (i: number) => (i ? `column${i + 1}` : 'column');
 const baseId = (i: number) => (i ? `base${i + 1}` : 'base');
 
 const hdir = (bearing: number): V => [Math.sin((bearing * Math.PI) / 180), Math.cos((bearing * Math.PI) / 180), 0];
+// the column face an arm leaves: its bearing, but for a skewed arm
+const faceOf = (a: Arm) => a.face ?? a.bearing;
 const mid = <T>(xs: T[]) => xs[Math.floor(xs.length / 2)];
 const r50 = (x: number) => Math.round(x / 50) * 50;
 const r150 = (x: number) => Math.round(x / 150) * 150;
@@ -176,7 +185,7 @@ const band = ([lo, hi]: [number, number], u: number) => lo + (hi - lo) * u;
 // every face of a column an arm lands on: its column, bearing and height
 function faces(arms: Arm[]) {
   return arms.flatMap((a) => [
-    { a, col: a.col, bearing: a.bearing, z: a.z },
+    { a, col: a.col, bearing: faceOf(a), z: a.z },
     ...(a.to === undefined ? [] : [{ a, col: a.to, bearing: (a.bearing + 180) % 360, z: a.z }]),
   ]);
 }
@@ -289,7 +298,7 @@ function frame(form: 'portal' | 'box', p: Params, cat: Catalog, rng: () => numbe
 const BRACE_MIN = 1000; // mm, along the arm and down the column
 function addBrace(a: Arm, arms: Arm[], cat: Catalog, end: 0 | 1 = 0, reach = 0.55, along = 0): boolean {
   const col = end ? a.to! : a.col;
-  const bearing = end ? (a.bearing + 180) % 360 : a.bearing;
+  const bearing = end ? (a.bearing + 180) % 360 : faceOf(a);
   const below = faces(arms).filter((f) => f.a !== a && f.col === col && f.bearing === bearing && f.z < a.z).map((f) => f.z + 600);
   const zb = Math.max(600, ...below);
   if (along) {
@@ -321,9 +330,13 @@ const TRUSS_P = { bay: 0.35, box: 0.1, arm: 0.3 };
 const LOW = { min: 450, max: 650, floor: 500, gap: 450, chord: 250, tube: 250 };
 // how far the face of the column is from its axis, for a beam on that bearing
 const colFace = (st: Structure, bearing: number) => (bearing % 180 === 0 ? st.col.d / 2 : st.col.tw / 2);
+// how far the end of an arm is from the column axis, along the arm. A
+// skewed arm: up to the tip of its flange on the acute side.
+const armFace = (st: Structure, a: Arm) =>
+  a.skew ? st.col.d / 2 + (a.sec.bf / 2) * Math.tan((Math.abs(a.skew) * Math.PI) / 180) : colFace(st, a.bearing);
 
 // The faces of the columns a member at `a` lands on: its own, and the far one in a bay.
-const endFaces = (a: Arm): [number, number][] => [[a.col, a.bearing], ...(a.to === undefined ? [] : [[a.to, (a.bearing + 180) % 360] as [number, number]])];
+const endFaces = (a: Arm): [number, number][] => [[a.col, faceOf(a)], ...(a.to === undefined ? [] : [[a.to, (a.bearing + 180) % 360] as [number, number]])];
 
 function trussFor(st: Structure, a: Arm, cat: Catalog, rng: () => number): Truss | undefined {
   const low = st.form === 'tree';
@@ -357,7 +370,7 @@ function trussFor(st: Structure, a: Arm, cat: Catalog, rng: () => number): Truss
     top = (k) => k % 2 === 1;
   } else {
     // an arm: at least two diagonals, the last one up to the tip
-    const s0 = r50(colFace(st, a.bearing) + 400);
+    const s0 = r50(armFace(st, a) + 400);
     const span = a.L - 150 - s0;
     const n = Math.max(2, Math.round(span / h));
     const q = span / n;
@@ -385,10 +398,10 @@ function trussFor(st: Structure, a: Arm, cat: Catalog, rng: () => number): Truss
 function roomAbove(st: Structure, a: Arm): number {
   let top = st.H - 250;
   for (const f of faces(st.arms)) {
-    if (f.a === a || f.col !== a.col || f.bearing !== a.bearing || f.z <= a.z) continue;
+    if (f.a === a || f.col !== a.col || f.bearing !== faceOf(a) || f.z <= a.z) continue;
     top = Math.min(top, f.z - f.a.sec.d - 300);
     if (f.a.truss) top = Math.min(top, f.z - f.a.truss.D - f.a.truss.chord.d - 300);
-    const e = f.col === f.a.col && f.bearing === f.a.bearing ? 0 : 1;
+    const e = f.col === f.a.col && f.bearing === faceOf(f.a) ? 0 : 1;
     for (const b of f.a.braces) if (b.end === e) top = Math.min(top, b.zb - 300);
   }
   return top;
@@ -413,7 +426,8 @@ function addTrussesAndRods(st: Structure, p: Params, cat: Catalog, rng: () => nu
     const P = p.trussK * (a.to === undefined ? TRUSS_P.arm : st.form === 'box' ? TRUSS_P.box : TRUSS_P.bay);
     if (r >= P || (a.to === undefined && a.L < 1400)) continue;
     const tr = trussFor(st, a, cat, rng);
-    if (!tr) continue;
+    // drawn as for a square arm, so the next arms keep their draws
+    if (!tr || a.skew) continue;
     a.truss = tr;
     a.braces = [];
     added = true;
@@ -422,7 +436,7 @@ function addTrussesAndRods(st: Structure, p: Params, cat: Catalog, rng: () => nu
   for (const a of st.arms) {
     if (rng() >= p.rodP) continue;
     const rod = rodFor(st, a, cat, rng);
-    if (!rod) continue;
+    if (!rod || a.skew) continue;
     a.rod = rod;
     added = true;
     log.push(`${a.id}: tension rod, up to ${rod.zr} mm`);
@@ -458,7 +472,7 @@ function addPosts(st: Structure, p: Params, cat: Catalog, rng: () => number, log
     if (!sec) continue;
     // a free spot along it, away from the end plates at the column, the
     // secondaries and the braces
-    const end = colFace(st, a.bearing) + 350 + sec.d / 2 + 2 * EDGE;
+    const end = armFace(st, a) + 350 + sec.d / 2 + 2 * EDGE;
     const t0 = Math.max(end, bay ? 0.3 * a.L : 0.5 * a.L);
     const t1 = Math.min(bay ? a.L - end : a.L - 150, bay ? 0.7 * a.L : a.L);
     const busy = [
@@ -909,7 +923,7 @@ function stiffen(st: Structure, m: Model, stab: Stability, cat: Catalog, p: Para
 const alphaLog = (a: number, amp: number) =>
   a === Infinity ? 'alphaCr: nothing in compression' : `alphaCr ${a.toFixed(1)}, moments × ${amp.toFixed(2)}${a < ALPHA_MIN ? ` (below ${ALPHA_MIN})` : ''}`;
 // beams that frame into the column web (above `z`) must fit between its flanges
-const webClear = (arms: Arm[], z = -Infinity) => Math.max(0, ...arms.filter((a) => a.bearing % 180 === 90).flatMap((a) => [
+const webClear = (arms: Arm[], z = -Infinity) => Math.max(0, ...arms.filter((a) => faceOf(a) % 180 === 90).flatMap((a) => [
   ...(a.z - a.sec.d > z ? [a.sec.bf + 40] : []),
   ...(a.truss && a.z - a.truss.D - a.truss.chord.d > z ? [a.truss.chord.bf + 40] : []),
 ]));
@@ -996,6 +1010,61 @@ function braceGeo(st: Structure, a: Arm, b: Brace, k: number, S: Geo) {
   return { g: geo(braceId(a, k), b.sec, add(B, mul(un, t0)), sub(C, mul(un, t1)), false), conn, hb };
 }
 
+// ------------------------------------------------------------- skewed arms
+// A tree arm on a column flange can leave it at 30 or 45 degrees (skew.ts
+// draws it). Only an arm with no secondary and no brace, with a moment end:
+// a skewed end plate, or the cut end welded on the flange. It stays out of
+// the column flange, so an arm on a web face never meets it, but a secondary
+// beam of that arm does: no arm with a secondary on the web face it turns
+// toward, closer than 900 mm in height (like one face). Each arm has a
+// stream of its own, so a skew never changes the draws of another arm. The
+// solver keeps the arm line through the column axis: the drawn arm starts
+// on the middle of the flange, (d/2) sin(skew) to the side.
+const SKEWS = [30, 45];
+function skewArms(st: Structure, p: Params): string[] {
+  if (p.skewP <= 0 || !(p.conn === 'auto' || p.conn === 'end_plate' || p.conn === 'welded')) return [];
+  const done: string[] = [];
+  for (const a of st.arms) {
+    const rng = mulberry32(p.seed * 12582917 + fnv1a(`${a.id}-skew`));
+    if (rng() >= p.skewP) continue;
+    const angle = SKEWS[Math.floor(rng() * SKEWS.length)];
+    const first = rng() < 0.5 ? 1 : -1;
+    if (a.bearing % 180 !== 0 || a.braces.length || st.secs.some((s) => st.arms[s.arm] === a)) continue;
+    const free = (sign: number) => {
+      const web = (a.bearing + sign * 90 + 360) % 360;
+      const busy = (o: Arm) => st.secs.some((s) => st.arms[s.arm] === o);
+      return !st.arms.some((o) => o !== a && o.col === a.col && faceOf(o) === web && Math.abs(o.z - a.z) < 900 && busy(o));
+    };
+    const sign = [first, -first].find(free);
+    if (sign === undefined) continue;
+    a.face = a.bearing;
+    a.skew = sign * angle;
+    a.bearing = (a.face + a.skew + 360) % 360;
+    if (CONNS[a.conn].pinned || a.conn === 'flange_plates') a.conn = 'end_plate';
+    done.push(`${a.id} ${a.skew}`);
+  }
+  return done.length ? [`skewed arms: ${done.join(', ')}`] : [];
+}
+// After the sizing: a weld only fits if the cut end is not wider than the
+// column flange (the upper shaft above a splice). Else an end plate.
+function skewEnds(st: Structure, log: string[]) {
+  for (const a of st.arms) {
+    if (!a.skew || a.conn !== 'welded') continue;
+    const col = st.splice && a.z - a.sec.d / 2 > st.splice.z ? st.splice.sec : st.col;
+    if (a.sec.bf / Math.cos((a.skew * Math.PI) / 180) <= col.bf) continue;
+    a.conn = 'end_plate';
+    log.push(`${a.id}: the skewed weld is wider than the column flange, end plate`);
+  }
+}
+// where the line of an arm starts: the column axis, or for a skewed arm the
+// point of its line as far back as the column axis, so the line goes
+// through the middle of the flange face
+function armStart(st: Structure, a: Arm): V {
+  if (!a.skew) return start(st, a);
+  const half = st.col.d / 2;
+  return add(start(st, a), sub(mul(hdir(a.face!), half), mul(hdir(a.bearing), half)));
+}
+
 // More kinds of beam end, from a stream of their own. Each end takes one
 // keyed draw, like shaped(): an arm end (key `arm3-from`, `arm3-to`) or a
 // secondary beam (its id). Under connKindsP, the end gets a kind that can
@@ -1017,6 +1086,7 @@ function moreKinds(st: Structure, p: Params, log: string[]): Swap[] {
     swaps.push({ key, part, old, set });
   };
   for (const a of st.arms) {
+    if (a.skew) continue; // it keeps its end plate or weld
     // on a column: its flange or its web
     const fit: Fit = a.bearing % 180 === 0 ? 'flange' : 'web';
     swap(`${a.id}-from`, () => `${a.id}-from-conn`, a.conn, fit, (c) => (a.conn = c));
@@ -1172,13 +1242,14 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
   const colAt = (ci: number, z: number) => (sp && z > sp.z ? cols[ci].hi : cols[ci].lo);
 
   // one member and its end connections, in build order: plates, member, bolts
-  type End = { S: Geo; sId: string; conn: ConnType; at: 'from' | 'to' };
+  // skew: a skewed end, the normal of the column face it lies on (skew.ts)
+  type End = { S: Geo; sId: string; conn: ConnType; at: 'from' | 'to'; skew?: V };
   // from: the direction the member (and its plates) come from. type and
   // who: its PartInfo type and its id in the solver model.
   const member = (g: Geo, ends: End[], from: V, type: string, who: string) => {
-    const rs = ends.map((e) => resolve(g, e.S, e.at));
-    g.copes = rs.flatMap((r) => (r.cope ? [r.cope] : []));
-    const hws = ends.map((e, i) => ({ e, hw: hardware(g, e.conn, rs[i]) }));
+    const rs = ends.map((e) => (e.skew ? undefined : resolve(g, e.S, e.at)));
+    g.copes = rs.flatMap((r) => (r?.cope ? [r.cope] : []));
+    const hws = ends.map((e, i) => ({ e, hw: e.skew ? skewHardware(g, e.conn, e.skew, e.S) : hardware(g, e.conn, rs[i]!) }));
     const supports: string[] = [];
     for (const { e, hw } of hws) {
       if (plates && hw.faces.length) {
@@ -1189,7 +1260,9 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
     const Lg = len(sub(g.p1, g.p0));
     const cuts = hws.flatMap(({ e, hw }) => hw.reach.map((x) => (e.at === 'from' ? x : Lg - x)));
     const info: PartInfo = { type, sec: g.sec, L: Lg, conn: ends.map((e) => e.conn), member: who };
-    out.push({ id: g.id, step: step++, supports, kind: 'member', from, faces: memberFaces(g, seg, cuts), boxes: memberBoxes(g), dots: [], info });
+    const n = ends.find((e) => e.skew)?.skew;
+    const [faces, boxes] = [memberFaces(g, seg, cuts), memberBoxes(g)];
+    out.push({ id: g.id, step: step++, supports, kind: 'member', from, faces: n ? cutEnd(faces, g, n) : faces, boxes: n ? cutBoxes(boxes, g, n) : boxes, dots: [], info });
     const dots = hws.flatMap(({ hw }) => hw.dots);
     if (bolts && dots.length) out.push({ id: `${g.id}-bolts`, step: step++, supports: [g.id, ...supports], kind: 'bolts', faces: [], dots, info: { type: 'Bolts', of: g.id, conn: ends.map((e) => e.conn) } });
   };
@@ -1220,11 +1293,18 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
   };
   for (const a of st.arms) {
     const h = hdir(a.bearing);
-    const o = start(st, a);
+    const o = armStart(st, a);
     const zm = a.z - a.sec.d / 2;
     const S = colAt(a.col, zm);
-    const p0 = add(o, mul(h, supportFace(S, h) + SETBACK[a.conn]));
+    let p0 = add(o, mul(h, supportFace(S, h) + SETBACK[a.conn]));
     const ends: End[] = [{ S, sId: S.id, conn: a.conn, at: 'from' }];
+    if (a.skew) {
+      // the cut end, `setback` out of the flange face
+      const n = hdir(a.face!);
+      const s0 = st.col.d / 2 + (supportFace(S, n) + SETBACK[a.conn] - st.col.d / 2) / dot(h, n);
+      p0 = add(o, mul(h, s0));
+      ends[0].skew = n;
+    }
     let p1 = add(o, mul(h, a.L));
     if (a.to !== undefined) {
       const Sj = colAt(a.to, zm);
@@ -1232,7 +1312,7 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
       ends.push({ S: Sj, sId: Sj.id, conn: a.conn2!, at: 'to' });
     }
     const g = geo(a.id, a.sec, p0, p1, true);
-    const beam = a.to === undefined ? 'Cantilever beam' : 'Bay beam';
+    const beam = (a.to === undefined ? 'Cantilever beam' : 'Bay beam') + (a.skew ? `, skewed ${Math.abs(a.skew)}°` : '');
     // an arm slides in along its axis, a bay beam is lowered between its columns
     if (a.splice === undefined) {
       armGeo.set(a.id, g);
@@ -1357,8 +1437,8 @@ function details(
     const levels: number[] = [];
     // each beam end on a column: column, connection, bearing, top of steel, section
     const beamEnds = st.arms.flatMap((a) => [
-      [a.col, a.conn, a.bearing, a.z, a.sec], [a.to, a.conn2, a.bearing + 180, a.z, a.sec],
-      ...(a.truss ? [[a.col, a.truss.conn, a.bearing, a.z - a.truss.D, a.truss.chord], [a.to, a.truss.conn2, a.bearing + 180, a.z - a.truss.D, a.truss.chord]] : []),
+      [a.col, a.conn, faceOf(a), a.z, a.sec], [a.to, a.conn2, a.bearing + 180, a.z, a.sec],
+      ...(a.truss ? [[a.col, a.truss.conn, faceOf(a), a.z - a.truss.D, a.truss.chord], [a.to, a.truss.conn2, a.bearing + 180, a.z - a.truss.D, a.truss.chord]] : []),
     ] as [number | undefined, ConnType | undefined, number, number, Section][]);
     for (const [ci2, conn, bearing, zt, sec] of st.continuity === false ? [] : beamEnds) {
       if (ci2 !== ci || !conn || !moment(conn) || bearing % 180 !== 0) continue;
@@ -1464,8 +1544,9 @@ export function generate(p0: Partial<Params>, cat: Catalog, detail: Detail = 'bo
   const roll = mulberry32(p.seed * 104729 + 7)();
   const form: Form = p.form !== 'mix' ? p.form : roll < 0.45 ? 'tree' : roll < 0.75 ? 'portal' : 'box';
   const st = form === 'tree' ? tree(p, cat, rng) : frame(form, p, cat, rng);
+  const skewLog = form === 'tree' ? skewArms(st, p) : [];
   const t1 = performance.now();
-  const log: string[] = [];
+  const log: string[] = [...skewLog];
   let solves = 0;
   let ok = false;
   let ratio = 0;
@@ -1597,6 +1678,7 @@ export function generate(p0: Partial<Params>, cat: Catalog, detail: Detail = 'bo
     addBeamSplices(st, p, mulberry32(p.seed * 32452843 + 11), log);
     dropSplicesOnGussets(st, p, log);
   }
+  skewEnds(st, log);
   if (swaps.length) keepFits(st, p, swaps, log);
   log.push(alphaLog(alpha, amp));
   log.push(`${sized} sizing passes, final max ratio ${ratio.toFixed(2)} (limit ${LIMIT})`);
