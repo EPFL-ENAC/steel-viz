@@ -11,9 +11,9 @@
 // come from a second pass, with the same rule as hlr.ts: the depth and the
 // part of every pixel go to a texture, and a screen pass draws a thick line
 // on the near side of a jump in depth bigger than DEEP, or of any jump to
-// another part behind. With one weight, only the round parts (rods, round
-// tubes) get it, as thin lines: their faces have no long edges, so without it
-// only their ends show.
+// another part behind. With one weight, only the round parts (Part.round:
+// rods, round tubes, the round bars of the test rig) get it, as thin lines:
+// their faces have no long edges, so without it only their ends show.
 import { add, cross, dot, mul, norm, sub, type V } from './vec.ts';
 import { BOLT_MS, buildEnd, camera, timeline, type Part } from './steel.ts';
 import { triangles } from './triangles.ts';
@@ -24,8 +24,6 @@ const DEEP = 50; // mm: a jump in depth bigger than this makes an outline
 const THIN = 1; // px
 const THICK = 2.25; // px
 const ONE = 1.6; // px, the lines with one weight
-// a rod or a round tube: its long sides have no line of their own
-const round = (p: Part) => p.info?.sec?.kind === 'ROD' || p.info?.sec?.kind === 'CHS';
 
 // rig: the lines of the test rig (default: half way between fg and bg)
 export type Colors = { bg: string; fg: string; accent: string; rig?: string };
@@ -622,7 +620,7 @@ export function createViewer(
         fill: fillBuf(tri), lines: seg.length ? lineBuf(seg) : undefined,
         // blue marks the bolts (a head, 13 mm high, gets no outline) and the
         // round parts (outlined with one weight too)
-        id: [((pi + 1) & 255) / 255, ((pi + 1) >> 8) / 255, part.kind === 'bolts' ? 1 : round(part) ? 0.5 : 0],
+        id: [((pi + 1) & 255) / 255, ((pi + 1) >> 8) / 255, part.kind === 'bolts' ? 1 : part.round ? 0.5 : 0],
         off: [0, 0, 0], visible: true, color: fg, width: THIN,
       };
       lineStyle(p);

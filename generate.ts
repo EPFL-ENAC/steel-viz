@@ -15,7 +15,7 @@ import { memberRatio } from './checks.ts';
 import type { Catalog, Section } from './sections.ts';
 import { ANGLE_GAP, rodSection } from './sections.ts';
 import {
-  box3, boxOf, flat, geo, hardware, memberBoxes, memberFaces, resolve, splicePlates, stiffener, supportFace, BEARING_T, BEAM_CONN_KINDS, CONNS, EDGE, PINNED, SETBACK, SPLICE_HALF,
+  box3, boxOf, flat, geo, hardware, isRound, memberBoxes, memberFaces, resolve, splicePlates, stiffener, supportFace, BEARING_T, BEAM_CONN_KINDS, CONNS, EDGE, PINNED, SETBACK, SPLICE_HALF,
   type BeamConn, type ConnType, type Fit, type Geo, type P2, type Part, type PartInfo, type Plate,
 } from './steel.ts';
 import { overlap, own } from './clash.ts';
@@ -1190,7 +1190,7 @@ function xParts(st: Structure, a: Arm, k: number, g: Geo, ends: [XEnd, XEnd], fr
   const tb = geo(`${id}-turnbuckle`, rodSection('turnbuckle', 1.8 * D), sub(c, mul(g.u, half)), add(c, mul(g.u, half)), false);
   const hi = geo(`${id}-hi`, b.sec, add(c, mul(g.u, half)), p1, false);
   d.member(lo, [ends[0]], from, `${type}, lower piece`, id);
-  d.put({ id: tb.id, supports: [lo.id], kind: 'plate', from, faces: memberFaces(tb, d.seg), boxes: memberBoxes(tb), dots: [], info: { type: 'Turnbuckle', of: id } });
+  d.put({ id: tb.id, supports: [lo.id], kind: 'plate', from, faces: memberFaces(tb, d.seg), boxes: memberBoxes(tb), dots: [], info: { type: 'Turnbuckle', of: id }, round: isRound(tb.sec) });
   d.member(hi, [ends[1]], from, `${type}, upper piece`, id);
 }
 
@@ -1410,7 +1410,7 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
         return { id, step: step++, supports: [on], kind: 'plate', from: [0, 0, -1], faces: f.faces, boxes: [f.box], dots: [], info: { type: 'End plate', of: lo.id } };
       };
       out.push(end(`${lo.id}-foot`, -tp / 2, 'foot-pin'));
-      out.push({ id: lo.id, step: step++, supports: [`${lo.id}-foot`], kind: 'column', from: [0, 0, 1], faces: memberFaces(lo, seg), boxes: memberBoxes(lo), dots: [], info: col(lo, 'Column', 'column') });
+      out.push({ id: lo.id, step: step++, supports: [`${lo.id}-foot`], kind: 'column', from: [0, 0, 1], faces: memberFaces(lo, seg), boxes: memberBoxes(lo), dots: [], info: col(lo, 'Column', 'column'), round: isRound(lo.sec) });
       out.push(end(`${lo.id}-cap`, st.H + tp / 2, lo.id));
       return { lo, hi: lo };
     }
@@ -1421,14 +1421,14 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
       boxes: [boxOf(centre, [0, 1, 0], [0, 0, 1], st.col.bf + 150, st.col.d + 150, tb)],
       dots: bolts ? [-1, 1].flatMap((sx) => [-1, 1].map((sy) => ({ p: add(c.x, [sx * (st.col.bf / 2 + 40), sy * (st.col.d / 2 + 40), 1]), n: [0, 0, 1] as V }))) : [],
     });
-    out.push({ id: lo.id, step: step++, supports: [baseId(ci)], kind: 'column', from: [0, 0, 1], faces: memberFaces(lo, seg), boxes: memberBoxes(lo), dots: [], info: col(lo, 'Column', 'column') });
+    out.push({ id: lo.id, step: step++, supports: [baseId(ci)], kind: 'column', from: [0, 0, 1], faces: memberFaces(lo, seg), boxes: memberBoxes(lo), dots: [], info: col(lo, 'Column', 'column'), round: isRound(lo.sec) });
     if (!sp) return { lo, hi: lo };
     const hi = geo(`${colId(ci)}-top`, sp.sec, at(sp.z + (sp.kind === 'bearing' ? BEARING_T : 0)), at(st.H), false);
     const sid = `${colId(ci)}-splice`;
     const k = splicePlates(lo, hi, sp.kind);
     // without the plates, the upper shaft stands on the lower one
     if (plates) out.push({ id: sid, step: step++, supports: [lo.id], kind: 'plate', from: [0, 0, 1], faces: k.faces, boxes: k.boxes, dots: [], info: { type: `Column splice, ${sp.kind}`, of: lo.id } });
-    out.push({ id: hi.id, step: step++, supports: [plates ? sid : lo.id], kind: 'column', from: [0, 0, 1], faces: memberFaces(hi, seg), boxes: memberBoxes(hi), dots: [], info: col(hi, 'Column, upper shaft', 'column-top') });
+    out.push({ id: hi.id, step: step++, supports: [plates ? sid : lo.id], kind: 'column', from: [0, 0, 1], faces: memberFaces(hi, seg), boxes: memberBoxes(hi), dots: [], info: col(hi, 'Column, upper shaft', 'column-top'), round: isRound(hi.sec) });
     if (bolts) out.push({ id: `${sid}-bolts`, step: step++, supports: [hi.id, sid], kind: 'bolts', faces: [], dots: k.dots, info: { type: 'Bolts', of: sid } });
     return { lo, hi };
   });
@@ -1456,7 +1456,7 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
     const info: PartInfo = { type, sec: g.sec, L: Lg, conn: ends.map((e) => e.conn), member: who };
     const n = ends.find((e) => e.skew)?.skew;
     const [faces, boxes] = [memberFaces(g, seg, cuts), memberBoxes(g)];
-    out.push({ id: g.id, step: step++, supports, kind: 'member', from, faces: n ? cutEnd(faces, g, n) : faces, boxes: n ? cutBoxes(boxes, g, n) : boxes, dots: [], info });
+    out.push({ id: g.id, step: step++, supports, kind: 'member', from, faces: n ? cutEnd(faces, g, n) : faces, boxes: n ? cutBoxes(boxes, g, n) : boxes, dots: [], info, round: isRound(g.sec) });
     const dots = hws.flatMap(({ hw }) => hw.dots);
     if (bolts && dots.length) out.push({ id: `${g.id}-bolts`, step: step++, supports: [g.id, ...supports], kind: 'bolts', faces: [], dots, info: { type: 'Bolts', of: g.id, conn: ends.map((e) => e.conn) } });
   };
@@ -1477,7 +1477,7 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
     pg.w = u;
     pg.v = cross(u, pg.u);
     const info: PartInfo = { type: 'Post', sec, L: len(sub(pg.p1, pg.p0)), member: postId(a) };
-    out.push({ id: pg.id, step: step++, supports: [plates ? bid : P.id], kind: 'member', from: up, faces: memberFaces(pg, seg), boxes: memberBoxes(pg), dots: [], info });
+    out.push({ id: pg.id, step: step++, supports: [plates ? bid : P.id], kind: 'member', from: up, faces: memberFaces(pg, seg), boxes: memberBoxes(pg), dots: [], info, round: isRound(pg.sec) });
     const cc = add(T, [0, 0, h - 8]);
     if (plates) out.push({ id: `${postId(a)}-cap`, step: step++, supports: [pg.id], kind: 'plate', from: up, faces: box3(cc, up, u, sec.bf + 20, 16, sec.d + 20), boxes: [boxOf(cc, up, u, sec.bf + 20, 16, sec.d + 20)], dots: [], info: { type: 'Post cap plate', of: postId(a) } });
     const gauge = Math.max(50, P.sec.bf - 2 * EDGE);
