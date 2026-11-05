@@ -173,6 +173,32 @@ node cli.ts --specimen specimens/Chi_and_Uang_2002_DC2.json --view iso   # write
 
 `--specimen` takes the same drawing options as a seed (`--view`, `--detail`, `--animate`, `--frames`, `--painter`, `--size`). The family comes from `--family`, else from the file, else aisc. `--seed`, `--form`, `--arms` and `--height` don't apply. `specimen.test.ts` covers the two hub files, the format and the errors.
 
+### How many hub tests we draw
+
+`hub-count.ts` reads every table that `hub.ts` knows from a copy of [resslab-hub-data](https://github.com/RESSLab-Team/resslab-hub-data). It reads each row as a `Specimen`, runs `generate()`, and looks for clashes and floating parts. It is a Node script: the package does not include it.
+
+```sh
+node hub-count.ts                         # looks for a resslab-hub-data folder next to the repo (or next to a parent folder, for a worktree)
+node hub-count.ts ../../resslab-hub-data  # or give the folder
+```
+
+It prints one line for each table, then the errors grouped by field (November 2026):
+
+```text
+connections: 99 / 100 drawn, 0 mechanism, 0 clash, 0 floating
+  specimen_type "Exterior - Frame" is not supported yet: 1 (Del_Caprio_et_al_2014_RBS-A)
+braces: 279 / 294 drawn, 0 mechanism, 0 clash, 0 floating
+  cross_section_shape "Angle" is not supported yet: 8 (Jain_1L, Jain_2L, Jain_3L, Jain_4L, Jain_5L, ...)
+  cross_section_shape "Double Channel" is not supported yet: 5 (Black_Strut-11, Lehman_Roeder_HSS29, Aslani_C1, Aslani_C2, Aslani_C3)
+  cross_section_shape "Flat Bar" is not supported yet: 2 (Wakabayashi_FTBM, Wakabayashi_FTBC)
+columns: 153 / 153 drawn, 0 mechanism, 0 clash, 0 floating
+hss_columns: 284 / 284 drawn, 0 mechanism, 0 clash, 0 floating
+```
+
+A row that does not read throws an error in one of two forms: `<id>: <field> is missing`, or `<id>: <field> "<value>" is not supported yet`. "mechanism" counts the tests where the solver finds a mechanism. Only the beam-to-column tests are solved, so it is 0 for the other tables.
+
+`hub.test.ts` runs the same loop. It fails if a drawn test has a clash or a floating part, or if an error is not in one of the two forms. CI has no copy of resslab-hub-data, so there the test is skipped.
+
 ### Brace tests
 
 A record of the hub `braces` table (it has a `brace_angle`) is a brace test. `bench.ts` draws it. The brace is in a vertical plane, `brace_angle` above the horizontal, with `l_b` between its two work points. There is no solve: the brace is only drawn.
@@ -260,6 +286,8 @@ The exact renderer draws like a technical drawing:
 
 `--flat` (or "One" in the line weights of the playground) draws every line at one width, as before, with no gaps. In the playground, the line weights are on auto by default: one weight in the 3D view, two in the SVG and in "Copy SVG".
 
+The test rig (parts of kind `rig`) is drawn lighter than the specimen. In the SVG, its parts have the class `g` and the color `var(--rig, #9e9e9e)`, so a page can set `--rig`. Its lines are thinner: 0.7 times the width in the painter renderer, and in `hlr.ts` its outline is no heavier than its inner lines. In the 3D view, `setColors({ bg, fg, accent, rig })` sets the rig color. Without `rig`, it is half way between `fg` and `bg`. The playground uses `--fg-muted`, and its tooltip adds "(test rig)" to the name of a rig part.
+
 The build animation (`--animate`) shows the parts put in place, like on a site. The columns come down from above. An arm slides in from outside the frame, along its own axis, after its plates. A bay beam is lowered between its two columns. Then the bolts pop in one by one. A part waits only for the parts it stands on, and up to three beams can fly in at the same time (`CRANES` in `steel.ts`), so a big structure builds in about 4 s. The animation has two knobs. `speed` says how fast one part comes in (2 is twice as fast). `duration` (ms, optional) says how long the whole build lasts: `timeline(parts, { speed, duration })` keeps the order and the time of each part, and moves their start times so the last part lands at the end. So a short build with slow parts has many parts in the air at once, and a long build with fast parts has pauses. If one part is slower than the whole build, all parts come at once (`shortestBuild()` gives the shortest build that keeps the order). `RenderOpts` and `Viewer.build()` take the same two. Each part has a `kind` and a `from` direction for this (set in `generate.ts`), and `timeline()` in `steel.ts` says when each part moves and lands. A line that a later part hides stays visible until that part lands. While a beam moves, its lines are already cut where other parts will hide it at the end, so a small hole can move with it.
 
 To find a structure that works as a logo, `score.ts` gives each one a score from 0 to 1. It looks at the big shapes from the chosen view: do they fill a square, does the weight sit on the columns, how many members, how many members cross each other. `pick.ts` scans many seeds and lists the best ones (450 structures take about 2 s). In the playground, "Find good seeds" does the same for 200 seeds and shows the best 8.
@@ -289,7 +317,8 @@ Files:
 - `generate.ts`: topology, the fix loop, trusses and rods, posts and beam splices, and the sizing. Also the specimen path (`buildSpecimen`), and it sends a brace test or a column test (also HSS) to `bench.ts`.
 - `bench.ts`: a brace test or a column test in its rig (`buildBrace`, `buildColumn`: standing, or lying for 3PB).
 - `specimen.ts`, `specimens/`: a real test as input (the `Specimen` type, the section lookup), and hub records as examples and test data.
-- `hub.ts`: reads a record of the hub test tables as a `Specimen`. `hub-count.ts` runs it on every row of resslab-hub-data and counts what we can draw (`node hub-count.ts [folder]`).
+- `hub.ts`: reads a record of the hub test tables as a `Specimen` (`toSpecimen` and one reader for each table).
+- `hub-count.ts`, `hub.test.ts`: read every row of resslab-hub-data and count what we can draw (`node hub-count.ts [folder]`). See "How many hub tests we draw".
 - `rig.ts`: the test rig parts (reaction blocks, pins, links, actuators, rollers, rig frame members).
 - `steel.ts`: geometry (profiles, copes, plates, clevis, bolts), camera and the painter renderer.
 - `clash.ts`: do two parts go through each other (each part as a few boxes).
