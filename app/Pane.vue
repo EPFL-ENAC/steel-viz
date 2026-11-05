@@ -1,7 +1,8 @@
 <!--
   One structure drawn with one engine (this checkout, or the base branch for
   "vs main"): the WebGL view, the exact SVG, or both. Drawing.vue shows one
-  pane, or two side by side.
+  pane, or two side by side. With a note (a hub test it can't draw), the note
+  shows and the drawing is hidden (the WebGL view keeps its size and context).
 -->
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
@@ -18,6 +19,7 @@ const props = defineProps<{
   turning: boolean;
   main?: boolean; // its numbers go to the title block, Copy SVG takes its drawing
   label?: string; // in vs main: which code it is
+  note?: string; // why there is no drawing
 }>();
 const emit = defineEmits<{ frame: [f: Frame | null] }>();
 
@@ -69,6 +71,7 @@ function draw(animate = false, fast = false) {
   if (viewer && m !== 'svg') {
     if (inViewer !== b.r) {
       viewer.show(b.r.parts);
+      if (b.fit) viewer.setFrame?.(null); // a new hub test: forget the zoom of the last one
       inViewer = b.r;
     }
     viewer.setWeights(two(true));
@@ -152,9 +155,10 @@ defineExpose({
 </script>
 
 <template>
-  <div class="pane" :class="`v-${mode}`">
+  <div class="pane" :class="[`v-${mode}`, { noted: note }]">
     <div ref="glEl" class="gl" :data-label="labels.gl" />
     <div ref="svgEl" class="svg" :data-label="labels.svg" />
+    <p v-if="note" class="pane-note note" role="status">{{ note }}</p>
     <div v-if="tip" class="tip" :class="{ warn: tip.warn }" :style="tipStyle" aria-hidden="true">
       <div class="tip-head"><b>{{ tip.title }}</b> <span>{{ tip.id }}</span></div>
       <dl>

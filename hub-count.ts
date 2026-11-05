@@ -7,32 +7,14 @@
 // (or next to one of its parent folders, for a worktree). For each table it
 // reads the CSV, reads each row as a Specimen (hub.ts), runs generate(), and
 // checks the clashes and the floating parts. The errors are grouped by field.
-import { existsSync, readFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { readFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseCsv, loadCatalog, type Catalog } from './sections.ts';
 import { floating, generate } from './generate.ts';
 import { clashes } from './clash.ts';
-import { readTables } from './tables.ts';
+import { HUB_TABLES, findHubData, readTables } from './tables.ts';
 import { toSpecimen } from './hub.ts';
-
-// the tables we read, and their CSV file in resslab-hub-data
-export const HUB_TABLES: Record<string, string> = {
-  connections: 'connections/connections.csv',
-  braces: 'braces/steel_braces.csv',
-  columns: 'columns/steel_columns.csv',
-  hss_columns: 'hss_columns/hss_columns.csv',
-  eccentric_braced_frames: 'eccentric_braced_frames/eccentric_braced_frames.csv',
-};
-
-export function findHubData(dir?: string): string | undefined {
-  if (dir) return existsSync(dir) ? resolve(dir) : undefined;
-  for (let d = dirname(fileURLToPath(import.meta.url)); ; d = dirname(d)) {
-    const here = join(d, 'resslab-hub-data');
-    if (existsSync(join(here, HUB_TABLES.connections))) return here;
-    if (dirname(d) === d) return undefined;
-  }
-}
 
 // One table. drawn: the rows that read and give parts. stuck: drawn, but the
 // solver finds a mechanism. errors: the rows that don't read, by kind of error

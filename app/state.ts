@@ -15,6 +15,9 @@ import euC from '../sections/channel-european-sections.csv?raw';
 import euL from '../sections/angle-european-sections.csv?raw';
 
 const DEFAULTS = {
+  // a hub test instead of a seed (app/tests.ts): '<table>/<id>', '<table>'
+  // (its first test) or 'paste' (the pasted record). '': the seed.
+  specimen: '',
   seed: 5,
   // structure
   form: 'mix',
@@ -96,7 +99,8 @@ watch(s, () => {
   timer = window.setTimeout(() => {
     const p = new URLSearchParams();
     for (const [k, v] of Object.entries(s)) if (v !== (DEFAULTS as any)[k]) p.set(k, String(v));
-    history.replaceState(null, '', p.size ? '#' + p : location.pathname);
+    // keep the / of specimen=<table>/<id> readable, URLSearchParams reads it back
+    history.replaceState(null, '', p.size ? '#' + String(p).replace(/%2F/gi, '/') : location.pathname);
   }, 200);
 });
 
@@ -127,8 +131,9 @@ const TABLES: Record<Family, [string, string, string, string]> = { aisc: [aiscI,
 const cats: Partial<Record<Family, Catalog>> = {};
 export const catalog = (fam: Family) => (cats[fam] ??= loadCatalog(fam, ...TABLES[fam]));
 
-// a structure and how it was made; animate: play the build when it shows
-export type Built = { r: Result; ms: number; animate: boolean };
+// a structure and how it was made; animate: play the build when it shows;
+// fit: a new hub test, the 3D view fits it
+export type Built = { r: Result; ms: number; animate: boolean; fit?: boolean };
 
 // what the drawing says in the title block
 export const stats = reactive({ draw: '', ms: '', base: '' });

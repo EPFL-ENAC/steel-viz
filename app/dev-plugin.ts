@@ -6,6 +6,11 @@
 //   node_modules/.cache. With its WebGL viewer (and three.js) only when that
 //   viewer has setFrame(): an older one can't zoom with ours, so the page
 //   draws the base structure with the viewer of this checkout (app/engine.ts).
+//   With toSpecimen() when the base has it, so main reads a hub test itself.
+// - /__dev/hub: the hub tables we can serve, { tables: [...] }, and
+//   /__dev/hub/<table>: the CSV text of one, from the resslab-hub-data folder
+//   that findHubData() finds (read only). Only the names of HUB_TABLES: no
+//   path from the URL goes to the disk. app/tests.ts reads them.
 // - A change outside app/ (generator, renderers, tables) reloads the whole
 //   page. The settings live in the URL hash, so they stay.
 import { execFileSync, execSync } from 'node:child_process';
@@ -15,7 +20,7 @@ import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import type { Plugin } from 'vite';
 import type { Family } from '../sections.ts';
-import { SHAPE_FILES, TABLE_FILES } from '../tables.ts';
+import { HUB_TABLES, SHAPE_FILES, TABLE_FILES, findHubData } from '../tables.ts';
 
 const app = dirname(fileURLToPath(import.meta.url));
 const root = dirname(app);
@@ -48,6 +53,8 @@ async function bundleBase(sha: string) {
     JSON.stringify([...TABLE_FILES[fam], ...SHAPE_FILES[fam]].map((f) => join(dir, 'sections', f)).filter(existsSync).map((f) => readFileSync(f, 'utf8')));
   const webgl = join(dir, 'webgl.ts');
   const gl = existsSync(webgl) && readFileSync(webgl, 'utf8').includes('setFrame');
+  const hub = join(dir, 'hub.ts');
+  const reader = existsSync(hub) && readFileSync(hub, 'utf8').includes('export function toSpecimen');
   const r = await build({
     stdin: {
       // steel.ts as a whole: an export the base does not have yet is just undefined
@@ -56,7 +63,8 @@ import { generate } from './generate.ts';
 import * as steel from './steel.ts';
 import { renderHLR } from './hlr.ts';
 ${gl ? "import { createViewer } from './webgl.ts';" : 'const createViewer = undefined;'}
-globalThis.BASE = { loadCatalog, generate, steel, renderHLR, createViewer, TABLES: { aisc: ${tables('aisc')}, eu: ${tables('eu')} } };`,
+${reader ? "import { toSpecimen } from './hub.ts';" : 'const toSpecimen = undefined;'}
+globalThis.BASE = { loadCatalog, generate, steel, renderHLR, createViewer, toSpecimen, TABLES: { aisc: ${tables('aisc')}, eu: ${tables('eu')} } };`,
       resolveDir: dir,
       loader: 'ts',
     },
@@ -86,11 +94,30 @@ function baseScript() {
   return bases.get(sha)!;
 }
 
+const hubData = findHubData();
+const hubFile = (table: string) => (hubData && Object.hasOwn(HUB_TABLES, table) ? join(hubData, HUB_TABLES[table]) : undefined);
+
 export const devTools = (): Plugin => ({
   name: 'steel-viz-dev',
   apply: 'serve',
   configureServer(server) {
     baseScript(); // ready before the page asks for it
+    console.log(hubData ? `  hub tests: ${hubData}` : '  hub tests: no resslab-hub-data folder, only the examples of specimens/');
+    // the CSV is read at each request: a change in resslab-hub-data shows on reload
+    server.middlewares.use('/__dev/hub', (req, res) => {
+      const name = (req.url ?? '').split('?')[0].replace(/^\/+/, '');
+      const file = hubFile(name);
+      if (!name) {
+        res.setHeader('content-type', 'application/json');
+        res.end(JSON.stringify({ tables: Object.keys(HUB_TABLES).filter((t) => existsSync(hubFile(t) ?? '')) }));
+      } else if (!file || !existsSync(file)) {
+        res.statusCode = 404;
+        res.end(`no hub table "${name}"`);
+      } else {
+        res.setHeader('content-type', 'text/csv; charset=utf-8');
+        res.end(readFileSync(file, 'utf8'));
+      }
+    });
     server.middlewares.use('/__dev/info', (_, res) => {
       res.setHeader('content-type', 'application/json');
       res.end(JSON.stringify(info()));

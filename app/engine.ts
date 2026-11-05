@@ -4,9 +4,11 @@
 // The base can be older than this code: its timeline() may have no duration,
 // each use checks first. A base with no viewer, or one with no setFrame()
 // (the dev plugin leaves it out), uses the viewer of this checkout, so the
-// zoom and pan still follow: ownViewer is false then.
+// zoom and pan still follow: ownViewer is false then. A base with no hub
+// readers has no toSpecimen.
 import { generate, type Result } from '../generate.ts';
 import { renderHLR } from '../hlr.ts';
+import { toSpecimen } from '../hub.ts';
 import type { Catalog, Family } from '../sections.ts';
 import * as steel from '../steel.ts';
 import { createViewer } from '../webgl.ts';
@@ -17,12 +19,13 @@ export type Engine = {
   render: typeof steel.render;
   renderHLR: typeof renderHLR;
   createViewer?: typeof createViewer;
+  toSpecimen?: typeof toSpecimen;
   steel: Partial<typeof steel> & Pick<typeof steel, 'timeline' | 'buildEnd'>;
   catalog: (fam: Family) => Catalog;
   ownViewer: boolean; // false: the base structure in the viewer of this checkout
 };
 
-export const here: Engine = { generate, render: steel.render, renderHLR, createViewer, steel, catalog, ownViewer: true };
+export const here: Engine = { generate, render: steel.render, renderHLR, createViewer, toSpecimen, steel, catalog, ownViewer: true };
 
 let baseLoad: Promise<Engine> | null = null;
 export const loadBase = () =>
@@ -36,7 +39,7 @@ export const loadBase = () =>
   }).then((B): Engine => {
     const cats: Partial<Record<Family, Catalog>> = {};
     return {
-      generate: B.generate, render: B.steel.render, renderHLR: B.renderHLR, steel: B.steel,
+      generate: B.generate, render: B.steel.render, renderHLR: B.renderHLR, steel: B.steel, toSpecimen: B.toSpecimen,
       createViewer: B.createViewer ?? createViewer, ownViewer: !!B.createViewer,
       catalog: (fam) => (cats[fam] ??= B.loadCatalog(fam, ...B.TABLES[fam])),
     };
