@@ -196,7 +196,7 @@ async function copy(what: 'svg' | 'link') {
         </Section>
 
         <Section v-if="!hub" id="layout" title="Layout" :keys="GROUPS.layout">
-          <p class="note">Storeys, span and bracing change a portal or a box. Arm length is for a tree (the side arms of a portal take 3/4 of the band).</p>
+          <p class="note">Storeys, span and bracing change a portal or a box. Arm length is for a tree (the side arms of a portal take 3/4 of the band). Gable roof is for a one storey portal.</p>
           <Seg v-model="s.storeys" label="Storeys" :options="[[0, 'Auto'], [1, 'One'], [2, 'Two']]" />
           <Slider id="span" v-model="s.span" label="Span" :min="0.6" :max="1.6" :step="0.05" :out="`× ${s.span.toFixed(2)}`" />
           <Seg v-model="s.bracing" label="Bracing" :options="[['auto', 'Auto'], ...BRACING_KINDS.map((b) => [b, b[0].toUpperCase() + b.slice(1)] as [string, string])]" />
@@ -210,6 +210,7 @@ async function copy(what: 'svg' | 'link') {
               <option v-for="c in BEAM_CONN_KINDS" :key="c" :value="c">All {{ CONN(c) }}</option>
             </select>
           </div>
+          <Slider id="gable" v-model="s.gable" label="Gable roof" :min="0" :max="1" :step="0.05" :out="pct(s.gable)" />
         </Section>
 
         <Section v-if="!hub" id="details" title="Details" :keys="GROUPS.details">

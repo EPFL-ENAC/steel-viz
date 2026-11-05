@@ -8,8 +8,8 @@ import { DEFAULTS, generate } from './generate.ts';
 import { OLD, cat, kinds } from './params-check.ts';
 
 test('the look settings at their default change nothing', () => {
-  const { storeys, spanK, bracing, xP, xKind, armL, armZ, conn, trussK, rodP, colSpliceP, connKindsP, skewP } = DEFAULTS;
-  const set = { storeys, spanK, bracing, xP, xKind, armL, armZ, conn, trussK, rodP, colSpliceP, connKindsP, skewP };
+  const { storeys, spanK, bracing, xP, xKind, armL, armZ, conn, trussK, rodP, colSpliceP, connKindsP, skewP, gableP } = DEFAULTS;
+  const set = { storeys, spanK, bracing, xP, xKind, armL, armZ, conn, trussK, rodP, colSpliceP, connKindsP, skewP, gableP };
   for (let seed = 1; seed <= 30; seed++) assert.deepEqual(generate({ seed, ...set }, cat).parts, generate({ seed }, cat).parts, `seed ${seed}`);
 });
 

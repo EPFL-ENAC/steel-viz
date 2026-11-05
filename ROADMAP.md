@@ -19,6 +19,10 @@ What we plan to do next. A checked item is done.
 - [x] Fewer trusses on boxes. Boxes get one on 32 of 40 seeds. Try a lower `TRUSS_P.bay` in `generate.ts`.
 - [ ] Trusses on portal arms. They never get one either. The low truss of trees would fit on a few, but it changes portal 143, #2 of the top 12.
 - [ ] A rod clevis goes through an arm connection on aisc tree 140 (today's code, outside the seeds the tests run).
+- [x] Gable portal: a one storey portal with a pitched roof, haunches at the eaves and a bolted ridge splice (`gable.ts`, `gableP`, `--gable`).
+- [ ] Gable on a two storey portal: on the top bay beam only, the floor beam stays flat. Mostly the condition in `addGable()`.
+- [ ] Gable on a box: the two bays of one side get the gable, with a ridge beam between the two ridges (a new member type).
+- [ ] Purlins on the rafters of a gable portal.
 
 ## Solver
 
