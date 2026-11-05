@@ -171,6 +171,12 @@ type Base = 'none' | 'flange' | 'all';
 // id: the specimen id. continuity: false leaves out the continuity plates.
 // load: what the actuators of a specimen push (see specimenRig).
 // minA: the lightest area sizing may pick for a member (raised when alphaCr is too low).
+// A rig part between two mount faces. from: the fixed one. to: the one on the specimen.
+export type RigStrut = { from: V; to: V; D: number; kind: 'link' | 'actuator' };
+// The mount points of the rig of a beam-to-column test. dir: the first beam.
+// axis: the pins. foot: the foot pin centre, footD its diameter. The pin
+// centres of a strut come from hingeSize(D).pin.
+export type SpecimenRig = { dir: V; axis: V; foot: V; footD: number; top: RigStrut; tips: (RigStrut & { arm: string })[] };
 export type Structure = {
   form: Form | 'specimen'; id?: string; H: number; col: Section; cols: Col[]; arms: Arm[]; secs: Secondary[]; splice?: Splice; base?: Base; continuity?: boolean;
   load?: 'beam' | 'column'; minA?: Record<string, number>;
@@ -178,6 +184,8 @@ export type Structure = {
   brace?: { frame: BraceSpecimen['frame']; L: number; angle: number; ends: BraceSpecimen['ends'] };
   // a column test (bench.ts): col is the column section, H its length
   columnTest?: { ends: ColumnSpecimen['ends']; L: number; angle: number };
+  // a beam-to-column test: its rig, for the deformed shape
+  rig?: SpecimenRig;
   // a link test (bench.ts): col is the link section, H the height of its axis.
   // stiffeners: how many are drawn, span and height: the frame (not for TF1).
   link?: { config: LinkSpecimen['config']; at: LinkSpecimen['at']; e: number; stiffeners: number; span?: number; height?: number };
@@ -185,7 +193,7 @@ export type Structure = {
 const colId = (i: number) => (i ? `column${i + 1}` : 'column');
 const baseId = (i: number) => (i ? `base${i + 1}` : 'base');
 
-const hdir = (bearing: number): V => [Math.sin((bearing * Math.PI) / 180), Math.cos((bearing * Math.PI) / 180), 0];
+export const hdir = (bearing: number): V => [Math.sin((bearing * Math.PI) / 180), Math.cos((bearing * Math.PI) / 180), 0];
 // the column face an arm leaves: its bearing, but for a skewed arm
 const faceOf = (a: Arm) => a.face ?? a.bearing;
 const mid = <T>(xs: T[]) => xs[Math.floor(xs.length / 2)];
@@ -684,8 +692,18 @@ const endT = (s: Section) => Math.max(25, Math.round(s.tf));
 const across = (h: V): V => [Math.round(h[1]), -Math.round(h[0]), 0];
 const firstDir = (st: Structure): V => (st.arms.length ? hdir(st.arms[0].bearing) : [0, 1, 0]);
 
+// The panel zone of a specimen: the column between the flanges of its beams,
+// mid flange to mid flange. ramp: how far past it the column cross sections go
+// back to square, in the deformed shape (deform-connection.ts).
+export function panelZone(st: Structure) {
+  const lo = Math.min(...st.arms.map((a) => a.z - a.sec.d + a.sec.tf / 2));
+  const hi = Math.max(...st.arms.map((a) => a.z - a.sec.tf / 2));
+  return { z0: lo, z1: hi, ramp: Math.max(1, Math.min(0.4 * st.col.d, lo / 2, (st.H - hi) / 2)) };
+}
+
 // below: the blocks and the foot pin, put down before the column. above: the
-// head, the links and the actuators, put on last.
+// head, the links and the actuators, put on last. It also keeps the mount
+// points of the rig in st.rig, for the deformed shape.
 function specimenRig(st: Structure): { below: Part[]; above: Part[] } {
   const { col, H } = st;
   const o = { step: 0 };
@@ -740,6 +758,11 @@ function specimenRig(st: Structure): { below: Part[]; above: Part[] } {
       return beam ? actuator(`${k.id}-actuator`, p0, p1, across(k.h), k.D, ko) : link(`${k.id}-link`, p0, p1, across(k.h), k.D, ko);
     }),
   ];
+  st.rig = {
+    dir: firstDir(st), axis: A, foot: [0, 0, zf + hingeSize(Dc).pin], footD: Dc,
+    top: { from, to, D: Da, kind: beam ? 'link' : 'actuator' },
+    tips: tips.map((k) => ({ arm: k.id, from: [k.P[0], k.P[1], k.top], to: [k.P[0], k.P[1], k.zb], D: k.D, kind: beam ? 'actuator' : 'link' })),
+  };
   return { below, above };
 }
 
@@ -1410,7 +1433,10 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
         return { id, step: step++, supports: [on], kind: 'plate', from: [0, 0, -1], faces: f.faces, boxes: [f.box], dots: [], info: { type: 'End plate', of: lo.id } };
       };
       out.push(end(`${lo.id}-foot`, -tp / 2, 'foot-pin'));
-      out.push({ id: lo.id, step: step++, supports: [`${lo.id}-foot`], kind: 'column', from: [0, 0, 1], faces: memberFaces(lo, seg), boxes: memberBoxes(lo), dots: [], info: col(lo, 'Column', 'column'), round: isRound(lo.sec) });
+      // cut at the panel zone, so the deformed shape bends where the model does
+      const pz = st.arms.length ? panelZone(st) : undefined;
+      const cuts = pz ? [pz.z0 - pz.ramp, pz.z0, pz.z1, pz.z1 + pz.ramp] : [];
+      out.push({ id: lo.id, step: step++, supports: [`${lo.id}-foot`], kind: 'column', from: [0, 0, 1], faces: memberFaces(lo, seg, cuts), boxes: memberBoxes(lo), dots: [], info: col(lo, 'Column', 'column'), round: isRound(lo.sec) });
       out.push(end(`${lo.id}-cap`, st.H + tp / 2, lo.id));
       return { lo, hi: lo };
     }
@@ -1722,6 +1748,8 @@ function checks(st: Structure, p: Params): Record<string, MemberCheck> {
 }
 
 export type Result = {
+  // a beam-to-column test: the mount points of its rig (deform-connection.ts)
+  rig?: SpecimenRig;
   st: Structure;
   parts: Part[];
   ok: boolean;
@@ -1921,5 +1949,5 @@ function buildSpecimen(p: Params, spec: ConnSpecimen, cat: Catalog, detail: Deta
   const ps = parts(st, detail, p.seg);
   const t3 = performance.now();
   const members = r.ok ? checks(st, p) : {};
-  return { st, parts: ps, ok: r.ok, log, ratio, alpha, solves: 1, ms: { topology: t1 - t0, solve: t2 - t1, geometry: t3 - t2 }, nodes: m.nodes.length, members };
+  return { st, parts: ps, ok: r.ok, log, ratio, alpha, solves: 1, ms: { topology: t1 - t0, solve: t2 - t1, geometry: t3 - t2 }, nodes: m.nodes.length, members, rig: st.rig };
 }

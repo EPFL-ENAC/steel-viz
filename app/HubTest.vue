@@ -5,6 +5,7 @@
 -->
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue';
+import Response from './Response.vue';
 import { s } from './state.ts';
 import { LABELS, counts, current, keyFields, loadTable, pasted, source, step, type Row, type Source } from './tests.ts';
 
@@ -129,6 +130,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', key));
         </ul>
       </div>
     </template>
+    <Response v-if="c.spec" />
     <details v-if="fields.length" class="record">
       <summary>Record, {{ fields.length }} fields</summary>
       <dl>

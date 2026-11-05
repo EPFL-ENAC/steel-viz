@@ -14,9 +14,15 @@
 // another part behind. With one weight, only the round parts (Part.round:
 // rods, round tubes, the round bars of the test rig) get it, as thin lines:
 // their faces have no long edges, so without it only their ends show.
+//
+// deform() moves the vertices in the vertex shader (the MOVE chunk, one Move
+// per part from deform.ts), so a new step of a test uploads no geometry. The
+// fill pass also colors the working zones. The boxes of the zones are in the
+// undeformed frame, so they follow the parts.
 import { add, cross, dot, mul, norm, sub, type V } from './vec.ts';
 import { BOLT_MS, buildEnd, camera, timeline, type Part } from './steel.ts';
 import { triangles } from './triangles.ts';
+import { I4, MAX_KNOTS, MAX_ZONES, type DeformState, type Move } from './deform.ts';
 
 const HEAD = 13; // bolt head height, mm, as in hlr.ts
 const R = 17; // bolt head, corner to centre, mm
@@ -25,8 +31,9 @@ const THIN = 1; // px
 const THICK = 2.25; // px
 const ONE = 1.6; // px, the lines with one weight
 
-// rig: the lines of the test rig (default: half way between fg and bg)
-export type Colors = { bg: string; fg: string; accent: string; rig?: string };
+// rig: the lines of the test rig (default: half way between fg and bg).
+// zones: the color of the working zones, by Zone.slot (default: accent)
+export type Colors = { bg: string; fg: string; accent: string; rig?: string; zones?: string[] };
 // what the view shows, in world mm: the point in the middle, and half the
 // height it shows. Two viewers with the same frame line up, even when their
 // structures are a bit different (vs main).
@@ -39,6 +46,9 @@ export type Viewer = {
   build(speed?: number, duration?: number): void;
   setWeights(two: boolean): void;
   setColors(c: Colors): void;
+  // the deformed shape of a test (null: undeformed). The parts keep it until
+  // the next show() of other parts.
+  deform(d: DeformState | null): void;
   reset(): void; // zoom and pan back to the whole structure
   frame(): Frame | null; // null: no zoom or pan by hand, it fits the structure
   setFrame(f: Frame | null): void; // null: fit the structure. Never calls onFrame.
@@ -71,16 +81,80 @@ const HEAD_SEG = 6 * 6 * 2;
 // highp for the samplers too: their default is lowp, too coarse for a depth
 const TOP = '#version 300 es\nprecision highp float;\nprecision highp int;\nprecision highp sampler2D;\n';
 
+// Where a vertex goes: the same math as movePoint() of deform.ts. Change both,
+// or the view and the tests stop matching. mk: s, w, t, r of each knot. A part
+// with no move has no knot and A = B = identity.
+const MOVE = `
+uniform vec3 mo, mu, mn;
+uniform vec4 mk[${MAX_KNOTS}];
+uniform int mnk;
+uniform mat4 mA, mB;
+uniform vec2 msplit;
+vec3 move(vec3 p) {
+  vec3 d = p - mo;
+  float s = dot(d, mu);
+  vec3 q = p;
+  if (mnk > 0) {
+    vec4 a = mk[0];
+    vec4 z = mk[mnk - 1];
+    float w;
+    float r;
+    if (s <= a.x) {
+      w = a.y + a.z * (s - a.x);
+      r = a.w;
+    } else if (s >= z.x) {
+      w = z.y + z.z * (s - z.x);
+      r = z.w;
+    } else {
+      int i = 0;
+      while (i < mnk - 2 && s > mk[i + 1].x) i++;
+      vec4 P = mk[i];
+      vec4 Q = mk[i + 1];
+      float h = Q.x - P.x;
+      float x = (s - P.x) / h;
+      float x2 = x * x;
+      float x3 = x2 * x;
+      w = (2.0 * x3 - 3.0 * x2 + 1.0) * P.y + (x3 - 2.0 * x2 + x) * h * P.z + (3.0 * x2 - 2.0 * x3) * Q.y + (x3 - x2) * h * Q.z;
+      r = P.w + (Q.w - P.w) * x;
+    }
+    q = p + mn * w - mu * (dot(d, mn) * r);
+  }
+  float f = msplit.y > msplit.x ? clamp((s - msplit.x) / (msplit.y - msplit.x), 0.0, 1.0) : (s >= msplit.x ? 1.0 : 0.0);
+  return mix((mA * vec4(q, 1.0)).xyz, (mB * vec4(q, 1.0)).xyz, f);
+}`;
+
 // the faces: the background colour, or the part id (the outline and pick passes)
 const FILL_VS = `${TOP}
 uniform mat4 M;
 uniform vec3 off;
 layout(location = 0) in vec3 pos;
-void main() { gl_Position = M * vec4(pos + off, 1.0); }`;
+out vec3 vPos;
+${MOVE}
+void main() {
+  vPos = pos;
+  gl_Position = M * vec4(move(pos) + off, 1.0);
+}`;
 const COLOR_FS = `${TOP}
 uniform vec4 color;
 out vec4 o;
 void main() { o = color; }`;
+// the faces in the view: the background, toward the color of the zone they are in.
+// vPos is the undeformed point. zk: rgb, and how far toward it.
+const ZONE_FS = `${TOP}
+uniform vec4 color;
+uniform int nz;
+uniform vec3 zc[${MAX_ZONES}], zx[${MAX_ZONES}], zy[${MAX_ZONES}], zz[${MAX_ZONES}], zh[${MAX_ZONES}];
+uniform vec4 zk[${MAX_ZONES}];
+in vec3 vPos;
+out vec4 o;
+void main() {
+  vec3 c = color.rgb;
+  for (int i = 0; i < nz; i++) {
+    vec3 d = vPos - zc[i];
+    if (abs(dot(d, zx[i])) <= zh[i].x && abs(dot(d, zy[i])) <= zh[i].y && abs(dot(d, zz[i])) <= zh[i].z) c = mix(c, zk[i].rgb, zk[i].a);
+  }
+  o = vec4(c, 1.0);
+}`;
 
 // a line of width px (device px, as LineSegments2 did: it took the size of
 // the viewport): a quad around the segment, plus a half disc
@@ -96,9 +170,10 @@ layout(location = 0) in vec4 corner;
 layout(location = 1) in vec3 start;
 layout(location = 2) in vec3 end;
 out vec2 uv;
+${MOVE}
 void main() {
-  vec4 a = M * vec4(start + off, 1.0);
-  vec4 b = M * vec4(end + off, 1.0);
+  vec4 a = M * vec4(move(start) + off, 1.0);
+  vec4 b = M * vec4(move(end) + off, 1.0);
   float aspect = res.x / res.y;
   vec2 dir = b.xy - a.xy;
   dir.x *= aspect;
@@ -208,6 +283,16 @@ function rgb(css: string): RGB {
   return [d[0] / 255, d[1] / 255, d[2] / 255];
 }
 
+// a Move, as the uniforms of the MOVE chunk want it
+type Packed = { o: V; u: V; n: V; k: Float32Array; nk: number; A: Float32Array; B: Float32Array; split: [number, number] };
+function pack(m: Move): Packed {
+  const k = new Float32Array(4 * MAX_KNOTS);
+  m.knots.forEach((c, i) => k.set([c.s, c.w, c.t, c.r], 4 * i));
+  const A = new Float32Array(m.A);
+  return { o: m.o, u: m.u, n: m.n, k, nk: m.knots.length, A, B: m.B ? new Float32Array(m.B) : A, split: m.split ?? [0, 0] };
+}
+const STILL = pack({ o: [0, 0, 0], u: [1, 0, 0], n: [0, 0, 1], knots: [], A: I4() });
+
 type Program = { p: WebGLProgram; u: Record<string, WebGLUniformLocation | null> };
 // a render target: a colour texture, and a depth texture or buffer
 type Target = { fb: WebGLFramebuffer; color: WebGLTexture; depth?: WebGLTexture; rb?: WebGLRenderbuffer; w: number; h: number };
@@ -217,7 +302,7 @@ type Buf = { vao: WebGLVertexArrayObject; buf: WebGLBuffer; n: number; draw: num
 // them the build animation shows now. off: where the animation moves it, mm.
 type Piece = {
   part: Part; fill: Buf; lines?: Buf; base: [number, number]; per: number;
-  id: RGB; off: V; visible: boolean; color: RGB; width: number;
+  id: RGB; off: V; visible: boolean; color: RGB; width: number; move: Packed;
 };
 
 // onTurn: the user turned the view (done: the drag is over). onHover: the
@@ -242,6 +327,8 @@ export function createViewer(
   // the lines of the test rig: colors.rig, or half way between fg and bg
   const rigOf = (c: Colors): RGB => (c.rig ? rgb(c.rig) : [0, 1, 2].map((i) => (rgb(c.fg)[i] + rgb(c.bg)[i]) / 2) as RGB);
   let rig = rigOf(colors);
+  let zoneColors = (colors.zones ?? []).map(rgb);
+  let deformed: DeformState | null = null;
   let two = true;
   let pieces: Piece[] = [];
   let shown: Part[] = []; // the parts of show(), in the order of their ids
@@ -320,11 +407,12 @@ export function createViewer(
   };
 
   // made again when the GPU comes back after a context loss
-  let fillP: Program, lineP: Program, outlineP: Program, downP: Program;
+  let fillP: Program, zoneP: Program, lineP: Program, outlineP: Program, downP: Program;
   let rt: Target, lt: Target, pickRT: Target; // depth and ids, the outlines alone, the pick
   let quadBuf: WebGLBuffer, quadIdx: WebGLBuffer;
   const init = () => {
     fillP = compile(FILL_VS, COLOR_FS);
+    zoneP = compile(FILL_VS, ZONE_FS);
     lineP = compile(LINE_VS, LINE_FS);
     outlineP = compile(SCREEN_VS, OUTLINE_FS);
     downP = compile(SCREEN_VS, DOWN_FS);
@@ -425,14 +513,43 @@ export function createViewer(
     gl.bindFramebuffer(gl.FRAMEBUFFER, t ? t.fb : null);
     gl.viewport(0, 0, t ? t.w : canvas.width, t ? t.h : canvas.height);
   };
-  // the faces, with their part id as colour (ids) or the background
+  const moveBy = ({ u }: Program, m: Packed) => {
+    gl.uniform3fv(u.mo, m.o);
+    gl.uniform3fv(u.mu, m.u);
+    gl.uniform3fv(u.mn, m.n);
+    gl.uniform4fv(u['mk[0]'], m.k);
+    gl.uniform1i(u.mnk, m.nk);
+    gl.uniformMatrix4fv(u.mA, false, m.A);
+    gl.uniformMatrix4fv(u.mB, false, m.B);
+    gl.uniform2fv(u.msplit, m.split);
+  };
+  // the zones in the uniforms of ZONE_FS. A level of 1 goes 80 % of the way to
+  // the color: the lines stay readable on it.
+  const zonesIn = ({ u }: Program) => {
+    const zs = deformed?.zones.slice(0, MAX_ZONES) ?? [];
+    const flat = (f: (z: (typeof zs)[number]) => number[]) => new Float32Array(zs.flatMap(f));
+    if (!zs.length) return 0;
+    gl.uniform3fv(u['zc[0]'], flat((z) => z.c));
+    gl.uniform3fv(u['zx[0]'], flat((z) => z.axes[0]));
+    gl.uniform3fv(u['zy[0]'], flat((z) => z.axes[1]));
+    gl.uniform3fv(u['zz[0]'], flat((z) => z.axes[2]));
+    gl.uniform3fv(u['zh[0]'], flat((z) => z.half));
+    gl.uniform4fv(u['zk[0]'], flat((z) => [...(zoneColors[z.slot] ?? accent), 0.8 * Math.min(1, z.level)]));
+    return zs.length;
+  };
+  // the faces, with their part id as colour (ids) or the background. The rig
+  // and the bolts take no zone color.
   const fills = (M: Float32Array, ids: boolean) => {
-    gl.useProgram(fillP.p);
-    gl.uniformMatrix4fv(fillP.u.M, false, M);
+    const P = ids ? fillP : zoneP;
+    gl.useProgram(P.p);
+    gl.uniformMatrix4fv(P.u.M, false, M);
+    const nz = ids ? 0 : zonesIn(P);
     for (const p of pieces) {
       if (!p.visible || !p.fill.draw) continue;
-      gl.uniform3fv(fillP.u.off, p.off);
-      gl.uniform4f(fillP.u.color, ...(ids ? p.id : bg), 1);
+      gl.uniform3fv(P.u.off, p.off);
+      gl.uniform4f(P.u.color, ...(ids ? p.id : bg), 1);
+      if (!ids) gl.uniform1i(P.u.nz, p.part.kind === 'rig' || p.part.kind === 'bolts' ? 0 : nz);
+      moveBy(P, p.move);
       gl.bindVertexArray(p.fill.vao);
       gl.drawArrays(gl.TRIANGLES, 0, p.fill.draw);
     }
@@ -446,6 +563,7 @@ export function createViewer(
       gl.uniform3fv(lineP.u.off, p.off);
       gl.uniform4f(lineP.u.color, ...p.color, 1);
       gl.uniform1f(lineP.u.width, p.width);
+      moveBy(lineP, p.move);
       gl.bindVertexArray(p.lines.vao);
       gl.drawElementsInstanced(gl.TRIANGLES, QUAD_IDX.length, gl.UNSIGNED_SHORT, 0, p.lines.draw);
     }
@@ -580,9 +698,14 @@ export function createViewer(
   };
 
   // ---- the structure
+  const moveOf = (part: Part) => {
+    const m = deformed?.moves[part.id];
+    return m ? pack(m) : STILL;
+  };
   const show = (parts: Part[]) => {
     stopAnim();
     setHover(null);
+    if (parts !== shown) deformed = null; // its moves are for the old parts
     shown = parts;
     for (const p of pieces) {
       free(p.fill);
@@ -621,7 +744,7 @@ export function createViewer(
         // blue marks the bolts (a head, 13 mm high, gets no outline) and the
         // round parts (outlined with one weight too)
         id: [((pi + 1) & 255) / 255, ((pi + 1) >> 8) / 255, part.kind === 'bolts' ? 1 : part.round ? 0.5 : 0],
-        off: [0, 0, 0], visible: true, color: fg, width: THIN,
+        off: [0, 0, 0], visible: true, color: fg, width: THIN, move: moveOf(part),
       };
       lineStyle(p);
       pieces.push(p);
@@ -812,7 +935,9 @@ export function createViewer(
     }
     const [ex, ey] = [(x1 - x0) / 2, (y1 - y0) / 2];
     const asp = w / h;
-    zoom = (1.1 * radius * 0.9) / Math.max(1, asp > 1 ? Math.max(ey, ex / asp) : Math.max(ex, ey * asp));
+    // a deformed shape needs more room than the box of the undeformed one
+    const room = deformed ? 0.8 : 0.9;
+    zoom = (1.1 * radius * room) / Math.max(1, asp > 1 ? Math.max(ey, ex / asp) : Math.max(ex, ey * asp));
     pan = add(mul(r, (x0 + x1) / 2), mul(up, (y0 + y1) / 2));
     fitted = true;
     place();
@@ -851,7 +976,15 @@ export function createViewer(
       colors = c;
       [bg, fg, accent] = [rgb(c.bg), rgb(c.fg), rgb(c.accent)];
       rig = rigOf(c);
+      zoneColors = (c.zones ?? []).map(rgb);
       for (const p of pieces) lineStyle(p);
+      redraw();
+    },
+    deform(d) {
+      const refit = !d !== !deformed && fitted;
+      deformed = d;
+      for (const p of pieces) p.move = moveOf(p.part);
+      if (refit && pieces.length) reset();
       redraw();
     },
     stats() {

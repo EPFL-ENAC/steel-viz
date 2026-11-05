@@ -11,14 +11,18 @@
 //   /__dev/hub/<table>: the CSV text of one, from the resslab-hub-data folder
 //   that findHubData() finds (read only). Only the names of HUB_TABLES: no
 //   path from the URL goes to the disk. app/tests.ts reads them.
+// - /__dev/hub/<table>/responses/<id>: the response files of one test,
+//   { "<folder>": "<CSV text>" }, for the folders of DEFORMS[table]. The id
+//   must be a file of the folder: again no path from the URL goes to the disk.
 // - A change outside app/ (generator, renderers, tables) reloads the whole
 //   page. The settings live in the URL hash, so they stay.
 import { execFileSync, execSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import type { Plugin } from 'vite';
+import { DEFORMS } from '../deforms.ts';
 import type { Family } from '../sections.ts';
 import { HUB_TABLES, SHAPE_FILES, TABLE_FILES, findHubData } from '../tables.ts';
 
@@ -97,6 +101,17 @@ function baseScript() {
 const hubData = findHubData();
 const hubFile = (table: string) => (hubData && Object.hasOwn(HUB_TABLES, table) ? join(hubData, HUB_TABLES[table]) : undefined);
 
+// the response files of a test. undefined: no such table
+function hubResponses(table: string, id: string) {
+  if (!hubData || !Object.hasOwn(DEFORMS, table) || !Object.hasOwn(HUB_TABLES, table)) return undefined;
+  const out: Record<string, string> = {};
+  for (const { folder } of DEFORMS[table].responses) {
+    const dir = join(hubData, dirname(HUB_TABLES[table]), folder);
+    if (existsSync(dir) && readdirSync(dir).includes(`${id}.csv`)) out[folder] = readFileSync(join(dir, `${id}.csv`), 'utf8');
+  }
+  return out;
+}
+
 export const devTools = (): Plugin => ({
   name: 'steel-viz-dev',
   apply: 'serve',
@@ -107,7 +122,13 @@ export const devTools = (): Plugin => ({
     server.middlewares.use('/__dev/hub', (req, res) => {
       const name = (req.url ?? '').split('?')[0].replace(/^\/+/, '');
       const file = hubFile(name);
-      if (!name) {
+      const test = name.match(/^(\w+)\/responses\/([\w.()%-]+)$/);
+      if (test) {
+        const files = hubResponses(test[1], decodeURIComponent(test[2]));
+        res.statusCode = files ? 200 : 404;
+        res.setHeader('content-type', 'application/json');
+        res.end(JSON.stringify(files ?? {}));
+      } else if (!name) {
         res.setHeader('content-type', 'application/json');
         res.end(JSON.stringify({ tables: Object.keys(HUB_TABLES).filter((t) => existsSync(hubFile(t) ?? '')) }));
       } else if (!file || !existsSync(file)) {

@@ -1,17 +1,19 @@
 // The hub tests: where they come from, and the test on show. The one place
-// that fetches a test (fetchRecord): feat/deformed-shape will add the response
-// file of the test there.
+// that fetches a test (fetchRecord), with its response files.
 //
 // - In the dev server, app/dev-plugin.ts serves the tables of resslab-hub-data
 //   (/__dev/hub). We read every row with toSpecimen() (hub.ts) at load, so the
 //   rail can say how many rows read.
 // - With no hub data (a static build, or no resslab-hub-data folder), only the
-//   example records of specimens/, grouped by their table.
+//   example records of specimens/, grouped by their table, and their response
+//   files in specimens/responses/.
 //
 // The URL key `specimen` (app/state.ts) says which test: '<table>/<id>',
 // '<table>' (its first test), or 'paste' (the record pasted in the rail, kept
 // in this browser). '' is the seed.
 import { reactive, ref, shallowRef, watch } from 'vue';
+import { readResponse, type Curve } from '../deform.ts';
+import { DEFORMS } from '../deforms.ts';
 import { READERS, hubTable, toSpecimen, type HubRecord } from '../hub.ts';
 import { parseCsv } from '../sections.ts';
 import type { SectionRef, Specimen } from '../specimen.ts';
@@ -91,13 +93,37 @@ export function loadTable(table: string): Promise<Row[]> {
   }
   return tables.get(table)!;
 }
-// The one place that fetches a test: its row, and where it is in its table.
-// An unknown id gives the first row. Later (feat/deformed-shape): its response.
-export async function fetchRecord(table: string, id: string): Promise<{ row: Row; index: number; rows: Row[] }> {
+// ---- the response files of a test: { folder: curve }, only the ones it has
+const RESPONSES = import.meta.glob('../specimens/responses/**/*.csv', { query: '?raw', import: 'default' }) as Record<string, () => Promise<string>>;
+async function responseTexts(table: string, id: string): Promise<Record<string, string>> {
+  if ((await source()).kind === 'hub') {
+    const r = await fetch(`/__dev/hub/${table}/responses/${encodeURIComponent(id)}`);
+    return r.ok ? r.json() : {};
+  }
+  const out: Record<string, string> = {};
+  for (const { folder } of DEFORMS[table].responses) {
+    const load = RESPONSES[`../specimens/responses/${table}/${folder}/${id}.csv`];
+    if (load) out[folder] = await load();
+  }
+  return out;
+}
+async function fetchResponses(table: string, id: string): Promise<Record<string, Curve>> {
+  if (!Object.hasOwn(DEFORMS, table)) return {};
+  try {
+    const texts = await responseTexts(table, id);
+    return Object.fromEntries(Object.entries(texts).map(([k, v]) => [k, readResponse(v)]));
+  } catch {
+    return {}; // a test with no response draws as before
+  }
+}
+
+// The one place that fetches a test: its row, where it is in its table, and
+// its response files. An unknown id gives the first row.
+export async function fetchRecord(table: string, id: string): Promise<{ row: Row; index: number; rows: Row[]; responses: Record<string, Curve> }> {
   const rows = await loadTable(table);
   if (!rows.length) throw new Error(`the table ${table} is empty`);
   const index = Math.max(0, rows.findIndex((r) => r.id === id));
-  return { row: rows[index], index, rows };
+  return { row: rows[index], index, rows, responses: await fetchResponses(table, rows[index].id) };
 }
 
 // ---- the pasted record, kept in this browser
@@ -125,6 +151,7 @@ export type Current = {
   record?: unknown; // what the reader takes
   spec?: Specimen; // what it gives
   error?: string; // why there is no spec
+  responses?: Record<string, Curve>; // its measured response files
 };
 export const current = shallowRef<Current | null>(null);
 
@@ -150,8 +177,8 @@ async function resolveKey(key: string): Promise<Current> {
   const [table, ...rest] = key.split('/');
   const id = rest.join('/');
   try {
-    const { row, index, rows } = await fetchRecord(table, id);
-    return { key: `${table}/${row.id}`, table, id: row.id, name: row.name, index, rows, record: row.record, spec: row.spec, error: row.error };
+    const { row, index, rows, responses } = await fetchRecord(table, id);
+    return { key: `${table}/${row.id}`, table, id: row.id, name: row.name, index, rows, record: row.record, spec: row.spec, error: row.error, responses };
   } catch (e) {
     return { key, table, id, name: '', index: 0, rows: [], error: (e as Error).message };
   }
