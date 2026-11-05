@@ -5,11 +5,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DEFAULTS, generate } from './generate.ts';
-import { OLD, cat, kinds } from './params-check.ts';
+import { loadCatalog } from './sections.ts';
+import { readTables } from './tables.ts';
+import { NEW, cat, kinds } from './params-check.ts';
 
 test('the look settings at their default change nothing', () => {
-  const { storeys, spanK, bracing, xP, xKind, armL, armZ, conn, trussK, rodP, colSpliceP, connKindsP, skewP, gableP } = DEFAULTS;
-  const set = { storeys, spanK, bracing, xP, xKind, armL, armZ, conn, trussK, rodP, colSpliceP, connKindsP, skewP, gableP };
+  const { storeys, spanK, bracing, xP, xKind, armL, armZ, conn, trussK, rodP, colSpliceP, connKindsP, skewP, gableP, roundP } = DEFAULTS;
+  const set = { storeys, spanK, bracing, xP, xKind, armL, armZ, conn, trussK, rodP, colSpliceP, connKindsP, skewP, gableP, roundP };
   for (let seed = 1; seed <= 30; seed++) assert.deepEqual(generate({ seed, ...set }, cat).parts, generate({ seed }, cat).parts, `seed ${seed}`);
 });
 
@@ -23,7 +25,7 @@ test('more connection kinds at 0 change nothing', () => {
     for (let seed = 1; seed <= 20; seed++) {
       const off = generate({ seed, form, connKindsP: 0, colSpliceP: 0 }, cat);
       const on = generate({ seed, form, colSpliceP: 0 }, cat);
-      assert.deepEqual(kinds(off).filter((k) => !OLD.includes(k)), [], `${form} seed ${seed}`);
+      assert.deepEqual(kinds(off).filter((k) => NEW.includes(k)), [], `${form} seed ${seed}`);
       const members = (r: typeof on) => r.parts.filter((q) => q.kind === 'member').map((q) => [q.id, q.boxes, q.info?.sec?.id, q.info?.L]);
       assert.deepEqual(members(off), members(on), `${form} seed ${seed}`);
     }
@@ -53,6 +55,19 @@ test('X at 0 changes nothing', () => {
       on += xParts(generate({ seed, form, xP: 1 }, cat)).length;
     }
   assert.ok(on > 0);
+});
+
+// With roundP 0, a seed gives the parts of a catalog with no round tube
+// table (like main, and like the hub), at any roundP: no draw moves.
+test('round tubes at 0 change nothing', () => {
+  const [i, hss, c, l] = readTables('aisc');
+  const old = loadCatalog('aisc', i, hss, c, l);
+  for (const form of ['tree', 'portal', 'box', 'mix'] as const)
+    for (let seed = 1; seed <= 20; seed++) {
+      const off = generate({ seed, form, roundP: 0 }, cat);
+      assert.ok(!off.parts.some((q) => q.info?.sec?.kind === 'CHS'), `${form} seed ${seed}`);
+      assert.deepEqual(off.parts, generate({ seed, form }, old).parts, `${form} seed ${seed}`);
+    }
 });
 
 test('the settings do what they say', () => {

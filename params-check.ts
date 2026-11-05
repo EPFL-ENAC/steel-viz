@@ -14,7 +14,7 @@ const SEEDS = 25;
 
 // the kinds of before the connKindsP stream, and the newer ones
 export const OLD: ConnType[] = ['shear_tab', 'end_plate', 'flange_plates', 'welded', 'gusset', 'gusset_small', 'gusset_lap', 'clevis'];
-export const NEW = BEAM_CONN_KINDS.filter((k) => !OLD.includes(k));
+export const NEW: ConnType[] = BEAM_CONN_KINDS.filter((k) => !OLD.includes(k));
 export const kinds = (r: ReturnType<typeof generate>) => r.parts.flatMap((q) => q.info?.conn ?? []) as ConnType[];
 
 // one test for each case: SEEDS seeds, no clash, no floating part

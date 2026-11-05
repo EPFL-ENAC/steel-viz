@@ -64,13 +64,31 @@ test('a round tube: the EN 10210 values', () => {
   assert.equal(s.Iw, s.Is);
   near(s.Ws, 185e3, 0.01, 'Wpl');
   near(s.rmin, 57.1, 0.01, 'i');
-  // no table has one: the random generator never picks it
+  // the round tubes are in cat.pipes, not in all: a specimen finds its
+  // section by name in all, and the I and HSS lists stay as they were
   for (const cat of Object.values(cats)) assert.ok(!cat.all.some((x) => x.kind === 'CHS'));
+});
+
+test('the round tube tables', () => {
+  const find = (xs: Section[], id: string) => {
+    const s = xs.find((x) => x.id === id);
+    assert.ok(s, `${id} not found`);
+    return s;
+  };
+  // AISC: the steelpy values (HSS_R and PIPE shapes, A and Ix from tdes)
+  for (const [id, A, I] of [['HSS6.625X0.280', 5.2, 26.4], ['HSS4.500X0.237', 2.96, 6.79], ['Pipe4STD', 2.96, 6.82], ['Pipe6XS', 7.83, 38.3]] as const) {
+    const s = find(cats.aisc.pipes, id);
+    near(s.A, A * IN2, 0.01, `${id} A`);
+    near(s.Is, I * IN4, 0.01, `${id} I`);
+  }
+  // EU: the same section as chsSection() gives (EN 10210-2 sizes)
+  assert.deepEqual(find(cats.eu.pipes, 'CHS 168.3x6.3'), chsSection('CHS 168.3x6.3', 168.3, 6.3));
+  for (const cat of Object.values(cats)) assert.ok(cat.pipes.every((s) => s.kind === 'CHS' && s.d >= 60 && s.d <= 300), cat.family);
 });
 
 test('the catalogs have the shape lists, with unique ids', () => {
   for (const cat of Object.values(cats)) {
-    for (const k of ['channels', 'angles', 'tees'] as const) {
+    for (const k of ['channels', 'angles', 'tees', 'pipes'] as const) {
       const xs = cat[k];
       assert.ok(xs.length > 5, `${cat.family} ${k}: ${xs.length}`);
       assert.equal(new Set(xs.map((s) => s.id)).size, xs.length, `${cat.family} ${k}: same id twice`);
@@ -85,5 +103,5 @@ test('the catalogs have the shape lists, with unique ids', () => {
 test('a catalog without the shape tables has empty shape lists', () => {
   const [i, hss] = readTables('eu');
   const cat = loadCatalog('eu', i, hss);
-  assert.deepEqual([cat.channels.length, cat.angles.length, cat.tees.length > 0], [0, 0, true]);
+  assert.deepEqual([cat.channels.length, cat.angles.length, cat.pipes.length, cat.tees.length > 0], [0, 0, 0, true]);
 });

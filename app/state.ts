@@ -13,6 +13,8 @@ import aiscC from '../sections/channel-aisc-sections.csv?raw';
 import aiscL from '../sections/angle-aisc-sections.csv?raw';
 import euC from '../sections/channel-european-sections.csv?raw';
 import euL from '../sections/angle-european-sections.csv?raw';
+import aiscO from '../sections/chs-aisc-sections.csv?raw';
+import euO from '../sections/chs-european-sections.csv?raw';
 
 const DEFAULTS = {
   // a hub test instead of a seed (app/tests.ts): '<table>/<id>', '<table>'
@@ -48,6 +50,7 @@ const DEFAULTS = {
   colSplice: GEN.colSpliceP,
   connKinds: GEN.connKindsP,
   skew: GEN.skewP,
+  round: GEN.roundP, // round tube braces
   // view
   viewer: '3d', // 3d, svg or both
   compare: 0, // 1: this branch and the base branch side by side (dev server only)
@@ -69,7 +72,7 @@ export type Key = keyof Settings;
 export const GROUPS = {
   structure: ['form', 'arms', 'height', 'load', 'family', 'shapes'],
   layout: ['storeys', 'span', 'bracing', 'xKind', 'armLmin', 'armLmax', 'armZmin', 'armZmax', 'conn', 'gable'],
-  details: ['braces', 'secondaries', 'posts', 'splices', 'trusses', 'rods', 'xBraces', 'colSplice', 'connKinds', 'skew'],
+  details: ['braces', 'secondaries', 'posts', 'splices', 'trusses', 'rods', 'xBraces', 'colSplice', 'connKinds', 'skew', 'round'],
   view: ['viewer', 'compare', 'view', 'az', 'el', 'weights', 'detail', 'size'],
   animation: ['duration', 'speed'],
 } satisfies Record<string, Key[]>;
@@ -129,10 +132,10 @@ export const params = (): Partial<Params> => ({
   xKind: s.xKind as Params['xKind'], xP: s.xBraces,
   armL: [s.armLmin, s.armLmax], armZ: [s.armZmin, s.armZmax], conn: s.conn as Params['conn'], gableP: s.gable,
   braceP: s.braces, secondaryP: s.secondaries, postP: s.posts, beamSpliceP: s.splices,
-  trussK: s.trusses, rodP: s.rods, colSpliceP: s.colSplice, connKindsP: s.connKinds, skewP: s.skew,
+  trussK: s.trusses, rodP: s.rods, colSpliceP: s.colSplice, connKindsP: s.connKinds, skewP: s.skew, roundP: s.round,
 });
 
-const TABLES: Record<Family, [string, string, string, string]> = { aisc: [aiscI, aiscHss, aiscC, aiscL], eu: [euI, euHss, euC, euL] };
+const TABLES: Record<Family, [string, string, string, string, string]> = { aisc: [aiscI, aiscHss, aiscC, aiscL, aiscO], eu: [euI, euHss, euC, euL, euO] };
 const cats: Partial<Record<Family, Catalog>> = {};
 export const catalog = (fam: Family) => (cats[fam] ??= loadCatalog(fam, ...TABLES[fam]));
 

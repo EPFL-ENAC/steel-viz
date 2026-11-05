@@ -9,7 +9,7 @@ export type Tip = { title: string; id: string; rows: [string, string][]; warn?: 
 const SHAPE: Record<Section['kind'], string> = { I: 'I', C: 'channel', T: 'tee', '2L': 'double angle', RHS: 'tube', ROD: 'round bar', CHS: 'round tube', L: 'angle', FB: 'flat bar' };
 // the beam end kinds have their label in the catalog, these say more
 const CONN: Record<string, string> = {
-  gusset: 'gusset, knife plate', gusset_small: 'small gusset', gusset_lap: 'lapped gusset plate', clevis: 'clevis and pin',
+  gusset: 'gusset, knife plate', gusset_small: 'small gusset', gusset_lap: 'lapped gusset plate', gusset_cap: 'end cap plate, tab on the gusset', clevis: 'clevis and pin',
   bearing: 'bearing', flange: 'flange plates',
 };
 

@@ -2,6 +2,7 @@
 //   [--detail members|plates|bolts] [--arms 5] [--height 6000] [--load 20]
 //   [--form mix|tree|portal|box] [--animate] [--frames] [--painter] [--flat] [--size px]
 //   [--shapes 0.35] (the chance of a channel, double angle or tee member, 0 for none)
+//   [--round-tubes 0.3] (the chance of round tube braces on an arm, 0 for none)
 //   the look (see Params in generate.ts): [--storeys 0|1|2] [--span 1] [--bracing auto|none|knee|chevron|diagonal|x]
 //   [--x-kind auto|flat|rod|angle] [--x-braces 0.3] (the chance that an auto diagonal is an X)
 //   [--conn auto|shear_tab|end_plate|flange_plates|welded|clip_angles|seated|stiffened_seat|tee|end_plate_stiffened]
@@ -49,6 +50,7 @@ const r = generate(
     beamSpliceP: num('beam-splices', DEFAULTS.beamSpliceP), trussK: num('trusses', DEFAULTS.trussK), rodP: num('rods', DEFAULTS.rodP),
     colSpliceP: num('col-splice', DEFAULTS.colSpliceP), connKindsP: num('conn-kinds', DEFAULTS.connKindsP), skewP: num('skew', DEFAULTS.skewP),
     gableP: num('gable', DEFAULTS.gableP),
+    roundP: num('round-tubes', DEFAULTS.roundP),
   },
   cat,
   detail,

@@ -1,6 +1,6 @@
 // node --test
-// Bracing and the detail chances (trusses, rods, splices, braces,
-// secondaries, posts, skewed arms): no clash, no floating part.
+// Bracing and the detail chances (trusses, rods, splices, braces, round
+// tube braces, secondaries, posts, skewed arms): no clash, no floating part.
 import { BRACING_KINDS, X_KINDS, type Params } from './generate.ts';
 import { noClash } from './params-check.ts';
 
@@ -11,4 +11,5 @@ noClash([
   ['many trusses and rods', { trussK: 2.5, rodP: 1, colSpliceP: 1 }],
   ['all braces, secondaries, posts, splices', { braceP: 1, secondaryP: 1, postP: 1, beamSpliceP: 1 }],
   ['skewed arms', { skewP: 1, form: 'tree' }],
+  ['round tube braces', { roundP: 1, braceP: 1 }],
 ]);

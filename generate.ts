@@ -51,6 +51,10 @@ export type Params = {
   // the chance that a one storey portal gets a pitched roof (gable.ts),
   // from a stream of its own. 0: flat beams only, as before.
   gableP: number;
+  // the chance that the braces of an arm are round tubes (when they don't get
+  // double angles from shapeP), from a stream of its own. 0: no round tube,
+  // so the same parts as before round tubes.
+  roundP: number;
   // The look of the structure. The seed still takes the same draws, then a
   // value set here replaces what it drew: at their default, every seed gives
   // the same structure as before these settings.
@@ -72,7 +76,7 @@ export type Params = {
   specimen?: Specimen; // a real test: seed, form, arms, height, braceP and secondaryP are not used
 };
 export const DEFAULTS: Params = {
-  seed: 1, arms: 8, height: 2500, load: 100, fy: 345, braceP: 0.3, secondaryP: 0.35, postP: 0.3, beamSpliceP: 0.3, connKindsP: 0.35, shapeP: 0.35, skewP: 0.3, gableP: 0.35,
+  seed: 1, arms: 8, height: 2500, load: 100, fy: 345, braceP: 0.3, secondaryP: 0.35, postP: 0.3, beamSpliceP: 0.3, connKindsP: 0.35, shapeP: 0.35, skewP: 0.3, gableP: 0.35, roundP: 0.3,
   storeys: 0, spanK: 1, bracing: 'auto', xP: 0.3, xKind: 'auto', armL: [0.3, 0.7], armZ: [0.35, 0.95], conn: 'auto', trussK: 1, rodP: 0.4, colSpliceP: 0.6,
   seg: 400, form: 'mix',
 };
@@ -102,12 +106,29 @@ const shaped = (p: Params, key: string) => p.shapeP > 0 && mulberry32(p.seed * 7
 // that gives only the I and tube tables)
 const orOld = (xs: Section[], old: Section[]) => (xs.length ? xs : old);
 
+// Round tube braces (see roundP). One keyed draw for each arm, from a stream
+// of its own, like shaped(). Its first value picks the round tube, the second
+// the end: a slotted tube on a knife plate (gusset), or an end cap plate with
+// a tab (gusset_cap). The tab is as wide as the bolts need (151 mm), so a
+// smaller tube than CAP_MIN_D keeps the slot.
+const CAP_MIN_D = 114;
+// the section list of the braces of an arm, and whether they get end caps
+function braceList(p: Params, cat: Catalog, a: Arm): { list: Section[]; cap: boolean } {
+  const key = `${a.id}-braces`;
+  if (shaped(p, key)) return { list: orOld(cat.angles, cat.tubes), cap: false };
+  if (p.roundP <= 0) return { list: cat.tubes, cap: false };
+  const rng = mulberry32(p.seed * 50331653 + fnv1a(key));
+  if (rng() >= p.roundP) return { list: cat.tubes, cap: false };
+  return { list: orOld(cat.pipes, cat.tubes), cap: rng() < 0.5 };
+}
+
 // a: where the brace meets the arm, measured from the column it starts on
 // (the column at the `end` of the arm: 0 its start, 1 its far end). zb:
 // where it meets that column, a height that stays put when sizing changes
 // the depth of the arm.
-// x: one of the two diagonals of an X (see addX).
-type Brace = { a: number; zb: number; sec: Section; end: 0 | 1; x?: XKind };
+// x: one of the two diagonals of an X (see addX). cap: a round tube brace
+// gets end cap plates (see braceList).
+type Brace = { a: number; zb: number; sec: Section; end: 0 | 1; x?: XKind; cap?: boolean };
 // An arm starts on column `col`. A bay beam also ends on column `to`.
 // splice: a bolted splice in a bay beam, that far along it (geometry only).
 // face and skew: a skewed arm (skewArms) leaves the column face `face` (0 or
@@ -1014,11 +1035,12 @@ function size(st: Structure, m: Model, res: Forces[], cat: Catalog, p: Params, c
       post.sec = choose(cat.columns, postId(a), post.sec, (s) => (fits ? postFits(s, sec) : s.A <= post.sec.A));
     }
     // all the braces of an arm get the same kind: one draw for the arm
-    const braces = shaped(p, `${a.id}-braces`) ? orOld(cat.angles, cat.tubes) : cat.tubes;
+    const braces = braceList(p, cat, a);
     a.braces.forEach((b, k) => {
       const L = Math.hypot(b.a, drop(a, b));
       if (b.x) return void (b.sec = choose(xList(cat, b.x), braceId(a, k), b.sec, xRule(b.x, L)));
-      b.sec = choose(braces, braceId(a, k), b.sec, (s) => L / s.rmin < 200);
+      b.sec = choose(braces.list, braceId(a, k), b.sec, (s) => L / s.rmin < 200);
+      if (braces.cap) b.cap = true;
     });
   }
   for (const s of st.secs) {
@@ -1054,7 +1076,7 @@ function braceGeo(st: Structure, a: Arm, b: Brace, k: number, S: Geo) {
   const un = mul(u, 1 / Math.hypot(...u));
   // a double angle has no knife plate: its gap is from the corner of the
   // angles nearest the face, half its depth times the slope off the face
-  const conn = braceConn(b.sec);
+  const conn = braceConn(b);
   const [cos, sin] = [un[0] * hb[0] + un[1] * hb[1], un[2]];
   const lap = conn === 'gusset_lap' ? b.sec.d / 2 : 0;
   const t0 = (supportFace(S, hb) + SETBACK[conn] + lap * sin) / cos;
@@ -1062,8 +1084,13 @@ function braceGeo(st: Structure, a: Arm, b: Brace, k: number, S: Geo) {
   return { g: geo(braceId(a, k), b.sec, add(B, mul(un, t0)), sub(C, mul(un, t1)), false), conn, hb };
 }
 // the end of a brace: a double angle, one angle or a flat bar laps a plate,
-// a rod has a clevis, a tube a knife plate
-const braceConn = (s: Section): ConnType => (s.kind === '2L' || s.kind === 'L' || s.kind === 'FB' ? 'gusset_lap' : s.kind === 'ROD' ? 'clevis' : 'gusset');
+// a rod has a clevis, a tube a knife plate (or an end cap plate, see braceList)
+function braceConn(b: Brace): ConnType {
+  const s = b.sec;
+  if (s.kind === '2L' || s.kind === 'L' || s.kind === 'FB') return 'gusset_lap';
+  if (s.kind === 'ROD') return 'clevis';
+  return s.kind === 'CHS' && b.cap && s.d >= CAP_MIN_D ? 'gusset_cap' : 'gusset';
+}
 
 // ------------------------------------------------------------- X bracing
 // Two diagonals that cross in a bay storey, each from the foot of one column

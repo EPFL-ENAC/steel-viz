@@ -171,9 +171,14 @@ export const profRect = (h: number, b: number): P2[][] => [
 ];
 
 // a round bar, as 16 sides: few enough to stay light, enough to read as round
-export const profRound = (D: number): P2[][] => [
-  ccw([...Array(16).keys()].map((i): P2 => [(D / 2) * Math.cos((i * Math.PI) / 8), (D / 2) * Math.sin((i * Math.PI) / 8)])),
+export const profRound = (D: number, n = 16): P2[][] => [
+  ccw([...Array(n).keys()].map((i): P2 => [(D / 2) * Math.cos((2 * i * Math.PI) / n), (D / 2) * Math.sin((2 * i * Math.PI) / n)])),
 ];
+// A round tube (and its end cap plate) has 12 sides. The folds (30 degrees)
+// stay under the FOLD of hlr.ts, so no line runs along it, and its width
+// changes by 3.4 % only as it turns. 16 sides draw 20 % more lines at full
+// size. At logo sizes it makes no difference: the end rings are too short.
+export const ROUND_SIDES = 12;
 
 // a channel: the web on v = 0, the flanges toward +v
 export function profC(d: number, bf: number, tw: number, tf: number): P2[][] {
@@ -218,7 +223,8 @@ export function profile(s: Section): P2[][] {
     case '2L': return prof2L(s.d, s.bf, s.tf);
     case 'L': return profL(s.d, s.bf, s.tf);
     case 'FB': return profFB(s.d, s.bf);
-    case 'ROD': case 'CHS': return profRound(s.d);
+    case 'ROD': return profRound(s.d);
+    case 'CHS': return profRound(s.d, ROUND_SIDES);
     default: return profRect(s.d, s.bf);
   }
 }
@@ -361,11 +367,13 @@ function piece(s: Section, f: Flanged, side: 'top' | 'bot', depth: number, split
     : [[wr, b0], ...right, [wr, b1], [br, b1], [br, h], [bl, h], [bl, b1], [wl, b1], ...left, [wl, b0]]);
 }
 
+// a round bar, tube or plate has no edges along it, only its outline (the
+// renderers find it): drop the long edges of the side faces of its prism
+const smooth = (fs: Face[]) =>
+  fs.map((f) => (f.pts.length === 4 ? { ...f, edges: f.edges.filter(([i, j]) => !((i === 1 && j === 2) || (i === 3 && j === 0))) } : f));
+
 export function memberFaces(g: Geo, seg: number, cuts: number[] = []): Face[] {
-  // a round bar or tube has no edges along it, only its outline (the renderers find it)
-  if (g.sec.kind === 'ROD' || g.sec.kind === 'CHS')
-    return prism(g.p0, g.p1, g.polys, g.u, g.v, g.w, seg, g.sh, cuts).map((f) =>
-      f.pts.length === 4 ? { ...f, edges: f.edges.filter(([i, j]) => !((i === 1 && j === 2) || (i === 3 && j === 0))) } : f);
+  if (g.sec.kind === 'ROD' || g.sec.kind === 'CHS') return smooth(prism(g.p0, g.p1, g.polys, g.u, g.v, g.w, seg, g.sh, cuts));
   const f = flanged(g.sec);
   if (!g.copes.length || !f) return prism(g.p0, g.p1, g.polys, g.u, g.v, g.w, seg, g.sh, cuts);
   const L = len(sub(g.p1, g.p0));
@@ -672,7 +680,7 @@ export function splicePlates(lo: Geo, hi: Geo, kind: 'bearing' | 'flange'): { fa
 }
 
 export type BeamConn = 'shear_tab' | 'end_plate' | 'flange_plates' | 'welded' | 'clip_angles' | 'seated' | 'stiffened_seat' | 'tee' | 'end_plate_stiffened';
-export type ConnType = BeamConn | 'gusset' | 'gusset_small' | 'gusset_lap' | 'clevis';
+export type ConnType = BeamConn | 'gusset' | 'gusset_small' | 'gusset_lap' | 'gusset_cap' | 'clevis';
 // where a beam end lands: on a column flange, on a column web, on the web of a beam
 export type Fit = 'flange' | 'web' | 'beam';
 // the solid of one connection and its bolt dots. `reach`: how far the plates
@@ -907,12 +915,14 @@ function flangePlates(g: Geo, r: Resolved, hw: Hardware) {
   webPlate(g, r, 10, 115, 3, hw);
 }
 
-function gusset(g: Geo, r: Resolved, hw: Hardware, small: boolean) {
+function gusset(g: Geo, r: Resolved, hw: Hardware, small: boolean, cap = false) {
   const { p, inward } = r;
   // Two plates and 4 bolts through both. The gusset is welded to the
   // support face. The knife plate sits in a slot at the tube end and laps
   // over the gusset. The bolts: 2 rows along the brace, 2 across. The
-  // small gusset has 1 row (2 bolts) and a shorter slot.
+  // small gusset has 1 row (2 bolts) and a shorter slot. With `cap` (a
+  // round tube), no slot: a round plate closes the tube end, and the tab
+  // is welded on it.
   const t = 12;
   let nrm = cross(r.direc, g.u);
   if (len(nrm) < 1e-3) nrm = g.v;
@@ -920,7 +930,7 @@ function gusset(g: Geo, r: Resolved, hw: Hardware, small: boolean) {
   const across = norm(cross(nrm, r.direc)); // in the plate plane, along the support face
   const side = norm(cross(nrm, inward)); // in the plate plane, across the brace
   const slot = small ? 100 : 150;
-  hw.reach.push(slot);
+  if (!cap) hw.reach.push(slot);
   const near = EDGE + 12; // the bolt rows, mm before the tube end
   const far = small ? near : near + PITCH;
   const half = PITCH / 2 + EDGE; // half width of the bolt area
@@ -929,11 +939,23 @@ function gusset(g: Geo, r: Resolved, hw: Hardware, small: boolean) {
     for (const s2 of [-PITCH / 2, PITCH / 2]) hw.dots.push({ p: at(u, s2, -t / 2), axis: nrm, half: t + 1 });
   // knife plate: from the bolts into the slot, in the plane of the brace
   // full width under the bolts, then down to the tube width at its end
-  const lk = far + EDGE + slot;
-  const w = Math.min(half, g.sec.bf / 2 + 10);
-  const knife = [at(-far - EDGE, -half), at(-far - EDGE, half), at(-near + EDGE, half), at(0, w), at(slot, w), at(slot, -w), at(0, -w), at(-near + EDGE, -half)];
-  hw.faces.push(...slab(knife.map((q) => add(q, mul(nrm, -t / 2))), nrm, t));
-  hw.boxes.push(boxOf(at((slot - far - EDGE) / 2, 0), side, inward, t, 2 * half, lk));
+  if (cap) {
+    // the cap: from the tube end out by t, a bit wider than the tube and
+    // at least as wide as the tab. The tab: from the bolts to the cap.
+    const D = Math.max(g.sec.d + 10, 2 * half);
+    const { u, v, w } = frame(at(-t, 0), at(0, 0));
+    hw.faces.push(...smooth(prism(at(-t, 0), at(0, 0), profRound(D, ROUND_SIDES), u, v, w, t)));
+    hw.boxes.push(boxOf(at(-t / 2, 0), side, inward, D, D, t));
+    const tab = [at(-far - EDGE, -half), at(-far - EDGE, half), at(-near + EDGE, half), at(-near + EDGE, -half)];
+    hw.faces.push(...slab(tab.map((q) => add(q, mul(nrm, -t / 2))), nrm, t));
+    hw.boxes.push(boxOf(at(-(far + near) / 2, 0), side, inward, t, 2 * half, far - near + 2 * EDGE));
+  } else {
+    const lk = far + EDGE + slot;
+    const w = Math.min(half, g.sec.bf / 2 + 10);
+    const knife = [at(-far - EDGE, -half), at(-far - EDGE, half), at(-near + EDGE, half), at(0, w), at(slot, w), at(slot, -w), at(0, -w), at(-near + EDGE, -half)];
+    hw.faces.push(...slab(knife.map((q) => add(q, mul(nrm, -t / 2))), nrm, t));
+    hw.boxes.push(boxOf(at((slot - far - EDGE) / 2, 0), side, inward, t, 2 * half, lk));
+  }
   // gusset: beside the knife plate, from the support face to the bolts. Its
   // outline joins the bolt area to its own foot on the face.
   const area = [at(-near + EDGE, -half, -t), at(-near + EDGE, half, -t), at(-far - EDGE, half, -t), at(-far - EDGE, -half, -t)];
@@ -1026,6 +1048,8 @@ export const CONNS: Record<ConnType, ConnSpec> = {
   gusset: { label: 'gusset', pinned: true, setback: 195, draw: (g, r, hw) => gusset(g, r, hw, false) },
   gusset_small: { label: 'small gusset', pinned: true, setback: 130, draw: (g, r, hw) => gusset(g, r, hw, true) },
   gusset_lap: { label: 'lapped gusset', pinned: true, setback: 40, draw: gussetLap },
+  // a round tube with end cap plates: the same setback as the gusset, so the brace stands at the same place
+  gusset_cap: { label: 'end cap plate', pinned: true, setback: 195, draw: (g, r, hw) => gusset(g, r, hw, false, true) },
   clevis: { label: 'clevis', pinned: true, setback: 110, draw: clevis },
 };
 const CONN_TYPES = Object.keys(CONNS) as ConnType[];

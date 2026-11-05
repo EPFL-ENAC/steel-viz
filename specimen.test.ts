@@ -8,7 +8,7 @@ import { clashes } from './clash.ts';
 import { HUB_TABLES, readTables } from './tables.ts';
 import { findSection, type ConnSpecimen } from './specimen.ts';
 import { READERS, fromHubConnection, hubTable, toSpecimen } from './hub.ts';
-import { geo, memberFaces } from './steel.ts';
+import { geo, memberFaces, ROUND_SIDES } from './steel.ts';
 
 const cats = { aisc: loadCatalog('aisc', ...readTables('aisc')), eu: loadCatalog('eu', ...readTables('eu')) };
 const record = (id: string) => JSON.parse(readFileSync(new URL(`./specimens/${id}.json`, import.meta.url), 'utf8'));
@@ -212,6 +212,6 @@ test('a round tube from its dimensions, drawn round', () => {
   // like a round bar: no edge along the tube, only its outline
   const f = memberFaces(geo('t', s, [0, 0, 0], [0, 0, 3000], false), 1e9);
   const sides = f.filter((x) => x.pts.length === 4);
-  assert.equal(sides.length, 16);
+  assert.equal(sides.length, ROUND_SIDES);
   assert.ok(sides.every((x) => x.edges.length === 2));
 });

@@ -103,7 +103,26 @@ test('channels, double angles and tees in both families', (t) => {
     for (const form of forms)
       for (let seed = 1; seed <= 40; seed++) for (const k of shapes(make(name, form, seed).st)) count[k] = (count[k] ?? 0) + 1;
     t.diagnostic(`${name}: ${Object.entries(count).sort().map(([k, n]) => `${k} ${n}`).join(', ')}`);
-    for (const k of ['brace 2L', 'brace RHS', 'secondary C', 'secondary I', 'chord T', 'chord I']) assert.ok(count[k] > 0, `${name}: no ${k}`);
+    for (const k of ['brace 2L', 'brace RHS', 'brace CHS', 'secondary C', 'secondary I', 'chord T', 'chord I']) assert.ok(count[k] > 0, `${name}: no ${k}`);
+  }
+});
+
+// roundP 1: every brace is a round tube, with a slotted end or an end cap
+// plate, and the structure still stands, with no clash
+test('round tube braces', () => {
+  for (const [name, cat] of Object.entries(cats)) {
+    const ends = new Set<string>();
+    for (const form of forms)
+      for (let seed = 1; seed <= 12; seed++) {
+        const r = generate({ seed, form, roundP: 1, shapeP: 0, braceP: 1 }, cat);
+        const at = `${name} ${form} seed ${seed}`;
+        assert.ok(r.ok, `${at}: mechanism`);
+        assert.deepEqual(clashes(r.parts), [], at);
+        assert.deepEqual(floating(r.parts), [], at);
+        assert.deepEqual(shapes(r.st).filter((k) => k.startsWith('brace') && k !== 'brace CHS'), [], at);
+        for (const q of r.parts) if (q.info?.type === 'Brace') for (const c of q.info.conn ?? []) ends.add(c);
+      }
+    for (const k of ['gusset', 'gusset_cap']) assert.ok(ends.has(k), `${name}: no ${k} end`);
   }
 });
 
