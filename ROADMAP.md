@@ -32,7 +32,7 @@ Today the hub only takes an exported SVG for its logo (RESSLab-Team/resslab-hub#
 - [x] A light entry point: the painter renderer and `timeline()`, with no three.js. It is for a loading animation in the slow parts of the hub. Done: `index.ts` (`@epfl-enac/steel-viz`), and `package.test.ts` checks it loads no three.js.
 - [x] A separate 3D entry point (`webgl.ts`), loaded only where it is needed. Done: `3d.ts` (`@epfl-enac/steel-viz/3d`).
 - [x] The exact drawing with no package, so it can be in the light entry. Done: our own hidden line removal in `hlr.ts`, about 3 times faster than three-edge-projection.
-- [x] A specimen input: build the structure of a real experiment from its sections, next to the random seed. Then the hub can show a view of each experiment. Done for beam-to-column tests (`specimen.ts`, `--specimen`), the next steps are under "Specimens".
+- [x] A specimen input: build the structure of a real experiment from its sections, next to the random seed. Then the hub can show a view of each experiment. Done for the beam-to-column, brace, column and HSS column tests (`specimen.ts`, `hub.ts`, `--specimen`). The next steps are under "Specimens".
 - [x] Ship built JS and `.d.ts` on a git tag, so the hub can depend on it from GitHub (`github:EPFL-ENAC/steel-viz#v0.1.0`). Done: `pnpm run build:lib` and `release.sh` (see the README).
 - [x] The 3D viewer in plain WebGL2, with no three.js (`webgl.ts`). Bundled and minified, `webgl.ts` alone is 19 KB (8 KB gzip), and the `3d` entry went from 648 KB (171 KB gzip) to 398 KB (102 KB gzip).
 - [x] Drop three.js from the `3d` entry when `hlr.ts` has no three either (`feat/hlr-native`). Done: `renderHLR` is in the light entry, and the package has no peer dependency anymore.
@@ -40,20 +40,25 @@ Today the hub only takes an exported SVG for its logo (RESSLab-Team/resslab-hub#
 
 ## Specimens
 
-The specimen input draws the beam-to-column tests of the hub `connection` table. Some details are left out, the log lists them as notes. Next:
+The specimen input draws four tables of the hub, each test in its test rig. `node hub-count.ts` gives the counts below (November 2026). No drawn test has a clash or a floating part. The details left out are in the log, as notes. Next:
 
-- [ ] The test rig: pins at the column ends instead of a base plate, and the actuator at the beam tip (or at the column top for a column loaded test). Today the column stands on a base plate, like in a building.
+- [x] The test rig (`rig.ts`): pins, rollers, floor blocks, actuators and frame members, as parts of kind `rig`, drawn lighter. The column no longer stands on a base plate, like in a building.
+- [x] Beam-to-column tests (`connections`), beam loaded or column loaded: 99 of 100.
 - [ ] RBS: the cut in the beam flanges.
 - [ ] WUF-B: the bolted shear tab on the beam web, next to the welded flanges.
 - [ ] KBB: the Kaiser bracket, today drawn as bolted flange plates. WFP: welded flange plates, today drawn bolted.
 - [ ] Doubler plates on the column web (`n_dp`).
 - [ ] The concrete slab (`slab`).
 - [ ] Continuity plates as thick as in the test (`t_cp`). Today they take the thickness of the column flange.
-- [ ] The column tests of the hub (`column`, `hss_column`). They give a section and a length, but each setup (cantilever, double curvature, 3-point bending) needs its own rig.
-- [ ] Braces and EBF. The hub tables have no frame layout (bay, storey), so we can't build the frame from them yet.
-- [ ] "Exterior - Frame" (one test in the hub).
+- [ ] "Exterior - Frame" (one test in the hub, Del_Caprio_et_al_2014_RBS-A).
+- [x] Brace tests (`braces`), SB, SBF and DBF: 279 of 294.
+- [ ] Angle, Double Channel and Flat Bar braces (8, 5 and 2 tests). `findSection` knows the I sections, the tees, the tubes, the round tubes, the rods and the double angles, but not these.
+- [ ] The gusset outline of a brace from `l_1t` to `l_8b`, when someone tells us what the 8 lengths are. Today the gussets have a generic outline.
+- [x] Column tests (`columns`): 153 of 153.
+- [x] HSS column tests (`hss_columns`), CF, DC and 3PB: 284 of 284. How we read `length__mm` is our own guess (RESSLab-Team/resslab-hub-data#75).
+- [ ] A round tube in `hss_columns`: read it as a CHS (`chsSection`). No row has one yet.
+- [ ] EBF link tests (`eccentric_braced_frames`, 240 tests). In progress on the `feat/ebf-links` branch.
 - [ ] A specimen input in the playground: paste a hub record, or pick one from a list.
-- [ ] Specimens with channel, angle or tee sections. Today `findSection` and `all` know only the I sections and the tubes.
 
 ## Playground
 

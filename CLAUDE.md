@@ -12,7 +12,7 @@ Node 24 or newer runs the `.ts` files directly. Imports keep the `.ts` extension
 
 ```sh
 pnpm install              # once
-node --test               # solver tests, no clash and no floating part on 240 structures, the specimens (about 4 s)
+node --test               # solver tests, no clash and no floating part on 240 structures, the specimens, the hub tables (about 20 s)
 pnpm run type-check       # tsc, strict, no emit (about 0.2 s)
 node --test solver.test.ts                         # one file
 node --test --test-name-pattern "clash|support"    # some tests by name
@@ -23,20 +23,23 @@ node cli.ts --seed 5 --view iso --out s5.svg       # also --form, --family eu, -
 node cli.ts --seed 5 --storeys 2 --bracing chevron --conn welded --span 1.4 --arm-length 0.5,0.9   # the look settings, see Params in generate.ts
 node pick.ts --count 150 --top 12 --sheet best.html
 node cli.ts --specimen specimens/Chi_and_Uang_2002_DC2.json --view iso   # a real test from a JSON file (specimen.ts)
+node hub-count.ts         # how many tests of each hub table we draw (needs resslab-hub-data next to the repo, or give its path)
 ```
 
-Run `node --test` after every change to `generate.ts`, `steel.ts` or `clash.ts`. `cli.ts` prints the solver log, the part count and `FLOATING` if a part comes before the part it stands on. It's the fastest way to look at one seed.
+Run `node --test` after every change to `generate.ts`, `steel.ts`, `clash.ts`, `bench.ts`, `rig.ts` or `hub.ts`. `cli.ts` prints the solver log, the part count and `FLOATING` if a part comes before the part it stands on. It's the fastest way to look at one seed.
 
 Node only strips the types. `pnpm run type-check` checks them (`tsc` with `tsconfig.json`, no emit). CI runs `node --test`, then the type check, on every push and pull request. `erasableSyntaxOnly` refuses TypeScript that Node can't strip (no `enum`, no `namespace`, no constructor parameter properties). There is no linter.
 
 ## How it fits together
 
 1. `sections.ts` turns the CSV tables into a `Catalog`. In Node, `tables.ts` reads `sections/`. In the playground, `app/state.ts` imports the CSV files with `?raw`.
-2. `generate(params, catalog)` in `generate.ts` builds a `Structure` (topology), then loops: `solve()` from `solver.ts`, `fix()` on a mechanism, `size()` from the forces. Then it adds trusses and rods, then the details (splice, base gussets). Last, `parts()` turns the structure into `Part[]` with the geometry helpers of `steel.ts`. With `params.specimen` (a real test, from `specimen.ts`), `generate()` skips all that: `buildSpecimen()` builds the given column and beams, solves once with no fix and no sizing, adds the cap and continuity plates, then calls `parts()`.
+2. `generate(params, catalog)` in `generate.ts` builds a `Structure` (topology), then loops: `solve()` from `solver.ts`, `fix()` on a mechanism, `size()` from the forces. Then it adds trusses and rods, then the details (splice, base gussets). Last, `parts()` turns the structure into `Part[]` with the geometry helpers of `steel.ts`. With `params.specimen` (a real test, from `specimen.ts`), `generate()` skips all that. A beam-to-column test goes to `buildSpecimen()`: it builds the given column and beams, solves once with no fix and no sizing, adds the cap and continuity plates, then calls `parts()`. A brace or column test goes to `buildBrace()` or `buildColumn()` in `bench.ts`, with no solve. All of them draw the test rig with `rig.ts` (parts of kind `rig`, drawn lighter). `hub.ts` reads a record of a hub table as a `Specimen`: `toSpecimen()` picks the reader from a field that only this table has. A reader throws in two forms only, `<id>: <field> is missing` and `<id>: <field> "<value>" is not supported yet`. Keep them when you add a reader: `hub-count.ts` groups the errors by them.
 3. A `Part` (type in `steel.ts`) is what every renderer takes: faces in mm, bolts as `dots`, `step` (build order), `supports` (ids of the parts it stands on), `boxes` (for `clash.ts`), `kind` and `from` (for the animation).
 4. Three renderers take `Part[]`: `render` in `steel.ts` (painter, fast, sometimes wrong), `renderHLR` in `hlr.ts` (exact, the default, the only one for export), `createViewer` in `webgl.ts` (3D view of the playground). All of them share `camera()` and `timeline()` from `steel.ts`, so the views and the animation match.
-5. The package has two entries. `index.ts` (`@epfl-enac/steel-viz`) re-exports the core: generate, loadCatalog, `renderHLR`, the painter render, timeline, the specimen input. `3d.ts` (`@epfl-enac/steel-viz/3d`) re-exports `createViewer`. The package has no dependency. The hub passes its own CSV text to `loadCatalog()`, the package ships no table. When you export something new for the hub, add it to `index.ts` (or `3d.ts` if it is part of the 3D view).
+5. The package has two entries. `index.ts` (`@epfl-enac/steel-viz`) re-exports the core: generate, loadCatalog, `renderHLR`, the painter render, timeline, the specimen input (`toSpecimen` and the readers of `hub.ts`). `3d.ts` (`@epfl-enac/steel-viz/3d`) re-exports `createViewer`. The package has no dependency. The hub passes its own CSV text to `loadCatalog()`, the package ships no table. When you export something new for the hub, add it to `index.ts` (or `3d.ts` if it is part of the 3D view).
 6. The playground is a Vue 3 app in `app/`, served by Vite (`vite.config.ts`). It imports the core modules directly. `app/state.ts` holds the settings and keeps them in the URL hash, `Drawing.vue` draws (3D, SVG, both, or vs main). `app/dev-plugin.ts` is for the dev server only: the branch info, the "vs main" bundle (the merge base with `main`, from `git archive`), and a full reload when a file outside `app/` changes.
+
+`hub-count.ts` is a Node script, the core never imports it. It reads every table of `HUB_TABLES` from `resslab-hub-data` (read only, never write in it) and prints how many tests we draw, with the errors grouped by field. `hub.test.ts` runs the same loop and fails on a clash, a floating part or an error in another form. CI has no copy of the data, so there it is skipped.
 
 Seeds must stay stable. `generate()` uses a separate `mulberry32` random stream for each stage (form, topology, trusses and rods, details). When you add a new random feature, give it its own stream. If it takes draws from the main `rng`, every seed after it changes, and the seeds picked for the logo change too. The shape of a member (`shapeP`: double angle brace, channel secondary, tee chord) is one draw per member, seeded from the seed and the member id (`shaped()` in `generate.ts`), so it doesn't depend on the order of the other draws.
 
