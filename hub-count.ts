@@ -22,6 +22,7 @@ export const HUB_TABLES: Record<string, string> = {
   braces: 'braces/steel_braces.csv',
   columns: 'columns/steel_columns.csv',
   hss_columns: 'hss_columns/hss_columns.csv',
+  eccentric_braced_frames: 'eccentric_braced_frames/eccentric_braced_frames.csv',
 };
 
 export function findHubData(dir?: string): string | undefined {
