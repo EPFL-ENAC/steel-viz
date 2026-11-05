@@ -12,7 +12,7 @@ Node 24 or newer runs the `.ts` files directly. Imports keep the `.ts` extension
 
 ```sh
 pnpm install              # once
-node --test               # solver tests, no clash and no floating part on 240 structures, the specimens, the hub tables (about 14 s)
+node --test               # solver tests, no clash and no floating part on 240 structures, the specimens, the hub tables (about 22 s)
 pnpm run type-check       # tsc, strict, no emit (about 0.2 s)
 node --test solver.test.ts                         # one file
 node --test --test-name-pattern "clash|support"    # some tests by name

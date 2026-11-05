@@ -109,7 +109,7 @@ Each beam end has one kind of connection. The kinds are a small catalog, `CONNS`
 
 The fix loop and the sizing only use the first four kinds. The other five come after, from a draw of their own (`connKindsP`, 0.35 by default). Each beam end takes one draw, keyed by its id like the member shapes, so the result doesn't depend on the order of the draws. Under `connKindsP`, the end gets a kind that can take the place of the one it has, and that fits where it lands. Clip angles, the two seats and the tee take the place of a shear tab. The stiffened end plate takes the place of an end plate. Each one has the same pin or moment and the same setback as the kind it replaces. So the solver, the sections and the members don't change, only the plates at the end. A secondary beam on a beam can only get clip angles or a tee. A truss chord keeps its kind.
 
-The column splice keeps clear of the seats and the end plates. A new kind that would go through another part goes back to the old one. With `connKindsP` at 0, a seed gives the same parts as before these kinds (`params.test.ts` checks it). With `--conn` set to one kind, there is no draw: every beam end that can take it gets it.
+The column splice keeps clear of the seats and the end plates. A new kind that would go through another part goes back to the old one. With `connKindsP` at 0, a seed gives the same parts as before these kinds (`params-conn-kinds-off.test.ts` checks it). With `--conn` set to one kind, there is no draw: every beam end that can take it gets it.
 
 A detail plate that would go through another part is left out. For example, a continuity plate on the side of the web where another beam frames in.
 
@@ -131,7 +131,7 @@ On a skewed arm:
 - No truss and no rod: the draw still happens, so the other arms keep their draws, but the result is dropped.
 - It doesn't turn toward a web face where an arm with a secondary beam is less than 900 mm higher or lower. Then it turns the other way, or stays square.
 
-The solver keeps the arm on a line through the column axis. The drawn arm goes through the middle of the flange face, so it is shifted to the side by `(d/2) * sin(skew)` (100 to 150 mm). The solver ignores this shift. Only trees get skewed arms. Bay beams and specimens stay square. With `skewP` at 0, a seed gives the same parts as before skewed arms (`params.test.ts` checks it). `geometry.test.ts` checks 80 trees with `skewP` 1.
+The solver keeps the arm on a line through the column axis. The drawn arm goes through the middle of the flange face, so it is shifted to the side by `(d/2) * sin(skew)` (100 to 150 mm). The solver ignores this shift. Only trees get skewed arms. Bay beams and specimens stay square. With `skewP` at 0, a seed gives the same parts as before skewed arms (`params.test.ts` checks it). `geometry-skew.test.ts` checks 80 trees with `skewP` 1.
 
 ### Gable portal
 
@@ -182,9 +182,9 @@ node cli.ts --seed 5 --form portal --storeys 2 --bracing chevron --conn welded -
 node cli.ts --seed 5 --form tree --arm-length 0.5,0.9 --arm-height 0.6,1
 ```
 
-A setting can give a mechanism (the status says so), never a clash or a floating part (`params-*.test.ts`, 25 seeds for each case). One known limit: above a load of 200 kN/m (the top of the slider), a tree with short braces can have clashes.
+A setting can give a mechanism (the status says so), never a clash or a floating part (`params-*.test.ts` and `geometry-*.test.ts`, 25 seeds for each case). One known limit: above a load of 200 kN/m (the top of the slider), a tree with short braces can have clashes.
 
-Parts must not go through each other. A secondary beam is coped (its flanges cut back) where it meets the flanges of its arm, and its plate fits between those flanges. A brace stays above the arms under it on the same face of its column, and is long enough that its two gussets don't touch. `clash.ts` checks this with boxes, and `geometry.test.ts` runs it on every form, 240 structures, on 72 more with every member in its other shape (`shapeP` 1), and on 72 more with round tube braces (`roundP` 1).
+Parts must not go through each other. A secondary beam is coped (its flanges cut back) where it meets the flanges of its arm, and its plate fits between those flanges. A brace stays above the arms under it on the same face of its column, and is long enough that its two gussets don't touch. `clash.ts` checks this with boxes, and `geometry-*.test.ts` runs it on every form, 240 structures, on 72 more with every member in its other shape (`shapeP` 1), and on 72 more with round tube braces (`roundP` 1).
 
 It can also draw a real test of RESSLab Hub instead of a seed: a specimen. For now it draws four kinds of test, each one in its test rig:
 
