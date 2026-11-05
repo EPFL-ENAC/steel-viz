@@ -14,6 +14,7 @@ import RangeSlider from './RangeSlider.vue';
 import Section from './Section.vue';
 import Seg from './Seg.vue';
 import Slider from './Slider.vue';
+import { variety } from '../score.ts';
 import { BUILD_KEYS, GROUPS, catalog, dev, params, s, setView, stats, turnTo, type Built } from './state.ts';
 import { shownTest } from './response.ts';
 import { current, setMode } from './tests.ts';
@@ -103,6 +104,8 @@ const inAir = computed(() => {
 });
 const pct = (x: number) => `${Math.round(x * 100)} %`;
 const band = (lo: number, hi: number) => `${lo.toFixed(2)} to ${hi.toFixed(2)} H`;
+// how many kinds of detail this seed shows (score.ts)
+const kinds = computed(() => (!hub.value && built.value ? variety(built.value.r.st) : undefined));
 const status = computed(() => {
   const r = built.value?.r;
   if (!r) return { ok: false, text: '' };
@@ -262,6 +265,7 @@ async function copy(what: 'svg' | 'link') {
 
         <Section id="analysis" title="Analysis">
           <div><span class="status" :class="status.ok ? 'ok' : 'bad'">{{ status.text }}</span></div>
+          <p v-if="kinds" class="note">Variety: {{ kinds.variety }} kinds of detail<br>{{ kinds.kinds.join(', ') }}</p>
           <ul class="members">
             <li v-for="[k, v] in members" :key="k"><span>{{ k }}</span><span>{{ v }}</span></li>
           </ul>
