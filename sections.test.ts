@@ -2,7 +2,7 @@
 // values of their source, and the catalog lists.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { chsSection, iSection, loadCatalog, rectProps, rects, type Section } from './sections.ts';
+import { chsSection, flatBar, iSection, loadCatalog, rectProps, rects, type Section } from './sections.ts';
 import { readTables } from './tables.ts';
 
 const cats = { aisc: loadCatalog('aisc', ...readTables('aisc')), eu: loadCatalog('eu', ...readTables('eu')) };
@@ -38,6 +38,21 @@ test('the new shapes are close to the values of their source', () => {
   for (const [s, A, Is] of refs) {
     near(s.A, A, 0.05, `${s.id} A`);
     near(s.Is, Is, 0.05, `${s.id} Is`);
+  }
+});
+
+test('one angle and a flat bar: rmin about the weak axis', () => {
+  // L 100x100x10: iv 1.95 cm (EN 10056). L4X4X1/2: rz 0.776 in (AISC).
+  // No root radius here, so a bit off.
+  const one = (cat: (typeof cats)['eu'], id: string) => cat.singles.find((s) => s.id === id)!;
+  near(one(cats.eu, 'L 100x100x10').rmin, 19.5, 0.05, 'L 100x100x10 rmin');
+  near(one(cats.aisc, 'L4X4X1/2').rmin, 0.776 * 25.4, 0.05, 'L4X4X1/2 rmin');
+  const fb = flatBar('FL 100x10', 100, 10);
+  near(fb.A, 1000, 1e-9, 'FB A');
+  near(fb.rmin, 10 / Math.sqrt(12), 1e-9, 'FB rmin');
+  for (const cat of Object.values(cats)) {
+    assert.ok(cat.flats.length > 10 && cat.singles.length > 5, cat.family);
+    assert.ok(cat.flats.every((s) => s.kind === 'FB' && s.bf <= s.d / 4) && cat.singles.every((s) => s.kind === 'L'));
   }
 });
 

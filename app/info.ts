@@ -6,10 +6,10 @@ import { CONNS, type ConnType, type Part } from '../steel.ts';
 
 export type Tip = { title: string; id: string; rows: [string, string][]; warn?: boolean };
 
-const SHAPE: Record<Section['kind'], string> = { I: 'I', C: 'channel', T: 'tee', '2L': 'double angle', RHS: 'tube', ROD: 'round bar', CHS: 'round tube' };
+const SHAPE: Record<Section['kind'], string> = { I: 'I', C: 'channel', T: 'tee', '2L': 'double angle', RHS: 'tube', ROD: 'round bar', CHS: 'round tube', L: 'angle', FB: 'flat bar' };
 // the beam end kinds have their label in the catalog, these say more
 const CONN: Record<string, string> = {
-  gusset: 'gusset, knife plate', gusset_small: 'small gusset', gusset_lap: 'gusset between the angles', clevis: 'clevis and pin',
+  gusset: 'gusset, knife plate', gusset_small: 'small gusset', gusset_lap: 'lapped gusset plate', clevis: 'clevis and pin',
   bearing: 'bearing', flange: 'flange plates',
 };
 
@@ -22,6 +22,8 @@ function dims(s: Section): string {
     case 'CHS': return `Ø ${n1(s.d)}, t ${n1(s.tf)} mm`;
     case 'RHS': return `${n1(s.d)} × ${n1(s.bf)}, t ${n1(s.tf)} mm`;
     case '2L': return `2 L ${n1(s.d)} × ${n1(s.d)}, t ${n1(s.tf)} mm`;
+    case 'L': return `L ${n1(s.d)} × ${n1(s.bf)}, t ${n1(s.tf)} mm`;
+    case 'FB': return `${n1(s.d)} × ${n1(s.bf)} mm`;
     default: return `d ${n1(s.d)}, bf ${n1(s.bf)}, tw ${n1(s.tw)}, tf ${n1(s.tf)} mm`;
   }
 }

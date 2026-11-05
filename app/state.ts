@@ -30,6 +30,7 @@ const DEFAULTS = {
   storeys: 0, // 0: the seed picks
   span: GEN.spanK,
   bracing: 'auto',
+  xKind: 'auto', // flat bars, rods or angles in an X
   armLmin: GEN.armL[0],
   armLmax: GEN.armL[1],
   armZmin: GEN.armZ[0],
@@ -42,6 +43,7 @@ const DEFAULTS = {
   splices: GEN.beamSpliceP,
   trusses: GEN.trussK, // times the usual chance
   rods: GEN.rodP,
+  xBraces: GEN.xP, // the chance that an auto diagonal is an X
   colSplice: GEN.colSpliceP,
   connKinds: GEN.connKindsP,
   skew: GEN.skewP,
@@ -65,8 +67,8 @@ export type Key = keyof Settings;
 // the keys of each section of the rail: what it counts as changed, and resets
 export const GROUPS = {
   structure: ['form', 'arms', 'height', 'load', 'family', 'shapes'],
-  layout: ['storeys', 'span', 'bracing', 'armLmin', 'armLmax', 'armZmin', 'armZmax', 'conn'],
-  details: ['braces', 'secondaries', 'posts', 'splices', 'trusses', 'rods', 'colSplice', 'connKinds', 'skew'],
+  layout: ['storeys', 'span', 'bracing', 'xKind', 'armLmin', 'armLmax', 'armZmin', 'armZmax', 'conn'],
+  details: ['braces', 'secondaries', 'posts', 'splices', 'trusses', 'rods', 'xBraces', 'colSplice', 'connKinds', 'skew'],
   view: ['viewer', 'compare', 'view', 'az', 'el', 'weights', 'detail', 'size'],
   animation: ['duration', 'speed'],
 } satisfies Record<string, Key[]>;
@@ -123,6 +125,7 @@ export const params = (): Partial<Params> => ({
   seed: s.seed || 1, form: s.form as Params['form'], arms: s.arms, height: s.height, load: s.load,
   shapeP: SHAPE_P[s.shapes] ?? GEN.shapeP, fy: s.family === 'eu' ? 355 : 345,
   storeys: s.storeys as Params['storeys'], spanK: s.span, bracing: s.bracing as Params['bracing'],
+  xKind: s.xKind as Params['xKind'], xP: s.xBraces,
   armL: [s.armLmin, s.armLmax], armZ: [s.armZmin, s.armZmax], conn: s.conn as Params['conn'],
   braceP: s.braces, secondaryP: s.secondaries, postP: s.posts, beamSpliceP: s.splices,
   trussK: s.trusses, rodP: s.rods, colSpliceP: s.colSplice, connKindsP: s.connKinds, skewP: s.skew,

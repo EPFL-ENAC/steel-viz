@@ -15,7 +15,7 @@ It builds a steel structure from a seed, in one of three forms:
 - Portal: two columns with beams between them, on one or two storeys, and a few arms out of the columns.
 - Box: four columns in a rectangle. Beams and braces stay in its four walls, nothing sticks out of them.
 
-Each bay storey gets its own bracing: none (moment connections), knee braces at both ends, a chevron (two braces up to the middle of the beam) or one diagonal. `--form` picks the form (`mix` lets the seed pick it, a tree seed gives the same tree in both).
+Each bay storey gets its own bracing: none (moment connections), knee braces at both ends, a chevron (two braces up to the middle of the beam), one diagonal, or an X (two diagonals that cross, see "X bracing"). `--form` picks the form (`mix` lets the seed pick it, a tree seed gives the same tree in both).
 
 A small frame solver checks that the structure stands up. If it does not, the generator adds a brace or changes a pinned connection to a moment connection. Then it sizes each member from the AISC or EU section tables in `sections/`. The I and tube tables are copies of RESSLab Hub (from `frontend/src/assets/connection/` and `frontend/src/assets/hss/` in the hub). Copy them again when the hub changes them. The channel and angle tables are ours until the hub has them. `sections/README.md` says where they come from and how to make them again. The tees are not in a table: a tee is an I cut in two (`W16X50` gives `WT8X25`, `IPE 300` gives `1/2 IPE 300`).
 
@@ -55,6 +55,24 @@ Then come posts and beam splices, each from a draw of its own (`postP` and `beam
 
 - Post: a short column, 400 to 900 mm high, on the top flange of a beam. It has a base plate bolted to the flange with 4 bolts, and a cap plate. It is free at the top. It goes on an arm that sticks out (with no rod and no truss, and only if the column has room above it), or on a bay beam of the top storey. At most 2 in a structure. Its flanges are not wider than the beam flange. The solver takes it: it is fixed on the beam, and it brings the load of 800 mm of beam as a point load at its top. The solver sizes it, and if the structure does not stand up with the posts, they are left out.
 - Beam splice: a bay beam of 2000 mm or more, with no truss, is cut in two pieces. Bolted plates on both flanges and on the web join them, the same plates as a flange splice of a column. The cut is between 20 and 40 % of the span from one end, where the moment is small, and clear of the end plates, the braces, the secondary beams and a post. A box gets it less often, because it has many bay beams. It is a full strength splice, so the solver keeps the beam in one piece.
+
+### X bracing
+
+An X is two diagonals in the same bay storey, one from each column up to the beam. They cross in the bay. Each X is one of three kinds:
+
+- Flat bars, bolted on a lapped gusset plate at each end (`gusset_lap`, the same plate as a double angle). The two bars sit on the two faces of the plates. Where they cross, a filler plate fills the gap between them, with one bolt through the three.
+- Single equal angles, drawn the same way as the flat bars.
+- Rods, with a clevis at each end, like a tension rod. Each rod is off the bay plane by half its diameter plus 3 mm, so the two pass each other. A turnbuckle cuts each rod at 1/4 of its length from the lower end.
+
+The members of an X only take tension. A slack one in compression does nothing. The solver is linear, so it takes them this way:
+
+- In the model, each diagonal has half its section (area and inertias) and its full self weight. The two together are as stiff as one full diagonal in tension.
+- In the check, the force is `2 N` in tension and there is no compression. The loads can reverse, so each diagonal is checked as the one in tension.
+- They add no compression to the buckling analysis of the whole structure.
+
+So the sizing has no buckling for them. Rods and flat bars only need the area. Angles also need `L / rmin` under 300 (`rmin` about the weak axis of one angle). A flat bar list is computed like the rods: AISC 2" to 6" wide, EU 50 to 150 mm, thickness up to a quarter of the width. The single angles are the equal angles of the angle table, legs 50 to 150 mm.
+
+The X comes from a draw of its own, keyed by the arm id (`xP`, 0.3 by default): when `bracing` is auto and the seed picks a diagonal, the bay storey gets an X instead. `xKind` picks the kind, or the same draw does. With `xP` at 0, a seed gives the same parts as before the X. With `--bracing x`, the bays are the same as with `--bracing diagonal`, with an X in place of each diagonal. If the second diagonal doesn't fit, the bay keeps a plain diagonal.
 
 ### Beam end connections
 
@@ -100,13 +118,14 @@ The solver keeps the arm on a line through the column axis. The drawn arm goes t
 
 ### The look settings
 
-Arms, height and load are not the only knobs. These `Params` in `generate.ts` change the look too. Each one has an auto or default value. At that value the seed takes the same draws, so it gives the same structure as before (`params.test.ts` checks it on 30 seeds). Only `skewP` is different: at its default, some trees get skewed arms. Set it to 0 for the trees of before. When you set one, the seed still takes its draw, then the value replaces it.
+Arms, height and load are not the only knobs. These `Params` in `generate.ts` change the look too. Each one has an auto or default value. At that value the seed takes the same draws, so it gives the same structure as before (`params.test.ts` checks it on 30 seeds). Only `skewP` and `xP` are different: at their default, some trees get skewed arms and some bays get an X. Set them to 0 for the structures of before. When you set one, the seed still takes its draw, then the value replaces it.
 
 | param | default | CLI | playground | what it does |
 |---|---|---|---|---|
 | `storeys` | 0 (auto) | `--storeys 0\|1\|2` | Layout, storeys | one or two storeys for a portal or a box |
 | `spanK` | 1 | `--span 1` | Layout, span | multiplies the bay spans (0.6 to 1.6 in the playground) |
-| `bracing` | auto | `--bracing none\|knee\|chevron\|diagonal` | Layout, bracing | the bracing of every bay storey |
+| `bracing` | auto | `--bracing none\|knee\|chevron\|diagonal\|x` | Layout, bracing | the bracing of every bay storey |
+| `xKind` | auto | `--x-kind flat\|rod\|angle` | Layout, X kind | the kind of every X (see "X bracing") |
 | `armL` | 0.3, 0.7 | `--arm-length 0.3,0.7` | Layout, arm length | the band of arm lengths, as a part of the height. Portal side arms take 3/4 of the band. |
 | `armZ` | 0.35, 0.95 | `--arm-height 0.35,0.95` | Layout, arm height | the band of heights where arms leave the column |
 | `conn` | auto | `--conn shear_tab\|end_plate\|...` (see "Beam end connections") | Layout, connections | the beam connection. A secondary beam keeps its own when it can't take this one. |
@@ -116,6 +135,7 @@ Arms, height and load are not the only knobs. These `Params` in `generate.ts` ch
 | `beamSpliceP` | 0.3 | `--beam-splices` | Details | the chance of a beam splice |
 | `trussK` | 1 | `--trusses` | Details | multiplies the truss chances (0 for none) |
 | `rodP` | 0.4 | `--rods` | Details | the chance of a tension rod |
+| `xP` | 0.3 | `--x-braces` | Details, X braces | the chance that an auto diagonal is an X |
 | `colSpliceP` | 0.6 | `--col-splice` | Details | the chance of a column splice |
 | `connKindsP` | 0.35 | `--conn-kinds` | Details, more connection kinds | the chance that a beam end gets one of the newer kinds (see "Beam end connections") |
 | `skewP` | 0.3 | `--skew` | Details, skewed arms | the chance that a tree arm leaves its column at 30 or 45 degrees (see "Skewed arms"). 0 gives the trees of before. |
@@ -132,7 +152,7 @@ Parts must not go through each other. A secondary beam is coped (its flanges cut
 It can also draw a real test of RESSLab Hub instead of a seed: a specimen. For now it draws four kinds of test, each one in its test rig:
 
 - A beam-to-column subassembly (the test of one connection): one column with one or two beams. That's the `connection` table of the hub, 99 of its 100 tests.
-- A brace test: one brace, alone or in a test frame. That's the `braces` table, 279 of its 294 tests. See "Brace tests" below.
+- A brace test: one brace, alone or in a test frame. That's the `braces` table, 281 of its 294 tests. See "Brace tests" below.
 - A column test: one column, pushed sideways at its top under an axial load. That's the `columns` table, all its 153 tests. See "Column tests" below.
 - An HSS column test: one square or rectangular tube, standing like a column test, or lying on two rollers and pushed at mid span. That's the `hss_columns` table, all its 284 tests. See "HSS column tests" below.
 - An EBF link test: the link of an eccentrically braced frame (the short piece of beam that yields in shear), alone or in a one bay frame. That's the `eccentric_braced_frames` table, all its 240 tests. See "EBF link tests" below.
@@ -209,12 +229,12 @@ It prints one line for each table, then the errors grouped by field (November 20
 ```text
 connections: 99 / 100 drawn, 0 mechanism, 0 clash, 0 floating
   specimen_type "Exterior - Frame" is not supported yet: 1 (Del_Caprio_et_al_2014_RBS-A)
-braces: 279 / 294 drawn, 0 mechanism, 0 clash, 0 floating
+braces: 281 / 294 drawn, 0 mechanism, 0 clash, 0 floating
   cross_section_shape "Angle" is not supported yet: 8 (Jain_1L, Jain_2L, Jain_3L, Jain_4L, Jain_5L, ...)
   cross_section_shape "Double Channel" is not supported yet: 5 (Black_Strut-11, Lehman_Roeder_HSS29, Aslani_C1, Aslani_C2, Aslani_C3)
-  cross_section_shape "Flat Bar" is not supported yet: 2 (Wakabayashi_FTBM, Wakabayashi_FTBC)
 columns: 153 / 153 drawn, 0 mechanism, 0 clash, 0 floating
 hss_columns: 284 / 284 drawn, 0 mechanism, 0 clash, 0 floating
+eccentric_braced_frames: 240 / 240 drawn, 0 mechanism, 0 clash, 0 floating
 ```
 
 A row that does not read throws an error in one of two forms: `<id>: <field> is missing`, or `<id>: <field> "<value>" is not supported yet`. "mechanism" counts the tests where the solver finds a mechanism. Only the beam-to-column tests are solved, so it is 0 for the other tables.
@@ -240,7 +260,8 @@ The section comes from the numbers:
 | Round Bar | a rod, `d_br` |
 | I-shaped | an I. `t_br` is the flange and `w_br` the web (the data dictionary says the other way round). A `WT` name gives a tee. |
 | Double Angle | from the name. `L152x89x9.5` and `2 L89x64x6.4` are long leg x short leg x t, long legs back to back. `49.7x3.88` has equal legs. `d_br` and `b_br` don't mean the same thing in every row, so they are used only when the name doesn't read. |
-| Angle, Double Channel, Flat Bar | not drawn yet (15 rows) |
+| Flat Bar | a flat bar, `b_br` x `t_br`, on the middle of its end plates |
+| Angle, Double Channel | not drawn yet (13 rows) |
 
 A brace test of our own, as JSON:
 
@@ -413,7 +434,7 @@ For the EU family, pass `european-sections.csv` and `hss-european-sections.csv` 
 
 The hub has no channel or angle table, so this catalog has no channels and no double angles: the braces and the secondary beams keep their tube and I sections. The tees still come, because they are made from the I table. To get the same drawing as here, also pass the channel and angle CSV files of `sections/` (`loadCatalog('aisc', iCsv, hssCsv, channelCsv, angleCsv)`). For no other shape at all, pass `shapeP: 0` to `generate()`.
 
-A tree of today can have skewed arms (`skewP`, 0.3 by default). The logo is an exported SVG, so it doesn't change. To export the same seed again with the same look, pass `skewP: 0`.
+A tree of today can have skewed arms (`skewP`, 0.3 by default), and a bay an X (`xP`, 0.3 by default). The logo is an exported SVG, so it doesn't change. To export the same seed again with the same look, pass `skewP: 0` and `xP: 0`.
 
 The package has no dependency, so the hub installs nothing else. For the 3D view:
 

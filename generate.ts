@@ -13,6 +13,7 @@ import { add, cross, dot, len, mul, norm, sub, type V } from './vec.ts';
 import { buckling, solve, type Elem, type FNode, type Solved } from './solver.ts';
 import { memberRatio } from './checks.ts';
 import type { Catalog, Section } from './sections.ts';
+import { ANGLE_GAP, rodSection } from './sections.ts';
 import {
   box3, boxOf, flat, geo, hardware, memberBoxes, memberFaces, resolve, splicePlates, stiffener, supportFace, BEARING_T, BEAM_CONN_KINDS, CONNS, EDGE, PINNED, SETBACK, SPLICE_HALF,
   type BeamConn, type ConnType, type Fit, type Geo, type P2, type Part, type PartInfo, type Plate,
@@ -52,6 +53,10 @@ export type Params = {
   storeys: 0 | 1 | 2; // portal and box: 0 lets the seed pick
   spanK: number; // portal and box: the bays are this many times longer
   bracing: Bracing | 'auto'; // portal and box: the bracing of every bay storey
+  // the chance that a diagonal the seed drew becomes an X (bracing auto
+  // only). 0: no X, the same parts as before X bracing.
+  xP: number;
+  xKind: XKind | 'auto'; // every X: flat bars, rods or angles
   armL: [number, number]; // tree arms, from this to this times the height (the arms of a portal: 3/4 of the band)
   armZ: [number, number]; // where the arms land on the column, from this to this times the height
   conn: BeamConn | 'auto'; // every beam end (a secondary beam takes it when it can)
@@ -64,7 +69,7 @@ export type Params = {
 };
 export const DEFAULTS: Params = {
   seed: 1, arms: 8, height: 2500, load: 100, fy: 345, braceP: 0.3, secondaryP: 0.35, postP: 0.3, beamSpliceP: 0.3, connKindsP: 0.35, shapeP: 0.35, skewP: 0.3,
-  storeys: 0, spanK: 1, bracing: 'auto', armL: [0.3, 0.7], armZ: [0.35, 0.95], conn: 'auto', trussK: 1, rodP: 0.4, colSpliceP: 0.6,
+  storeys: 0, spanK: 1, bracing: 'auto', xP: 0.3, xKind: 'auto', armL: [0.3, 0.7], armZ: [0.35, 0.95], conn: 'auto', trussK: 1, rodP: 0.4, colSpliceP: 0.6,
   seg: 400, form: 'mix',
 };
 
@@ -97,7 +102,8 @@ const orOld = (xs: Section[], old: Section[]) => (xs.length ? xs : old);
 // (the column at the `end` of the arm: 0 its start, 1 its far end). zb:
 // where it meets that column, a height that stays put when sizing changes
 // the depth of the arm.
-type Brace = { a: number; zb: number; sec: Section; end: 0 | 1 };
+// x: one of the two diagonals of an X (see addX).
+type Brace = { a: number; zb: number; sec: Section; end: 0 | 1; x?: XKind };
 // An arm starts on column `col`. A bay beam also ends on column `to`.
 // splice: a bolted splice in a bay beam, that far along it (geometry only).
 // face and skew: a skewed arm (skewArms) leaves the column face `face` (0 or
@@ -172,8 +178,9 @@ const BEAM_CONN = { shear_tab: 0.4, end_plate: 0.2, flange_plates: 0.2, welded: 
 export { BEAM_CONN_KINDS, type BeamConn };
 const SEC_CONN = { shear_tab: 0.6, end_plate: 0.25, welded: 0.15 };
 const BRACING = { none: 0.2, knee: 0.3, chevron: 0.3, diagonal: 0.2 };
-export type Bracing = keyof typeof BRACING;
-export const BRACING_KINDS = Object.keys(BRACING) as Bracing[];
+// x is not in the draw: a diagonal becomes an X from a stream of its own (xOf)
+export type Bracing = keyof typeof BRACING | 'x';
+export const BRACING_KINDS = [...Object.keys(BRACING), 'x'] as Bracing[];
 // a beam end: the seed draws it, p.conn replaces it
 const beamConn = (p: Params, rng: () => number): BeamConn => {
   const c = pick(rng, BEAM_CONN);
@@ -237,8 +244,8 @@ function secondaries(p: Params, cat: Catalog, rng: () => number, arms: Arm[]): S
 // them: no arms out of the columns, no secondary beams.
 // Each bay storey gets its bracing: none (the connections take the
 // moments), knee braces at both ends, a chevron (two braces up to the
-// middle of the beam) or one diagonal. A portal also gets a few arms out of
-// its columns.
+// middle of the beam), one diagonal or an X (two diagonals, see addX). A
+// portal also gets a few arms out of its columns.
 function frame(form: 'portal' | 'box', p: Params, cat: Catalog, rng: () => number): Structure {
   const drawn = rng() < 0.4 ? 2 : 1;
   const storeys = p.storeys || drawn;
@@ -283,7 +290,12 @@ function frame(form: 'portal' | 'box', p: Params, cat: Catalog, rng: () => numbe
     const kind = bracing[i];
     if (kind === 'knee') addBrace(a, arms, cat, 0, 0.4) && addBrace(a, arms, cat, 1, 0.4);
     if (kind === 'chevron') addBrace(a, arms, cat, 0, 0, a.L / 2 - 250) && addBrace(a, arms, cat, 1, 0, a.L / 2 - 250);
-    if (kind === 'diagonal') addBrace(a, arms, cat, rng() < 0.5 ? 0 : 1, 0, a.L - 500);
+    if (kind === 'diagonal' || kind === 'x') {
+      const end = rng() < 0.5 ? 0 : 1;
+      const x = xOf(p, a, kind); // undefined: a plain diagonal
+      if (x) addX(a, arms, cat, end, x);
+      else addBrace(a, arms, cat, end, 0, a.L - 500);
+    }
     if (kind === undefined && rng() < p.braceP) addBrace(a, arms, cat);
   });
   return { form, H, col: mid(cat.columns), cols, arms, secs: form === 'box' ? [] : secondaries(p, cat, rng, arms) };
@@ -700,13 +712,15 @@ function holdSpecimen(st: Structure, nodes: FNode[]) {
 
 // ------------------------------------------------------------- analysis
 // len: the length of each member (owner), its buckling length in checks.ts
-type Model = { nodes: FNode[]; elems: Elem[]; owner: string[]; nodeOwner: string[][]; len: Map<string, number> };
+// tension: the X diagonals, tension only (see worstOf).
+type Model = { nodes: FNode[]; elems: Elem[]; owner: string[]; nodeOwner: string[][]; len: Map<string, number>; tension: Set<string> };
 
 function model(st: Structure, p: Params): Model {
   const nodes: FNode[] = [];
   const elems: Elem[] = [];
   const owner: string[] = [];
   const nodeOwner: string[][] = [];
+  const tension = new Set<string>();
   const node = (x: V, who: string, fixed = false) => {
     let i = nodes.findIndex((n) => Math.hypot(...sub(n.x, x)) < 1);
     if (i < 0) {
@@ -787,7 +801,8 @@ function model(st: Structure, p: Params): Model {
       const b0 = add(st.cols[b.end ? a.to! : a.col].x, [0, 0, b.zb]);
       const b1 = add(o, mul(h, b.end ? a.L - b.a : b.a));
       const id = braceId(a, k);
-      elems.push({ i: node(b0, id), j: node(b1, id), p: b.sec, pinI: true, pinJ: true, q: [0, 0, -w(b.sec)] });
+      if (b.x) tension.add(id);
+      elems.push({ i: node(b0, id), j: node(b1, id), p: b.x ? halved(b.sec) : b.sec, pinI: true, pinJ: true, q: [0, 0, -w(b.sec)] });
       owner.push(id);
     });
   });
@@ -805,7 +820,7 @@ function model(st: Structure, p: Params): Model {
     const who = owner[i];
     if (who !== 'column' && who !== 'column-top') lengths.set(who, (lengths.get(who) ?? 0) + len(sub(nodes[e.j].x, nodes[e.i].x)));
   });
-  return { nodes, elems, owner, nodeOwner, len: lengths };
+  return { nodes, elems, owner, nodeOwner, len: lengths, tension };
 }
 
 // a mechanism at a node: fix the pinned connection highest up the support
@@ -852,6 +867,7 @@ function worstOf(m: Model, res: Forces[]) {
     const w = worst.get(who) ?? { N: 0, Nc: 0, My: 0, Mz: 0 };
     worst.set(who, { N: Math.max(w.N, res[i].N), Nc: Math.max(w.Nc, res[i].Nc), My: Math.max(w.My, res[i].My), Mz: Math.max(w.Mz, res[i].Mz) });
   });
+  for (const who of m.tension) worst.set(who, tensionOnly(worst.get(who)!));
   return worst;
 }
 
@@ -864,7 +880,7 @@ type Stability = { alpha: number; amp: number; forces: Forces[]; energy: Map<str
 // Free, a short post with its load sways and twists the beam (alphaCr < 1).
 // The member check covers the buckling of the post itself.
 function stability(m: Model, r: Extract<Solved, { ok: true }>): Stability {
-  const axial = r.axial.map((n, i) => (m.owner[i].endsWith('-post') ? 0 : n));
+  const axial = r.axial.map((n, i) => (m.owner[i].endsWith('-post') || m.tension.has(m.owner[i]) ? 0 : n));
   const b = buckling(m.nodes, m.elems, { ...r, axial });
   const amp = 1 / (1 - 1 / Math.max(b.alpha, ALPHA_MIN));
   const forces = r.forces.map((f) => ({ ...f, My: f.My * amp, Mz: f.Mz * amp }));
@@ -966,6 +982,7 @@ function size(st: Structure, m: Model, res: Forces[], cat: Catalog, p: Params, c
     const braces = shaped(p, `${a.id}-braces`) ? orOld(cat.angles, cat.tubes) : cat.tubes;
     a.braces.forEach((b, k) => {
       const L = Math.hypot(b.a, drop(a, b));
+      if (b.x) return void (b.sec = choose(xList(cat, b.x), braceId(a, k), b.sec, xRule(b.x, L)));
       b.sec = choose(braces, braceId(a, k), b.sec, (s) => L / s.rmin < 200);
     });
   }
@@ -1002,12 +1019,117 @@ function braceGeo(st: Structure, a: Arm, b: Brace, k: number, S: Geo) {
   const un = mul(u, 1 / Math.hypot(...u));
   // a double angle has no knife plate: its gap is from the corner of the
   // angles nearest the face, half its depth times the slope off the face
-  const conn: ConnType = b.sec.kind === '2L' ? 'gusset_lap' : 'gusset';
+  const conn = braceConn(b.sec);
   const [cos, sin] = [un[0] * hb[0] + un[1] * hb[1], un[2]];
   const lap = conn === 'gusset_lap' ? b.sec.d / 2 : 0;
   const t0 = (supportFace(S, hb) + SETBACK[conn] + lap * sin) / cos;
   const t1 = (SETBACK[conn] + lap * cos) / sin;
   return { g: geo(braceId(a, k), b.sec, add(B, mul(un, t0)), sub(C, mul(un, t1)), false), conn, hb };
+}
+// the end of a brace: a double angle, one angle or a flat bar laps a plate,
+// a rod has a clevis, a tube a knife plate
+const braceConn = (s: Section): ConnType => (s.kind === '2L' || s.kind === 'L' || s.kind === 'FB' ? 'gusset_lap' : s.kind === 'ROD' ? 'clevis' : 'gusset');
+
+// ------------------------------------------------------------- X bracing
+// Two diagonals that cross in a bay storey, each from the foot of one column
+// up to the beam near the other one. Three generic kinds: flat bars or
+// single angles, bolted to each other where they cross, with a filler plate
+// between them, or rods with a clevis at each end and a turnbuckle.
+// Flat bars and angles sit on one side of their end plates (gusset_lap), and
+// the two diagonals on opposite sides, so they pass each other.
+//
+// They work in tension only. Under a side load one diagonal pulls and the
+// other one goes slack. The solver is linear, so it keeps both, each with
+// half its section (halved): together they are as stiff as one tension
+// diagonal, and each takes half its force. The check takes twice the force
+// as tension, and no compression (tensionOnly). They have no buckling
+// check, and stability() leaves them out.
+const X_KIND = { flat: 1, rod: 1, angle: 1 };
+export type XKind = keyof typeof X_KIND;
+export const X_KINDS = Object.keys(X_KIND) as XKind[];
+const X_LABEL: Record<XKind, string> = { flat: 'flat bars', rod: 'rods', angle: 'angles' };
+
+// Is this diagonal an X, and of which kind? Two draws from a stream of its
+// own (key: the arm id), always both, in this order: the chance (it counts
+// only for a diagonal of bracing auto), then the kind. kind: the bracing of
+// the bay storey, diagonal or x.
+function xOf(p: Params, a: Arm, kind: Bracing): XKind | undefined {
+  const rng = mulberry32(p.seed * 179424673 + fnv1a(`${a.id}-x`));
+  const chance = rng();
+  const drawn = pick(rng, X_KIND);
+  if (kind !== 'x' && !(p.bracing === 'auto' && chance < p.xP)) return undefined;
+  return p.xKind === 'auto' ? drawn : p.xKind;
+}
+
+// The diagonal from `end`, then the one from the other end, both as far up
+// as a diagonal. If the second one doesn't fit, the first one stays a plain
+// diagonal (a tube), like the bracing diagonal.
+function addX(a: Arm, arms: Arm[], cat: Catalog, end: 0 | 1, x: XKind) {
+  if (!addBrace(a, arms, cat, end, 0, a.L - 500) || !addBrace(a, arms, cat, end ? 0 : 1, 0, a.L - 500)) return;
+  for (const b of a.braces.slice(-2)) Object.assign(b, { x, sec: mid(xList(cat, x)) });
+}
+// the sections of a kind (an old catalog with no angle table: flat bars)
+const xList = (cat: Catalog, x: XKind) => (x === 'rod' ? cat.rods : x === 'angle' ? orOld(cat.singles, cat.flats) : cat.flats);
+// in tension only, a rod or a flat bar has no slenderness rule. An angle
+// keeps L / r <= 300, the usual limit for a tension member.
+const xRule = (x: XKind, L: number) => (s: Section) => x !== 'angle' || L / s.rmin <= 300;
+const halved = (s: Section): Section => ({ ...s, A: s.A / 2, Is: s.Is / 2, Iw: s.Iw / 2, J: s.J / 2 });
+const tensionOnly = (f: Forces): Forces => ({ ...f, N: 2 * f.N, Nc: 0 });
+
+// One diagonal of an X, in parts(): g from braceGeo, its two ends, and the
+// callbacks of parts(). Flat bars and angles: the member, and after the
+// second diagonal the filler plate and the bolt where they cross. A rod
+// moves off the bay plane by half its diameter and 3 mm, so the two rods
+// pass each other. It is in two pieces, joined by a turnbuckle at a
+// quarter of its length from its foot (away from the crossing).
+type XEnd = { S: Geo; sId: string; conn: ConnType; at: 'from' | 'to' };
+type XDraw = {
+  member: (g: Geo, ends: XEnd[], from: V, type: string, who: string) => void;
+  put: (q: Omit<Part, 'step'>) => void;
+  plates: boolean; bolts: boolean; seg: number;
+};
+function xParts(st: Structure, a: Arm, k: number, g: Geo, ends: [XEnd, XEnd], from: V, d: XDraw) {
+  const b = a.braces[k];
+  const id = braceId(a, k);
+  const type = `X brace, ${X_LABEL[b.x!]}`;
+  if (b.sec.kind !== 'ROD') {
+    d.member(g, ends, from, type, id);
+    if (k === 0) return;
+    // the bolt lines of both diagonals (see gussetLap), from the column to the beam, cross here
+    const [l0, l1] = [0, 1].map((j) => {
+      const q = a.braces[j];
+      const h = hdir(a.bearing);
+      const B = add(st.cols[q.end ? a.to! : a.col].x, [0, 0, q.zb]);
+      const C = add(add(start(st, a), mul(h, q.end ? a.L - q.a : q.a)), [0, 0, -a.sec.d]);
+      const f = geo('', q.sec, B, C, false);
+      return { p: add(B, mul(f.w, q.sec.tf / 2)), u: f.u };
+    });
+    // in the bay plane: l0.p + s l0.u = l1.p + r l1.u
+    const n = norm(cross(l0.u, l1.u));
+    const e = sub(l1.p, l0.p);
+    const s = dot(cross(e, l1.u), n) / dot(cross(l0.u, l1.u), n);
+    const X = add(l0.p, mul(l0.u, s));
+    const fid = `${a.id}-x-filler`;
+    const side = b.sec.d + 40;
+    const z: V = [0, 0, 1];
+    const pl = flat(X, cross(z, n), z, ANGLE_GAP, [[-side / 2, -side / 2], [side / 2, -side / 2], [side / 2, side / 2], [-side / 2, side / 2]]);
+    const both = [braceId(a, 0), id];
+    if (d.plates) d.put({ id: fid, supports: both, kind: 'plate', from, faces: pl.faces, boxes: [pl.box], dots: [], info: { type: 'Filler plate, X brace', of: a.id } });
+    const dots = [{ p: X, axis: n, half: ANGLE_GAP / 2 + b.sec.tw }];
+    if (d.bolts) d.put({ id: `${fid}-bolts`, supports: d.plates ? [fid, ...both] : both, kind: 'bolts', faces: [], dots, info: { type: 'Bolts', of: fid } });
+    return;
+  }
+  const D = b.sec.d;
+  const off = mul(g.v, D / 2 + 3);
+  const [p0, p1] = [add(g.p0, off), add(g.p1, off)];
+  const c = add(p0, mul(g.u, len(sub(p1, p0)) / 4));
+  const half = 3 * D; // the turnbuckle is 6 D long, 1.8 D wide
+  const lo = geo(id, b.sec, p0, sub(c, mul(g.u, half)), false);
+  const tb = geo(`${id}-turnbuckle`, rodSection('turnbuckle', 1.8 * D), sub(c, mul(g.u, half)), add(c, mul(g.u, half)), false);
+  const hi = geo(`${id}-hi`, b.sec, add(c, mul(g.u, half)), p1, false);
+  d.member(lo, [ends[0]], from, `${type}, lower piece`, id);
+  d.put({ id: tb.id, supports: [lo.id], kind: 'plate', from, faces: memberFaces(tb, d.seg), boxes: memberBoxes(tb), dots: [], info: { type: 'Turnbuckle', of: id } });
+  d.member(hi, [ends[1]], from, `${type}, upper piece`, id);
 }
 
 // ------------------------------------------------------------- skewed arms
@@ -1336,6 +1458,7 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
       const Sb = colAt(b.end ? a.to! : a.col, b.zb);
       const { g: bg, conn, hb } = braceGeo(st, a, b, k, Sb);
       const P = pieceAt(armGeo, a, b.end ? a.L - b.a : b.a);
+      if (b.x) return xParts(st, a, k, bg, [{ S: Sb, sId: Sb.id, conn, at: 'from' }, { S: P, sId: P.id, conn, at: 'to' }], [h[1], -h[0], 0], { member, put: (q) => out.push({ ...q, step: step++ }), plates, bolts, seg });
       member(bg, [
         { S: Sb, sId: Sb.id, conn, at: 'from' },
         { S: P, sId: P.id, conn, at: 'to' },

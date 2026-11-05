@@ -8,8 +8,8 @@ import { DEFAULTS, generate } from './generate.ts';
 import { OLD, cat, kinds } from './params-check.ts';
 
 test('the look settings at their default change nothing', () => {
-  const { storeys, spanK, bracing, armL, armZ, conn, trussK, rodP, colSpliceP, connKindsP, skewP } = DEFAULTS;
-  const set = { storeys, spanK, bracing, armL, armZ, conn, trussK, rodP, colSpliceP, connKindsP, skewP };
+  const { storeys, spanK, bracing, xP, xKind, armL, armZ, conn, trussK, rodP, colSpliceP, connKindsP, skewP } = DEFAULTS;
+  const set = { storeys, spanK, bracing, xP, xKind, armL, armZ, conn, trussK, rodP, colSpliceP, connKindsP, skewP };
   for (let seed = 1; seed <= 30; seed++) assert.deepEqual(generate({ seed, ...set }, cat).parts, generate({ seed }, cat).parts, `seed ${seed}`);
 });
 
@@ -39,6 +39,20 @@ test('skewed arms at 0 change nothing', () => {
       assert.ok(r.st.arms.every((a) => a.bearing % 90 === 0 && a.face === undefined && a.skew === undefined), at);
       assert.ok(r.parts.every((q) => !/skewed/.test(q.info?.type ?? '')), at);
     }
+});
+
+// With xP 0, a seed gives the parts of before the X (the branch was checked
+// against main once, part by part, on 40 seeds of every form and family).
+// Here: no X part, and on with xP 1 there are some.
+test('X at 0 changes nothing', () => {
+  const xParts = (r: ReturnType<typeof generate>) => r.parts.filter((q) => q.info?.type.startsWith('X brace'));
+  let on = 0;
+  for (const form of ['tree', 'portal', 'box', 'mix'] as const)
+    for (let seed = 1; seed <= 30; seed++) {
+      assert.deepEqual(xParts(generate({ seed, form, xP: 0 }, cat)), [], `${form} seed ${seed}`);
+      on += xParts(generate({ seed, form, xP: 1 }, cat)).length;
+    }
+  assert.ok(on > 0);
 });
 
 test('the settings do what they say', () => {

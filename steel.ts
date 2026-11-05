@@ -187,12 +187,27 @@ export function profT(d: number, bf: number, tw: number, tf: number): P2[][] {
   return [ccw([[-w, -h], [w, -h], [w, -h + t], [x, -h + t], [x, h], [-x, h], [-x, -h + t], [-w, -h + t]])];
 }
 
+// one angle on the +v side of the gap: the leg along the gap goes down
+// from w = -h, the outstanding leg is on top and reaches v = w
+const angleRight = (h: number, w: number, t: number): P2[] => {
+  const g = ANGLE_GAP / 2;
+  return [[g, -h], [w, -h], [w, -h + t], [g + t, -h + t], [g + t, h], [g, h]];
+};
+
 // two angles back to back, ANGLE_GAP apart: the legs along the gap go down,
 // the outstanding legs are on top
 export function prof2L(d: number, bf: number, t: number): P2[][] {
-  const [h, w, g] = [d / 2, bf / 2, ANGLE_GAP / 2];
-  const right: P2[] = [[g, -h], [w, -h], [w, -h + t], [g + t, -h + t], [g + t, h], [g, h]];
+  const right = angleRight(d / 2, bf / 2, t);
   return [ccw(right), ccw(right.map(([a, b]): P2 => [-a, b]))];
+}
+
+// one angle, the +v half of a 2L (an X brace)
+export const profL = (d: number, bf: number, t: number): P2[][] => [ccw(angleRight(d / 2, ANGLE_GAP / 2 + bf, t))];
+
+// a flat bar on the +v side of the gap, like one angle of a 2L
+export function profFB(d: number, t: number): P2[][] {
+  const [h, g] = [d / 2, ANGLE_GAP / 2];
+  return [ccw([[g, -h], [g + t, -h], [g + t, h], [g, h]])];
 }
 
 export function profile(s: Section): P2[][] {
@@ -201,6 +216,8 @@ export function profile(s: Section): P2[][] {
     case 'C': return profC(s.d, s.bf, s.tw, s.tf);
     case 'T': return profT(s.d, s.bf, s.tw, s.tf);
     case '2L': return prof2L(s.d, s.bf, s.tf);
+    case 'L': return profL(s.d, s.bf, s.tf);
+    case 'FB': return profFB(s.d, s.bf);
     case 'ROD': case 'CHS': return profRound(s.d);
     default: return profRect(s.d, s.bf);
   }
@@ -936,7 +953,8 @@ function gussetLap(g: Geo, r: Resolved, hw: Hardware) {
   // A double angle on a gusset plate. The plate is welded to the support
   // face and goes into the gap between the two angles. One line of 2 bolts
   // along the brace, through both angles and the plate, in the middle of
-  // the free part of the legs.
+  // the free part of the legs. One angle or a flat bar (L, FB) is only on
+  // the +v side: the bolts go through it and the plate.
   const t = ANGLE_GAP;
   const nrm = g.v;
   // the plate is in the plane of the legs: its foot goes to the face along
@@ -948,7 +966,9 @@ function gussetLap(g: Geo, r: Resolved, hw: Hardware) {
   hw.reach.push(far + EDGE);
   const at = (u: number, dw: number, n = 0) => add(add(add(p, mul(inward, u)), mul(g.w, dw)), mul(nrm, n));
   const wb = wAt(g, (g.sec.tf + g.d) / 2);
-  for (const u of [EDGE, far]) hw.dots.push({ p: at(u, wb), axis: nrm, half: t / 2 + g.sec.tw });
+  const one = g.sec.kind === 'L' || g.sec.kind === 'FB';
+  const tw = g.sec.tw;
+  for (const u of [EDGE, far]) hw.dots.push({ p: at(u, wb, one ? tw / 2 : 0), axis: nrm, half: t / 2 + (one ? tw / 2 : tw) });
   // the bolt area, a bit wider than the angles, joined to its foot on the face
   const [w0, w1] = [wAt(g, -15), wAt(g, g.d + 15)];
   const area = [at(0, w0, -t / 2), at(far + EDGE, w0, -t / 2), at(far + EDGE, w1, -t / 2), at(0, w1, -t / 2)];

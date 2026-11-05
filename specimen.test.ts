@@ -145,6 +145,9 @@ test('findSection: table names written the hub way, built-up names, errors', () 
   assert.throws(() => findSection('HEB 300', cats.aisc), /not in the aisc table \(try the eu family/);
   assert.throws(() => findSection({ id: 'x', d: 100, bf: 100, tf: 60, tw: 10 }, cats.aisc), /too thick/);
   assert.throws(() => findSection({ id: 'x', d: 100, bf: -1, tf: 6, tw: 10 }, cats.aisc), /bf must be a number above 0/);
+  const fb = findSection({ id: 'FB 35.3x3.3', shape: 'FB', b: 35.3, t: 3.3 }, cats.aisc);
+  assert.deepEqual([fb.kind, fb.d, fb.bf], ['FB', 35.3, 3.3]);
+  assert.throws(() => findSection({ id: 'x', shape: 'FB', b: 10, t: 12 }, cats.aisc), /section x: the bar is thicker than it is wide/);
 });
 
 // hand-written specimens, in our own format

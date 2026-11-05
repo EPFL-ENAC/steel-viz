@@ -136,6 +136,10 @@ export function fromHubBrace(rec: HubRecord): BraceSpecimen {
     } else if (Number.isFinite(value('t_br')) && Math.abs(value('t_br') - t) > 0.05)
       notes.push(`t_br ${value('t_br')} does not match the name ${name}, drawn ${t} thick`);
     section = { id: m ? `2L${name.replace(/^(?:2\s*)?L?\s*/i, '')}` : `2L ${long}x${short}x${t}`, shape: '2L', d: long, b: short, t };
+  } else if (shape === 'Flat Bar') {
+    // b_br the width, t_br the thickness (d_br is the thickness again)
+    const [b, t] = [num('b_br'), num('t_br')];
+    section = { id: `FB ${name || `${b}x${t}`}`, shape: 'FB', b, t };
   } else throw unsupported('cross_section_shape');
 
   const length = num('l_b');
