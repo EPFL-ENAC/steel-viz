@@ -7,7 +7,14 @@
 // - balance: the weight sits on the columns, not all on one side.
 // - members: a few members read better than many (4 to 6 is best).
 // - crossings: members that cross each other on screen make a knot.
-import { camera, type Part } from './steel.ts';
+//
+// The variety says something else: how many different kinds of detail one
+// structure shows, for a teaching sculpture. One kind is one detail a student
+// can point at and name. It counts 1 if the structure has it at least once.
+// It reads the structure, not the parts, so it works at any detail level
+// (`pick.ts` uses `members`, where the plates don't exist yet).
+import { braceConn, X_KINDS, X_LABEL, type Structure } from './generate.ts';
+import { BEAM_CONN_KINDS, camera, CONNS, type Part } from './steel.ts';
 import { dot, type V } from './vec.ts';
 
 export type Score = { score: number; fill: number; aspect: number; balance: number; members: number; crossings: number };
@@ -92,4 +99,76 @@ export function logoScore(parts: Part[], az: number, el: number): Score {
   const score =
     0.25 * Math.min(1, fill / 0.75) + 0.2 * aspect ** 2 + 0.2 * Math.max(0, 1 - 8 * balance) + 0.15 * mScore + 0.2 / (1 + crossings / 2);
   return { score, fill, aspect, balance, members, crossings };
+}
+
+export type Variety = { variety: number; kinds: string[] };
+
+const xKind = (k: keyof typeof X_LABEL) => `X brace, ${X_LABEL[k]}`;
+
+// every kind we count, in the order `variety()` lists them
+export const VARIETY_KINDS: string[] = [
+  ...BEAM_CONN_KINDS.map((k) => CONNS[k].label),
+  'secondary beam',
+  'brace',
+  ...X_KINDS.map(xKind),
+  'double angle brace',
+  'round tube brace',
+  'round tube brace, end caps',
+  'channel secondary',
+  'tee chord',
+  'truss',
+  'tension rod',
+  'post',
+  'skewed arm',
+  'gable roof',
+  'column splice, bearing',
+  'column splice, flange plates',
+  'beam splice',
+  'foot gussets',
+];
+
+export function variety(st: Structure): Variety {
+  const { arms, secs, splice, base } = st;
+  const braces = arms.flatMap((a) => a.braces);
+  const plain = braces.filter((b) => !b.x);
+  const round = plain.filter((b) => b.sec.kind === 'CHS');
+  const trusses = arms.flatMap((a) => a.truss ?? []);
+  const seen: Record<string, boolean> = {
+    'secondary beam': secs.length > 0,
+    brace: plain.length > 0,
+    'double angle brace': plain.some((b) => b.sec.kind === '2L'),
+    // one tube end or the other: a small tube keeps its slot, even with `cap`
+    'round tube brace': round.some((b) => braceConn(b) !== 'gusset_cap'),
+    'round tube brace, end caps': round.some((b) => braceConn(b) === 'gusset_cap'),
+    'channel secondary': secs.some((s) => s.sec.kind === 'C'),
+    'tee chord': trusses.some((t) => t.chord.kind === 'T'),
+    truss: trusses.length > 0,
+    'tension rod': arms.some((a) => a.rod),
+    post: arms.some((a) => a.post),
+    'skewed arm': arms.some((a) => a.skew),
+    'gable roof': arms.some((a) => a.gable),
+    'column splice, bearing': splice?.kind === 'bearing',
+    'column splice, flange plates': splice?.kind === 'flange',
+    'beam splice': arms.some((a) => a.splice !== undefined),
+    'foot gussets': base === 'flange' || base === 'all',
+  };
+  // the ends of arms, chords and secondaries. Only the beam end kinds: a gusset or a clevis comes with its brace, truss or rod.
+  for (const c of [...arms.flatMap((a) => [a.conn, a.conn2]), ...trusses.flatMap((t) => [t.conn, t.conn2]), ...secs.map((s) => s.conn)])
+    if (c && CONNS[c].fits) seen[CONNS[c].label] = true;
+  for (const b of braces) if (b.x) seen[xKind(b.x)] = true;
+  const kinds = VARIETY_KINDS.filter((k) => seen[k]);
+  return { variety: kinds.length, kinds };
+}
+
+// the variety that counts as full in the mix: about 3 % of the default seeds reach it
+export const VARIETY_FULL = 12;
+// half logo, half variety, both from 0 to 1
+export const mixScore = (logo: number, v: number) => 0.5 * logo + 0.5 * Math.min(1, v / VARIETY_FULL);
+
+export type By = 'logo' | 'variety' | 'mix';
+export const BY: By[] = ['logo', 'variety', 'mix'];
+// to sort a scan, best first. Many seeds have the same variety: the logo score decides.
+export function better(by: By): (a: Score & Variety, b: Score & Variety) => number {
+  const key = (s: Score & Variety) => (by === 'logo' ? s.score : by === 'variety' ? s.variety : mixScore(s.score, s.variety));
+  return (a, b) => key(b) - key(a) || b.score - a.score;
 }

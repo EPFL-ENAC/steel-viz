@@ -1141,7 +1141,7 @@ function braceGeo(st: Structure, a: Arm, b: Brace, k: number, S: Geo) {
 }
 // the end of a brace: a double angle, one angle or a flat bar laps a plate,
 // a rod has a clevis, a tube a knife plate (or an end cap plate, see braceList)
-function braceConn(b: Brace): ConnType {
+export function braceConn(b: Brace): ConnType {
   const s = b.sec;
   if (s.kind === '2L' || s.kind === 'L' || s.kind === 'FB') return 'gusset_lap';
   if (s.kind === 'ROD') return 'clevis';
@@ -1166,7 +1166,7 @@ function braceConn(b: Brace): ConnType {
 const X_KIND = { flat: 1, rod: 1, angle: 1 };
 export type XKind = keyof typeof X_KIND;
 export const X_KINDS = Object.keys(X_KIND) as XKind[];
-const X_LABEL: Record<XKind, string> = { flat: 'flat bars', rod: 'rods', angle: 'angles' };
+export const X_LABEL: Record<XKind, string> = { flat: 'flat bars', rod: 'rods', angle: 'angles' };
 
 // Is this diagonal an X, and of which kind? Two draws from a stream of its
 // own (key: the arm id), always both, in this order: the chance (it counts
