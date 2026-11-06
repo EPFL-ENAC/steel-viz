@@ -177,6 +177,15 @@ type Base = 'none' | 'flange' | 'all';
 // minA: the lightest area sizing may pick for a member (raised when alphaCr is too low).
 // A rig part between two mount faces. from: the fixed one. to: the one on the specimen.
 export type RigStrut = { from: V; to: V; D: number; kind: 'link' | 'actuator' };
+// What the deformed shape of a brace test needs. lines: each brace. o: its
+// bottom work point. u: along it. s: where its steel starts and ends, mm from o.
+// actuator: the actuator on the loaded beam. frame, in a frame only: the foot
+// pin centres, their radius, and the z of the column tops.
+export type BraceRig = {
+  lines: { id: string; o: V; u: V; s: [number, number] }[];
+  actuator: RigStrut;
+  frame?: { feet: V[]; R: number; top: number };
+};
 // The mount points of the rig of a beam-to-column test. dir: the first beam.
 // axis: the pins. foot: the foot pin centre, footD its diameter. The pin
 // centres of a strut come from hingeSize(D).pin.
@@ -186,6 +195,7 @@ export type Structure = {
   load?: 'beam' | 'column'; minA?: Record<string, number>;
   // a brace test (bench.ts): col is the brace section, H the height of its top work point
   brace?: { frame: BraceSpecimen['frame']; L: number; angle: number; ends: BraceSpecimen['ends'] };
+  braceRig?: BraceRig;
   // a column test (bench.ts): col is the column section, H its length
   columnTest?: { ends: ColumnSpecimen['ends']; L: number; angle: number };
   // a beam-to-column test: its rig, for the deformed shape

@@ -65,7 +65,7 @@ test('thin: the first, the last and every peak of x, at most max points', () => 
 test('protocol: same row counts line up by row', () => {
   const p = protocol({ Global: { x: [0, 1, 2], y: [0, 5, 6] }, Panel_zone: { x: [0, 0.1, 0.3], y: [1, 2, 3] } });
   assert.equal(p.n, 3);
-  assert.deepEqual(p.at(1).Panel_zone, { x: 0.1, y: 2, along: 0.1 });
+  assert.deepEqual(p.at(1).Panel_zone, { x: 0.1, y: 2, along: 0.1, lo: 0, hi: 0.1 });
 });
 
 test('protocol: different row counts line up by pseudo time, step 0 is the start', () => {

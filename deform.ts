@@ -239,8 +239,9 @@ function atTime(t: number, time: number[], c: Curve) {
 
 // One step of one file. along: x, with the sign that goes with the driver. The
 // files of a test don't all count the same way (the west beam turns the other
-// way in some of them).
-export type Sample = { x: number; y: number; along: number };
+// way in some of them). lo, hi: the smallest and the largest `along` so far,
+// from 0, for a model with a memory (a brace). protocol() gives them.
+export type Sample = { x: number; y: number; along: number; lo?: number; hi?: number };
 export type Samples = Record<string, Sample>;
 // The steps of a test. driver: the file that gives the steps. series: each
 // file read at the steps. at(i): every file at step i.
@@ -273,11 +274,18 @@ export function protocol(curves: Record<string, Curve>, max = 2000): Protocol {
     const s = series[k].x.reduce((sum, x, i) => sum + x * series[driver].x[i], 0);
     return [k, s < 0 ? -1 : 1];
   }));
+  const reached = Object.fromEntries(names.map((k) => {
+    let [lo, hi] = [0, 0];
+    return [k, series[k].x.map((x) => {
+      [lo, hi] = [Math.min(lo, sign[k] * x), Math.max(hi, sign[k] * x)];
+      return { lo, hi };
+    })];
+  }));
   return {
     n: rows.length, driver, series,
     at: (i) => Object.fromEntries(names.map((k) => {
       const [x, y] = [series[k].x[i], series[k].y[i]];
-      return [k, { x, y, along: sign[k] * x }];
+      return [k, { x, y, along: sign[k] * x, ...reached[k][i] }];
     })),
   };
 }

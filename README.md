@@ -396,6 +396,24 @@ The SVG export stays the undeformed drawing. "Copy SVG at this step" gives one d
 
 The files in `specimens/responses/` are copies from resslab-hub-data, which is public domain. They are the examples of the tests and of the static build. The dev server reads all the others from the hub data.
 
+The brace model is in `deform-braces.ts`. The file gives the axial displacement and the force. The brace gets longer by the displacement, and the top end, the rig and the actuator follow. In a frame, the top sways and the pinned columns turn. In compression, past buckling, the middle moves sideways by (2 / π) sqrt(Lb Δ), with Lb the length that bends and Δ the shortening.
+
+Δ counts from the longest length so far, less the elastic part. So a brace that was pulled far buckles at a positive displacement. `protocol()` gives this history in `Sample.lo` and `Sample.hi`.
+
+The way it bends depends on the ends:
+
+| ends | direction | shape | Lb |
+|---|---|---|---|
+| gusset | out of plane | half sine, it folds at the end of the tube | length of the tube |
+| fixed | weak axis, out of plane for a round or square section | (1 - cos 2πξ) / 2, the ends stay square | length of the tube |
+| pin | weak axis, in plane for a round or square section | half sine | work point to work point |
+
+The scale multiplies the axial move only. The bow stays at real size, because it is already 5 to 15 % of the length. The rail says so. Auto stops at ×10, because a short brace at ×20 loses a third of its length on screen.
+
+Each brace has two zones. The axial zone (blue) is N / Pt in tension and |N| / Pc in compression. It drops after buckling. The hinge zone (orange) is the moment in the middle over Mp, |N| a / Mp, half of that for fixed ends. The force falls but the bow grows, so the hinge stays lit while the middle works hardest.
+
+In a DBF the file gives the force of the two braces together. Each brace shows half of it. The second brace goes the other way, with its own history. Its hinge uses |F| - `p_t_theory`, which is an upper limit: the brace in tension hardens, and the file can't tell how much.
+
 #### How a table adds its deformed shape
 
 The dev server, the rail, the chart and the viewer read `DEFORMS` in `deforms.ts`. They have no rule for a table. To add a table (braces, columns, HSS columns, EBF links), do these three things:
@@ -475,7 +493,7 @@ Files:
 - `hub.ts`: reads a record of the hub test tables as a `Specimen` (`toSpecimen` and one reader for each table).
 - `hub-count.ts`, `hub.test.ts`: read every row of resslab-hub-data and count what we can draw (`node hub-count.ts [folder]`). See "How many hub tests we draw".
 - `deform.ts`: the deformed shape of a test, for all tables: how a part moves (`Move`, `movePoint`), the response files (`readResponse`), the steps (`protocol`). See "Deformed shape of a test".
-- `deforms.ts`, `deform-connection.ts`: the tables that have a deformed shape, and the shape of a beam-to-column test. `deform.test.ts` checks them.
+- `deforms.ts`, `deform-connection.ts`, `deform-braces.ts`: the tables that have a deformed shape, the shape of a beam-to-column test and the shape of a brace test. `deform.test.ts` and `deform-braces.test.ts` check them.
 - `rig.ts`: the test rig parts (reaction blocks, pins, links, actuators, rollers, rig frame members).
 - `steel.ts`: geometry (profiles, copes, plates, clevis, bolts), camera and the painter renderer.
 - `clash.ts`: do two parts go through each other (each part as a few boxes).
