@@ -31,7 +31,7 @@ import { ANGLE_GAP, type Catalog, type Section } from './sections.ts';
 import { boxOf, flat, geo, isRound, memberBoxes, memberFaces, stiffener, type P2, type Part } from './steel.ts';
 import { actuator, block, clevis, crosshead, hingeSize, rigMember, rigSection, roller, seat, type RigOpts } from './rig.ts';
 import { LINK_CONFIGS, findSection, type BraceSpecimen, type ColumnSpecimen, type LinkSpecimen } from './specimen.ts';
-import type { BraceRig, Detail, Params, Result, RigStrut, Structure } from './generate.ts';
+import type { BraceRig, Detail, LinkRig, Params, Result, RigStrut, Structure } from './generate.ts';
 
 // ------------------------------------------------------------- the plane
 type Q = [number, number]; // a point or a direction in the brace plane: (y, z)
@@ -680,6 +680,7 @@ export function buildLink(p: Params, spec: LinkSpecimen, cat: Catalog, detail: D
   };
   let H: number;
   let frameSize: { span: number; height: number } | undefined;
+  let rig: LinkRig;
   if (isolated) {
     // TF1: the link at zl above the floor (z = 0)
     const zl = r5(Math.max(800, 2 * d));
@@ -696,6 +697,7 @@ export function buildLink(p: Params, spec: LinkSpecimen, cat: Catalog, detail: D
     const span = r5(Math.max(px, R.bf, 600) + R.d + 200);
     add(crosshead('rig-crosshead', [0, yL, top], X, span, 0, R, ground()));
     add(actuator('rig-actuator', [0, yL, top], [0, yL, zLt], X, Da, ro(['rig-crosshead', 'rig-load'])));
+    rig = { y0: 0, zl, actuator: { from: [0, yL, top], to: [0, yL, zLt], D: Da, kind: 'actuator' } };
   } else {
     // the frame size, from the data or a default
     let [L, Hf] = spec.frame ? [spec.frame.span, spec.frame.height] : [r5(Math.max(3000, 3 * e)), 0];
@@ -740,6 +742,7 @@ export function buildLink(p: Params, spec: LinkSpecimen, cat: Catalog, detail: D
     // the beam and 2 mm over the base beam, 20 mm clear of the column.
     const Rb = rigSection(cat, clamp(0.6 * d, 150, 400));
     const braces: string[] = [];
+    const braceRig: NonNullable<LinkRig['frame']>['braces'] = [];
     const brace = (id: string, s: number, yT: number) => {
       const inner = s > 0 ? yA : -yB; // the column face, the brace side made +y
       const T: Q = [s * yT, Hf];
@@ -756,6 +759,7 @@ export function buildLink(p: Params, spec: LinkSpecimen, cat: Catalog, detail: D
       const P = (k: number): V => [0, s * (By + k * u[0]), k * u[1]];
       add(rigMember(id, Rb, P(sb), P(st), ro(['rig-base'], 'Frame brace')));
       braces.push(id);
+      braceRig.push({ id, from: P(0), to: [0, yT, Hf], side: s > 0 ? 0 : 1 });
       // the angle of the frame: from the foot pin to the link end
       const drawn = (Math.atan2(Hf, Math.abs(yT - (s > 0 ? axA : axB))) * 180) / Math.PI;
       const note = `brace angle ${spec.brace}° given, the frame sizes give ${Math.round(drawn * 10) / 10}°`;
@@ -784,6 +788,12 @@ export function buildLink(p: Params, spec: LinkSpecimen, cat: Catalog, detail: D
     const zf = zfb - 400;
     add(block('rig-wall', [0, yw + s * 200, (zf + Hf + 400) / 2], [Math.max(600, R.bf + 200), 400, Hf + 400 - zf], ground('Reaction wall')));
     add(actuator('rig-actuator', [0, yw, Hf], [0, y1, Hf], X, D, ro(['rig-wall', edge ? 'rig-colB' : 'rig-colA'])));
+    const footD = clamp(r5(0.25 * R.d), 40, 100); // the same as in pinnedFrame()
+    const pin = hingeSize(footD).pin;
+    rig = {
+      y0, zl: Hf, actuator: { from: [0, yw, Hf], to: [0, y1, Hf], D, kind: 'actuator' },
+      frame: { feet: [[0, axA, pin], [0, axB, pin]], footD, side: edge ? 1 : 0, braces: braceRig },
+    };
   }
   const nst = parts.filter((q) => q.info?.type === 'Stiffener').length;
 
@@ -791,6 +801,7 @@ export function buildLink(p: Params, spec: LinkSpecimen, cat: Catalog, detail: D
   const st: Structure = {
     form: 'specimen', id: spec.id, H, col: sec, cols: [], arms: [], secs: [],
     link: { config: spec.config, at: spec.at, e, stiffeners: nst, ...(frameSize ?? {}) },
+    linkRig: rig,
   };
   return { st, parts: forDetail(parts, detail), ok: true, log, ratio: 0, alpha: Infinity, solves: 0, ms: { topology: t1 - t0, solve: 0, geometry: performance.now() - t1 }, nodes: 0, members: {} };
 }

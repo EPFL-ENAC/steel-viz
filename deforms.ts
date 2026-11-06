@@ -3,9 +3,11 @@
 // this list, so a new table needs no change there.
 import { BRACE_DEFORM } from './deform-braces.ts';
 import { CONNECTION_DEFORM } from './deform-connection.ts';
+import { LINK_DEFORM } from './deform-links.ts';
 import type { DeformTable } from './deform.ts';
 
 export const DEFORMS: Record<string, DeformTable> = {
   connections: CONNECTION_DEFORM,
   braces: BRACE_DEFORM,
+  eccentric_braced_frames: LINK_DEFORM,
 };
