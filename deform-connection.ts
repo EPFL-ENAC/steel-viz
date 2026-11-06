@@ -197,7 +197,11 @@ function shape(r: Result, spec: Specimen, rec: HubRecord, at: Samples, scale: nu
   const Mp = plasticMoment(rec);
   const Rn = panelCapacity(rec);
   const across = rig.axis;
-  if (Mp)
+  // one of these files is enough: readStep() gives it to every beam
+  const force = at.Global ?? at.Global_west ?? at.Beam_moment_rotation ?? at.Beam_moment_rotation_west;
+  if (!force) notes.push('No force or moment file: no beam hinge zone.');
+  else if (!Mp) notes.push('No Z and fy in the record: no beam hinge zone.');
+  else
     beams.forEach((b, i) => {
       const c: V = [0, 1, 2].map((k) => b.o[k] + b.u[k] * (b.face + b.d / 2 + 0.5)) as V;
       zones.push({
@@ -205,7 +209,6 @@ function shape(r: Result, spec: Specimen, rec: HubRecord, at: Samples, scale: nu
         level: Math.abs(v.moments[i] * 1000) / Mp, label: beams.length > 1 ? `Beam hinge ${i ? 'west' : 'east'}` : 'Beam hinge', ratio: '|M| / Mp',
       });
     });
-  else notes.push('No Z and fy in the record: no beam hinge zone.');
   if (Rn) {
     zones.push({
       c: [0, 0, (pz.z0 + pz.z1) / 2], axes: [h, across, up], half: [st.col.d / 2, st.col.bf, (pz.z1 - pz.z0) / 2], slot: SHEAR,
@@ -214,7 +217,7 @@ function shape(r: Result, spec: Specimen, rec: HubRecord, at: Samples, scale: nu
   } else notes.push('No panel zone capacity in the record: no panel zone color.');
   if (rec.connection_type === 'RBS') notes.push('RBS: the hinge is drawn at the column face and uses Z of the full beam. The cut is not drawn yet.');
   if (!at.Panel_zone) notes.push('No panel zone file: elastic estimate of the distortion.');
-  if (!at.Beam_moment_rotation) notes.push('No beam file: moment from the actuator force, what is left of the drift is half beam, half column.');
+  if (force && !at.Beam_moment_rotation) notes.push('No beam file: moment from the actuator force, what is left of the drift is half beam, half column.');
   return { moves: follow(r.parts, moves), zones, scale, notes };
 }
 

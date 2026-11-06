@@ -92,6 +92,19 @@ test('a CSV row (strings, NA) gives the same specimen as the API record', () => 
   assert.equal((s.beams[0].section as { d: number }).d, 360);
 });
 
+test('an exterior test with the whole span in l_b: the beam ends at l_o from the column face', () => {
+  const base = record('Chi_and_Uang_2002_DC2');
+  const length = (r: object) => fromHubConnection({ ...base, ...r }).beams[0].length;
+  const whole = { d_c: 400, l_b: 7000, l_fc: 6600, l_o: 3300 };
+  assert.equal(length(whole), 3500);
+  assert.equal(length({ ...whole, l_fc: '6600', l_o: '3300' }), 3500);
+  // the usual exterior test: l_o is l_fc
+  assert.equal(length({ ...whole, l_fc: 3300 }), 7000);
+  assert.equal(length({ ...whole, l_o: 'NA' }), 7000);
+  // an interior test always has l_o = l_fc / 2
+  assert.equal(length({ ...whole, l_b: 8000, specimen_type: 'Interior - Beam Loaded - Subassembly' }), 4000);
+});
+
 test('the hub connection types and the notes', () => {
   const base = record('Chi_and_Uang_2002_DC2');
   const conn = (ct: string) => fromHubConnection({ ...base, connection_type: ct });

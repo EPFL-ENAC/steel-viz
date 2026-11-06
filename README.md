@@ -229,7 +229,7 @@ The pin of the link (or of the actuator) on the head is the top pin of the colum
 From a hub record:
 
 - The sections come from the numbers (`d_c b_cf t_cf t_cw`, `d_b b_bf t_bf t_bw`), not from the names. The names are free text (`build up H section`) and don't link to the section tables.
-- An exterior test has one beam of length `l_b`. An interior test has two, one on each flange, `l_b / 2` each (there `l_b` is the whole span). The beams are at half the column height `h_c`.
+- An exterior test has one beam of length `l_b`. Some exterior tests give the whole span in `l_b`: if `l_o` is under 0.7 `l_fc`, the beam ends at `l_o` from the column face. An interior test has two, one on each flange, `l_b / 2` each (there `l_b` is the whole span). The beams are at half the column height `h_c`.
 - `t_cp` 0 means no continuity plates.
 - `specimen_type` gives the load: "Interior - Column Loaded - Subassembly" is column loaded.
 - The connection is the closest one we can draw:
@@ -390,7 +390,7 @@ The colors come from the data, and the rail shows each value next to its color:
 - Beam hinge, in orange: |M| / Mp at the column face, over one beam depth. Mp is `z_xb` times the beam yield stress. An RBS test uses the Z of the full beam, because the cut isn't drawn yet.
 - Panel zone, in blue: |V| / Rn, between the beam flanges. Rn is `r_n_pl_m_aisc`, else `r_n_pl_n_aisc`, else `r_n_el_n_aisc`.
 
-A test with a missing capacity has no zone for it, and the rail says why.
+A test with a missing capacity has no zone for it, and the rail says why. A test with only a `Panel_zone` file has no force, so it has no beam hinge zone, and the rail says why too.
 
 The SVG export stays the undeformed drawing. "Copy SVG at this step" gives one deformed frame, drawn by `renderHLR` from `deformParts()`.
 
@@ -402,7 +402,7 @@ The dev server, the rail, the chart and the viewer read `DEFORMS` in `deforms.ts
 
 1. Write `deform-<table>.ts` with a `DeformTable`: its `responses` (the folders in `resslab-hub-data/<table>/`), its `shape()` and its `autoScale()`. `shape()` gives one `Move` for each member and each rig part that moves, then calls `follow()`: a part with no move takes the move of the part it stands on.
 2. Add one line to `DEFORMS`.
-3. Copy the response files of its example tests to `specimens/responses/<table>/<Folder>/<id>.csv`, and add a test to `deform.test.ts`.
+3. Copy the response files of its example tests to `specimens/responses/<table>/<Folder>/<id>.csv`, and add a test to `deform-<table>.test.ts`. Don't add it to `deform.test.ts`, because several branches add a table at the same time.
 
 A `Move` is the same for all tables, and the vertex shader does the same math as `movePoint()`:
 

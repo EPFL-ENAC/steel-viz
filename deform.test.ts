@@ -216,6 +216,14 @@ test('zones: no capacity in the record gives no zone, and the legend says why', 
   assert.ok(d.notes!.some((n) => n.includes('no panel zone color')));
 });
 
+test('zones: no force file gives no beam hinge zone, and the legend says why', () => {
+  const { r, spec, rec } = load(IDS[2]);
+  const d = T.shape(r, spec, rec, { Panel_zone: sample(0.004, 1000) }, 1);
+  assert.deepEqual(d.zones.map((z) => z.label), ['Panel zone']);
+  assert.ok(d.notes!.includes('No force or moment file: no beam hinge zone.'));
+  assert.ok(!d.notes!.some((n) => n.includes('actuator force')));
+});
+
 test('a table lists its folders once, and the viewer has room for its moves', () => {
   for (const t of Object.values(DEFORMS)) assert.equal(new Set(t.responses.map((r) => r.folder)).size, t.responses.length);
   const { r, spec, rec, p } = load(IDS[1]);
@@ -230,7 +238,7 @@ test('hub connections: every test with response files gives finite moves', { ski
   const table = join(dir!, 'connections');
   const rows = parseCsv(readFileSync(join(dir!, HUB_TABLES.connections), 'utf8'));
   const files = new Map(T.responses.map(({ folder }) => [folder, new Set(readdirSync(join(table, folder)))]));
-  let done = 0;
+  let [done, noForce] = [0, 0];
   for (const rec of rows) {
     const id = String(rec.id);
     const c: Record<string, Curve> = {};
@@ -246,6 +254,8 @@ test('hub connections: every test with response files gives finite moves', { ski
     const p = protocol(c);
     const scale = T.autoScale(p);
     assert.ok([1, 2, 5, 10, 20].includes(scale), `${id}: scale ${scale}`);
+    const force = Object.keys(p.series).some((k) => k !== 'Panel_zone');
+    if (!force) noForce++;
     for (const k of [0, 0.25, 0.5, 0.75, 1]) {
       const d = T.shape(r, spec, rec, p.at(Math.round(k * (p.n - 1))), scale);
       for (const [name, m] of Object.entries(d.moves)) {
@@ -254,9 +264,11 @@ test('hub connections: every test with response files gives finite moves', { ski
         assert.ok(q.every(Number.isFinite), `${id} ${name}: not finite at step ${k}`);
       }
       assert.ok(d.zones.every((z) => Number.isFinite(z.level)), `${id}: zone level`);
+      if (!force) assert.ok(d.zones.every((z) => z.slot !== 0), `${id}: a beam hinge with no force`);
     }
     done++;
   }
   t.diagnostic(`${done} tests`);
   assert.ok(done > 50);
+  assert.equal(noForce, 6);
 });
