@@ -83,7 +83,7 @@ Play the measured response of a hub test in the 3D view. `deform.ts` is the base
 
 - [x] Beam-to-column tests (`connections`): the shape, the rig, the zones (beam hinge, panel zone), the chart.
 - [x] Brace tests (`braces`).
-- [ ] Column tests and HSS column tests (`columns`, `hss_columns`).
+- [x] Column tests and HSS column tests (`columns`, `hss_columns`).
 - [x] EBF link tests (`eccentric_braced_frames`): the link in shear, the frames on their pins, the web zone.
 - [ ] RBS: the hinge at the cut, with Z of the cut section. Today it's at the column face, with Z of the full beam. Needs the RBS cut above.
 - [ ] Doubler plates in the panel zone: the elastic estimate of the distortion uses the column web alone.

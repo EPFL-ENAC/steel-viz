@@ -431,6 +431,28 @@ A `Move` is the same for all tables, and the vertex shader does the same math as
 
 A `Zone` is a box with a level (1 is the capacity), a `slot` for its color, a label and the ratio it shows. `ResponseSpec.slot` gives the chart the same color. `deform-connection.ts` is the example to copy.
 
+#### The shape of a column test
+
+`deform-column.ts` has one model for the tables `columns` and `hss_columns`, because `buildColumn()` draws both. Each table has its own `DeformTable`, and only the way to read a step changes.
+
+The lever is the whole distance between the ends, so the top moves θ L. The shape comes from `ends`:
+
+| `ends` | how it bends | top slope |
+|---|---|---|
+| `fixed-free` | a cantilever | 1.5 δ/L |
+| `fixed-flexible` | between the two, from `l_sc` / `l_c` | 1.2 δ/L at 0.75 |
+| `fixed-fixed` | double curvature, the head stays level | 0 |
+| `3pb` | a simple beam with the load at mid span. Mid span moves θ L/2, and the column goes straight on past the rollers. | |
+
+The other rules:
+
+- The column moves along the push, also when it is turned by `angle`. A bi-axial test with two files moves along the sum of the two rotations, so `Move.n` changes at each step. The signs of the files are real, so the model reads `Sample.x` and never `Sample.along`.
+- The axial shortening moves the top by the file value, with its sign (the files go negative), and the column shrinks between its two ends. With no file there is no shortening, and the rail says so. `hss_columns` has no such file.
+- The hinge zones are at the base, also at the top for `fixed-fixed`, and at mid span for `3pb`. The level is |M| / Mp. The file has one moment, so the top hinge uses the same level as the base.
+- Mp comes from `axis_of_bending`, not from the folder of the file. `hss_columns` has M in kN m and Mp in kN mm.
+- The axial load does not reduce Mp. We tried the EC3 and AISC rules on the real tests, and they spread the peak levels more. The rail gives P / Py, because a hinge can form below level 1 under a high axial load.
+- The scale can go past what the rig allows. The head can pass the pin of the actuator: the pins then stay two tongues apart, and the foot leaves its support. The shortening stops at half the length. The rail says so in both cases.
+
 ### The drawing
 
 The output is an SVG line drawing with the hidden lines removed. The SVG can also build itself step by step, as an animation.
@@ -496,6 +518,7 @@ Files:
 - `hub-count.ts`, `hub.test.ts`: read every row of resslab-hub-data and count what we can draw (`node hub-count.ts [folder]`). See "How many hub tests we draw".
 - `deform.ts`: the deformed shape of a test, for all tables: how a part moves (`Move`, `movePoint`), the response files (`readResponse`), the steps (`protocol`). See "Deformed shape of a test".
 - `deforms.ts`, `deform-connection.ts`, `deform-braces.ts`: the tables that have a deformed shape, the shape of a beam-to-column test and the shape of a brace test. `deform.test.ts` and `deform-braces.test.ts` check them.
+- `deform-column.ts`: the shape of a column test, for `columns` and `hss_columns`. `deform-column.test.ts` checks it.
 - `rig.ts`: the test rig parts (reaction blocks, pins, links, actuators, rollers, rig frame members).
 - `steel.ts`: geometry (profiles, copes, plates, clevis, bolts), camera and the painter renderer.
 - `clash.ts`: do two parts go through each other (each part as a few boxes).
