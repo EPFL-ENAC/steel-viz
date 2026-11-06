@@ -7,6 +7,7 @@ name = "steel-viz"
 base_branch = "main"
 # The single source for the push guard, the completion and the deny rules.
 protected_branches = ["main"]
+land = "merge"
 
 # One port per worktree for the playground (Vite dev server).
 [[ports.family]]
