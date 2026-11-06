@@ -4,9 +4,12 @@
 // resslab-hub-data next to the repo, so it is skipped in CI.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { loadCatalog } from './sections.ts';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { loadCatalog, parseCsv } from './sections.ts';
 import { HUB_TABLES, findHubData, readTables } from './tables.ts';
 import { countTable } from './hub-count.ts';
+import { fromHubConnection } from './hub.ts';
 
 const dir = findHubData();
 const cat = loadCatalog('aisc', ...readTables('aisc'));
@@ -22,3 +25,26 @@ for (const table of Object.keys(HUB_TABLES))
     // errorKind gives "other: ..." for a message in neither of the two forms
     assert.deepEqual([...c.errors].filter(([k]) => k.startsWith('other: ')), [], `${table}: unknown errors`);
   });
+
+// The four exterior tests with the whole span in l_b. Every other beam keeps
+// its length from l_b, and no row stops reading.
+const WHOLE_SPAN = ['Kim_and_Lee_2017_PN500-C', 'Kim_and_Lee_2017_PN500C-HST', 'Kim_and_Lee_2017_PN500C-SH', 'Kim_and_Lee_2017_PN500C-TH'];
+test('hub connections: only the four whole span beams end at l_o', { skip }, () => {
+  const rows = parseCsv(readFileSync(join(dir!, HUB_TABLES.connections), 'utf8'));
+  const [changed, unread]: string[][] = [[], []];
+  for (const row of rows) {
+    try {
+      const { id, beams } = fromHubConnection(row);
+      const lb = Number(row.l_b) / beams.length;
+      if (beams.some((b) => Math.abs(b.length - lb) > 0.01)) {
+        changed.push(id);
+        assert.ok(beams.every((b) => b.length === 3500), `${id}: ${beams[0].length}`);
+      }
+    } catch (e) {
+      if (e instanceof assert.AssertionError) throw e;
+      unread.push(row.id);
+    }
+  }
+  assert.deepEqual(changed, WHOLE_SPAN);
+  assert.deepEqual(unread, ['Del_Caprio_et_al_2014_RBS-A']);
+});
