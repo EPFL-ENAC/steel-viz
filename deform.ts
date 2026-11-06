@@ -22,7 +22,7 @@ export type M4 = number[]; // 4x4, by column
 // A knot along the axis of a part. s: mm from Move.o. w: the deflection along
 // Move.n. t: dw/ds (rad). r: the turn of the cross section (rad). r = t:
 // plane sections stay square to the axis (bending). r != t: shear (a panel
-// zone, later an EBF link).
+// zone, an EBF link).
 export type Knot = { s: number; w: number; t: number; r: number };
 // How a part moves. First the bend along its axis (w, t: cubic Hermite between
 // the knots, r: linear, past the ends: straight on). Then the affine moves A
@@ -158,15 +158,24 @@ export function strut(p0: V, p1: V, q0: V, q1: V, split: [number, number]): Move
 // One file of a test: resslab-hub-data/<table>/<folder>/<id>.csv, x and y its
 // two columns, for the chart.
 // slot: the zone it speaks about (Zone.slot): the chart takes the same color
-export type ResponseSpec = { folder: string; x: string; y: string; label: string; xUnit: string; yUnit: string; slot?: number };
+// file: the file name of a row id, when it is not <id>.csv
+// cols: the two columns by name, when they are not the first two
+export type ResponseSpec = { folder: string; x: string; y: string; label: string; xUnit: string; yUnit: string; slot?: number; file?: (id: string) => string; cols?: [string, string] };
+export const responseFile = (spec: ResponseSpec, id: string) => spec.file?.(id) ?? `${id}.csv`;
 export type Curve = { x: number[]; y: number[] };
 
-// The first two columns of a response file. It takes a BOM, a quoted header, a
+// Two columns of a response file: the first two, or the ones named in cols (a
+// name that is not in the header throws). It takes a BOM, a quoted header, a
 // trailing comma and E notation. Rows that are not two numbers (NA, NR) go.
-export function readResponse(csv: string): Curve {
+export function readResponse(csv: string, cols?: [string, string]): Curve {
   const c: Curve = { x: [], y: [] };
-  for (const line of csv.replace(/^﻿/, '').split(/\r?\n/).slice(1)) {
-    const [a, b] = line.split(',');
+  const [head, ...rows] = csv.replace(/^﻿/, '').split(/\r?\n/);
+  const names = head.split(',').map((h) => h.replace(/"/g, '').trim());
+  const [i, j] = cols?.map((n) => names.indexOf(n)) ?? [0, 1];
+  if (i < 0 || j < 0) throw new Error(`no column ${cols} in the header ${names}`);
+  for (const line of rows) {
+    const cells = line.split(',');
+    const [a, b] = [cells[i], cells[j]];
     const [x, y] = [Number(a), Number(b)];
     if (!a?.trim() || !b?.trim() || !Number.isFinite(x) || !Number.isFinite(y)) continue;
     c.x.push(x);

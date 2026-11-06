@@ -196,6 +196,15 @@ export type SpecimenRig = { dir: V; axis: V; foot: V; footD: number; top: RigStr
 // pushes. struts: the actuators, id is the part. pin: the clevis at the end of
 // a lying column with axial load: at on its mount face, along toward the column.
 export type ColumnRig = { o: V; u: V; web: V; minor: V; push: V; struts: (RigStrut & { id: string })[]; pin?: { at: V; along: V; D: number } };
+// The rig of a link test, for the deformed shape. y0, zl: the link starts at
+// [0, y0, zl] and goes along +y. actuator: its `to` is on a frame column, or on
+// the loading beam of TF1. frame (not for TF1): feet, the foot pin centres of
+// colA and colB. side: the side of the frame the actuator is on, 0 colA, 1 colB.
+// braces: from their foot on the base beam to the link end on the beam axis.
+export type LinkRig = {
+  y0: number; zl: number; actuator: RigStrut;
+  frame?: { feet: [V, V]; footD: number; side: 0 | 1; braces: { id: string; from: V; to: V; side: 0 | 1 }[] };
+};
 export type Structure = {
   form: Form | 'specimen'; id?: string; H: number; col: Section; cols: Col[]; arms: Arm[]; secs: Secondary[]; splice?: Splice; base?: Base; continuity?: boolean;
   load?: 'beam' | 'column'; minA?: Record<string, number>;
@@ -210,6 +219,7 @@ export type Structure = {
   // a link test (bench.ts): col is the link section, H the height of its axis.
   // stiffeners: how many are drawn, span and height: the frame (not for TF1).
   link?: { config: LinkSpecimen['config']; at: LinkSpecimen['at']; e: number; stiffeners: number; span?: number; height?: number };
+  linkRig?: LinkRig;
 };
 const colId = (i: number) => (i ? `column${i + 1}` : 'column');
 const baseId = (i: number) => (i ? `base${i + 1}` : 'base');

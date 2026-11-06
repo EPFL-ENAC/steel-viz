@@ -12,7 +12,7 @@
 // '<table>' (its first test), or 'paste' (the record pasted in the rail, kept
 // in this browser). '' is the seed.
 import { reactive, ref, shallowRef, watch } from 'vue';
-import { readResponse, type Curve } from '../deform.ts';
+import { readResponse, responseFile, type Curve } from '../deform.ts';
 import { DEFORMS } from '../deforms.ts';
 import { READERS, hubTable, toSpecimen, type HubRecord } from '../hub.ts';
 import { parseCsv } from '../sections.ts';
@@ -101,9 +101,9 @@ async function responseTexts(table: string, id: string): Promise<Record<string, 
     return r.ok ? r.json() : {};
   }
   const out: Record<string, string> = {};
-  for (const { folder } of DEFORMS[table].responses) {
-    const load = RESPONSES[`../specimens/responses/${table}/${folder}/${id}.csv`];
-    if (load) out[folder] = await load();
+  for (const spec of DEFORMS[table].responses) {
+    const load = RESPONSES[`../specimens/responses/${table}/${spec.folder}/${responseFile(spec, id)}`];
+    if (load) out[spec.folder] = await load();
   }
   return out;
 }
@@ -111,7 +111,8 @@ async function fetchResponses(table: string, id: string): Promise<Record<string,
   if (!Object.hasOwn(DEFORMS, table)) return {};
   try {
     const texts = await responseTexts(table, id);
-    return Object.fromEntries(Object.entries(texts).map(([k, v]) => [k, readResponse(v)]));
+    const cols = (folder: string) => DEFORMS[table].responses.find((s) => s.folder === folder)?.cols;
+    return Object.fromEntries(Object.entries(texts).map(([k, v]) => [k, readResponse(v, cols(k))]));
   } catch {
     return {}; // a test with no response draws as before
   }

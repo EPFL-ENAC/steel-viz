@@ -27,11 +27,11 @@ const G = 77000; // shear modulus of steel, MPa
 const MOMENT = 0;
 const SHEAR = 1;
 
-const value = (rec: HubRecord, f: string) => {
+export const value = (rec: HubRecord, f: string) => {
   const x = typeof rec[f] === 'string' ? Number((rec[f] as string).trim() || NaN) : rec[f];
   return typeof x === 'number' && Number.isFinite(x) ? x : undefined;
 };
-const firstOf = (rec: HubRecord, fs: string[]) => fs.map((f) => value(rec, f)).find((x) => x !== undefined);
+export const firstOf = (rec: HubRecord, fs: string[]) => fs.map((f) => value(rec, f)).find((x) => x !== undefined);
 
 // the plastic moment of a beam, N mm. z_xb: mm3, fy: MPa
 export function plasticMoment(rec: HubRecord) {

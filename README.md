@@ -422,9 +422,11 @@ The dev server, the rail, the chart and the viewer read `DEFORMS` in `deforms.ts
 2. Add one line to `DEFORMS`.
 3. Copy the response files of its example tests to `specimens/responses/<table>/<Folder>/<id>.csv`, and add a test to `deform-<table>.test.ts`. Don't add it to `deform.test.ts`, because several branches add a table at the same time.
 
+A `ResponseSpec` has two optional fields for a table whose files don't follow the usual form. `file` gives the file name of a row id, when it is not `<id>.csv`. `cols` names the two columns, when they are not the first two. A name that is not in the header throws. `deform-links.ts` uses both: the file of row 74 is `id74.csv`, and its columns are `gamma_t` and `V`.
+
 A `Move` is the same for all tables, and the vertex shader does the same math as `movePoint()`:
 
-- `knots`: a bend along the axis. Each knot gives the deflection `w`, the slope `t` and the turn `r` of the cross section. If `r` equals `t`, sections stay square to the axis (bending). If not, the part shears (a panel zone, later an EBF link).
+- `knots`: a bend along the axis. Each knot gives the deflection `w`, the slope `t` and the turn `r` of the cross section. If `r` equals `t`, sections stay square to the axis (bending). If not, the part shears (a panel zone, an EBF link).
 - `A`, `B`, `split`: two rigid moves, blended along the axis. A pin has its tongue on `B` and its ears on `A`. An actuator has its cylinder on `A` and its rod on `B`, so it gets longer. A pinned link has a linear blend.
 
 A `Zone` is a box with a level (1 is the capacity), a `slot` for its color, a label and the ratio it shows. `ResponseSpec.slot` gives the chart the same color. `deform-connection.ts` is the example to copy.
