@@ -181,6 +181,12 @@ export type RigStrut = { from: V; to: V; D: number; kind: 'link' | 'actuator' };
 // axis: the pins. foot: the foot pin centre, footD its diameter. The pin
 // centres of a strut come from hingeSize(D).pin.
 export type SpecimenRig = { dir: V; axis: V; foot: V; footD: number; top: RigStrut; tips: (RigStrut & { arm: string })[] };
+// The rig of a column test, for the deformed shape. o: where the column starts
+// to bend (the top of the foot plate, or the first roller). u: along the axis.
+// web, minor: the two directions of the section. push: the way the actuator
+// pushes. struts: the actuators, id is the part. pin: the clevis at the end of
+// a lying column with axial load: at on its mount face, along toward the column.
+export type ColumnRig = { o: V; u: V; web: V; minor: V; push: V; struts: (RigStrut & { id: string })[]; pin?: { at: V; along: V; D: number } };
 export type Structure = {
   form: Form | 'specimen'; id?: string; H: number; col: Section; cols: Col[]; arms: Arm[]; secs: Secondary[]; splice?: Splice; base?: Base; continuity?: boolean;
   load?: 'beam' | 'column'; minA?: Record<string, number>;
@@ -188,6 +194,7 @@ export type Structure = {
   brace?: { frame: BraceSpecimen['frame']; L: number; angle: number; ends: BraceSpecimen['ends'] };
   // a column test (bench.ts): col is the column section, H its length
   columnTest?: { ends: ColumnSpecimen['ends']; L: number; angle: number };
+  columnRig?: ColumnRig;
   // a beam-to-column test: its rig, for the deformed shape
   rig?: SpecimenRig;
   // a link test (bench.ts): col is the link section, H the height of its axis.

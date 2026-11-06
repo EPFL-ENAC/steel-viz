@@ -31,7 +31,7 @@ import { ANGLE_GAP, type Catalog, type Section } from './sections.ts';
 import { boxOf, flat, geo, isRound, memberBoxes, memberFaces, stiffener, type P2, type Part } from './steel.ts';
 import { actuator, block, clevis, crosshead, hingeSize, rigMember, rigSection, roller, seat, type RigOpts } from './rig.ts';
 import { LINK_CONFIGS, findSection, type BraceSpecimen, type ColumnSpecimen, type LinkSpecimen } from './specimen.ts';
-import type { Detail, Params, Result, Structure } from './generate.ts';
+import type { ColumnRig, Detail, Params, Result, Structure } from './generate.ts';
 
 // ------------------------------------------------------------- the plane
 type Q = [number, number]; // a point or a direction in the brace plane: (y, z)
@@ -393,6 +393,7 @@ type ColumnBench = {
   add: (pt: Part) => Part;
   ro: (supports: string[], type?: string) => RigOpts;
   ground: (type?: string) => RigOpts;
+  rig?: ColumnRig; // standing() and lying() set it, for the deformed shape
 };
 
 // One column test: standing (see standing), or for 3pb lying on two rollers
@@ -441,7 +442,7 @@ export function buildColumn(p: Params, spec: ColumnSpecimen, cat: Catalog, detai
   log.push(`column test ${spec.ends}, pushed at ${spec.angle}° from the web${spec.axial === false ? ', no axial load' : ''}, not solved (only drawn)`);
   const st: Structure = {
     form: 'specimen', id: spec.id, H: Math.round(L), col: sec, cols: [], arms: [], secs: [],
-    columnTest: { ends: spec.ends, L, angle: spec.angle },
+    columnTest: { ends: spec.ends, L, angle: spec.angle }, columnRig: b.rig,
   };
   return { st, parts: forDetail(parts, detail), ok: true, log, ratio: 0, alpha: Infinity, solves: 0, ms: { topology: t1 - t0, solve: 0, geometry: performance.now() - t1 }, nodes: 0, members: {} };
 }
@@ -492,6 +493,8 @@ function standing(b: ColumnBench) {
   g.w = [Math.sin(a), Math.cos(a), 0];
   g.v = [g.w[1], -g.w[0], 0]; // cross(w, u), u = z
   add({ id: 'column', step: 0, supports: ['column-foot'], kind: 'column', from: Z, faces: memberFaces(g, p.seg), boxes: memberBoxes(g), dots: [], info: { type: 'Column', sec, L }, round: isRound(sec) });
+  const struts: ColumnRig['struts'] = [];
+  b.rig = { o: [0, 0, 0], u: Z, web: g.w, minor: g.v, push: Y, struts };
   plate('column-cap', L + tt / 2, tt, 1, 'column');
   add(block('rig-head', [0, 0, zh + hh / 2], [2 * hx, 2 * hy, hh], ro(['column-cap'], 'Loading head')));
 
@@ -500,6 +503,7 @@ function standing(b: ColumnBench) {
   const y0 = -hy - reach;
   add(block('rig-wall', [0, y0 - 200, (zf + zc + 400) / 2], [Math.max(600, 2 * hx + 200), 400, zc + 400 - zf], ground('Reaction wall')));
   add(actuator('rig-actuator', [0, y0, zc], [0, -hy, zc], X, Da, ro(['rig-wall', 'rig-head'])));
+  struts.push({ id: 'rig-actuator', from: [0, y0, zc], to: [0, -hy, zc], D: Da, kind: 'actuator' });
 
   // the axial load: the crosshead posts clear the floor block and the wall
   if (spec.axial === false && !two) return;
@@ -510,9 +514,15 @@ function standing(b: ColumnBench) {
   if (two) {
     const zs = top - R.d / 2;
     add(rigMember('rig-spreader', R, [0, -e - hz.side / 2 - 100, zs], [0, e + hz.side / 2 + 100, zs], ro(['rig-crosshead'], 'Spreader beam')));
-    for (const [k, s] of [[1, -1], [2, 1]])
-      add(actuator(`rig-axial${k === 1 ? '' : k}`, [0, s * e, top - R.d], [0, s * e, zh + hh], X, Da, ro(['rig-spreader', 'rig-head'])));
-  } else add(actuator('rig-axial', [0, 0, top], [0, 0, zh + hh], X, Da, ro(['rig-crosshead', 'rig-head'])));
+    for (const [k, s] of [[1, -1], [2, 1]]) {
+      const id = `rig-axial${k === 1 ? '' : k}`;
+      add(actuator(id, [0, s * e, top - R.d], [0, s * e, zh + hh], X, Da, ro(['rig-spreader', 'rig-head'])));
+      struts.push({ id, from: [0, s * e, top - R.d], to: [0, s * e, zh + hh], D: Da, kind: 'actuator' });
+    }
+  } else {
+    add(actuator('rig-axial', [0, 0, top], [0, 0, zh + hh], X, Da, ro(['rig-crosshead', 'rig-head'])));
+    struts.push({ id: 'rig-axial', from: [0, 0, top], to: [0, 0, zh + hh], D: Da, kind: 'actuator' });
+  }
 }
 
 // The column lying (3pb, three-point bending). Its axis is on x, its bottom
@@ -543,6 +553,9 @@ function lying(b: ColumnBench) {
   g.w = [0, Math.sin(a), Math.cos(a)];
   g.v = [0, g.w[2], -g.w[1]]; // cross(w, u), u = x
   add({ id: 'column', step: 0, supports: ['rig-roller', 'rig-roller2'], kind: 'column', from: Z, faces: memberFaces(g, p.seg), boxes: memberBoxes(g), dots: [], info: { type: 'Column', sec, L: 2 * xe }, round: isRound(sec) });
+  const struts: ColumnRig['struts'] = [];
+  const rig: ColumnRig = { o: [-L / 2, 0, zc], u: X, web: g.w, minor: g.v, push: [0, 0, -1], struts };
+  b.rig = rig;
 
   // the push: a loading block on top at mid span, the actuator above it
   const hs = Math.max(150, r5(1.5 * Da + 60));
@@ -553,6 +566,7 @@ function lying(b: ColumnBench) {
   const span = r5(Math.max(rl + 200, sy + 200, 600) + R.d + 200);
   add(crosshead('rig-crosshead', [0, 0, top], Y, span, zf, R, ground()));
   add(actuator('rig-actuator', [0, 0, top], [0, 0, zs], Y, Da, ro(['rig-crosshead', 'rig-saddle'])));
+  struts.push({ id: 'rig-actuator', from: [0, 0, top], to: [0, 0, zs], D: Da, kind: 'actuator' });
 
   // the axial load, along x at the column axis
   if (spec.axial === false) return;
@@ -568,9 +582,11 @@ function lying(b: ColumnBench) {
   const xa = -xe - tp[0] - hz.reach; // the reaction block face
   add(block('rig-block', [xa - 200, 0, (zf + zt) / 2], [400, Wb, zt - zf], ground()));
   add(clevis('rig-pin', [xa, 0, zc], X, Y, Da, hz.reach, ro(['rig-block'])));
+  rig.pin = { at: [xa, 0, zc], along: X, D: Da };
   const xw = xe + tp[1] + reach; // the reaction wall face
   add(block('rig-wall', [xw + 200, 0, (zf + zt) / 2], [400, Wb, zt - zf], ground('Reaction wall')));
   add(actuator('rig-axial', [xw, 0, zc], [xe + tp[1], 0, zc], Y, Da, ro(['rig-wall', 'column-end2'])));
+  struts.push({ id: 'rig-axial', from: [xw, 0, zc], to: [xe + tp[1], 0, zc], D: Da, kind: 'actuator' });
 }
 
 // ------------------------------------------------------------- link tests
