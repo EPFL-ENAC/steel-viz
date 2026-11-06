@@ -77,6 +77,11 @@ export function fromHubConnection(rec: HubRecord): ConnSpecimen {
   const height = num('h_c');
   // l_b: from the column axis to the beam tip for an exterior test, the whole span for an interior one
   const lb = num('l_b');
+  // Some exterior tests give the whole span in l_b. Then l_o (the shear span from
+  // the column face) is about half of l_fc, and the beam ends at l_o from the face.
+  // A missing l_o or l_fc gives NaN: the test is false and l_b stays.
+  const [lo, lfc] = [value('l_o'), value('l_fc')];
+  const exterior = lo < 0.7 * lfc ? mm(num('d_c') / 2 + lo) : lb;
 
   const notes: string[] = [];
   const ct = text('connection_type');
@@ -89,7 +94,7 @@ export function fromHubConnection(rec: HubRecord): ConnSpecimen {
   const tcp = value('t_cp');
 
   const beams: SpecimenBeam[] = (interior ? [0, 180] as const : [0] as const).map((bearing) => ({
-    section: beam, bearing, length: interior ? lb / 2 : lb, connection,
+    section: beam, bearing, length: interior ? lb / 2 : exterior, connection,
   }));
   return { id, column: { section: column, height }, beams, continuity: tcp > 0, load, notes };
 }

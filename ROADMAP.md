@@ -82,7 +82,7 @@ The specimen input draws four tables of the hub, each test in its test rig. `nod
 Play the measured response of a hub test in the 3D view. `deform.ts` is the base, each table is one branch on it. The README says how a table adds its shape.
 
 - [x] Beam-to-column tests (`connections`): the shape, the rig, the zones (beam hinge, panel zone), the chart.
-- [ ] Brace tests (`braces`).
+- [x] Brace tests (`braces`).
 - [x] Column tests and HSS column tests (`columns`, `hss_columns`).
 - [ ] EBF link tests (`eccentric_braced_frames`). A link shears: use `r` different from `t` in its knots, like the panel zone.
 - [ ] RBS: the hinge at the cut, with Z of the cut section. Today it's at the column face, with Z of the full beam. Needs the RBS cut above.

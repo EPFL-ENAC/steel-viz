@@ -31,7 +31,7 @@ import { ANGLE_GAP, type Catalog, type Section } from './sections.ts';
 import { boxOf, flat, geo, isRound, memberBoxes, memberFaces, stiffener, type P2, type Part } from './steel.ts';
 import { actuator, block, clevis, crosshead, hingeSize, rigMember, rigSection, roller, seat, type RigOpts } from './rig.ts';
 import { LINK_CONFIGS, findSection, type BraceSpecimen, type ColumnSpecimen, type LinkSpecimen } from './specimen.ts';
-import type { ColumnRig, Detail, Params, Result, Structure } from './generate.ts';
+import type { BraceRig, ColumnRig, Detail, Params, Result, RigStrut, Structure } from './generate.ts';
 
 // ------------------------------------------------------------- the plane
 type Q = [number, number]; // a point or a direction in the brace plane: (y, z)
@@ -318,15 +318,18 @@ export function buildBrace(p: Params, spec: BraceSpecimen, cat: Catalog, detail:
   };
   // the actuator on the loaded beam end at y1, height zc, from a reaction
   // wall on the side s (+1: toward +y). The wall stands on the floor zf.
+  let pushing: RigStrut | undefined;
   const push = (zf: number, zc: number, y1: number, s: number) => {
     const D = clamp(r5(0.2 * R.d), 40, 80);
     const y0 = y1 + s * Math.max(1000, 14 * D);
     add(block('rig-wall', [0, y0 + s * 200, (zf + zc + 400) / 2], [Math.max(600, R.bf + 200), 400, zc + 400 - zf], ground('Reaction wall')));
     add(actuator('rig-actuator', [0, y0, zc], [0, y1, zc], X, D, ro(['rig-wall', 'rig-beam'])));
+    pushing = { from: [0, y0, zc], to: [0, y1, zc], D, kind: 'actuator' };
   };
 
   // the rig before the braces, and what comes after them
   let after = () => {};
+  let swaying: BraceRig['frame'];
   const bottomRig: string[][] = [];
   const topRig: string[] = [];
   if (!inFrame) {
@@ -347,7 +350,10 @@ export function buildBrace(p: Params, spec: BraceSpecimen, cat: Catalog, detail:
     // SBF, DBF: the frame, its columns pinned on the base beam
     const dR = R.d;
     const [yA, yB, zb, zt] = [c.colA!, -c.colB!, c.base!, -c.beam!];
-    const { zfb } = pinnedFrame(R, yA, yB, zb, zt, add, ro, ground);
+    const { axA, axB, zfb } = pinnedFrame(R, yA, yB, zb, zt, add, ro, ground);
+    // the foot pins of pinnedFrame()
+    const hinge = hingeSize(clamp(r5(0.25 * dR), 40, 100));
+    swaying = { feet: [[0, axA, zb + hinge.pin], [0, axB, zb + hinge.pin]], R: hinge.R, top: zt };
     add(rigMember('rig-beam', R, [0, yA - dR, zt + dR / 2], [0, yB + dR, zt + dR / 2], ro(['rig-colA', 'rig-colB'], 'Frame beam')));
     bottomRig.push(['rig-base', 'rig-colA'], ['rig-base', 'rig-colB']);
     topRig.push('rig-beam');
@@ -373,6 +379,11 @@ export function buildBrace(p: Params, spec: BraceSpecimen, cat: Catalog, detail:
   const st: Structure = {
     form: 'specimen', id: spec.id, H: Math.round(W1[1]), col: sec, cols: [], arms: [], secs: [],
     brace: { frame, L, angle: spec.angle, ends: spec.ends },
+    braceRig: {
+      lines: braces.map((b) => ({ id: b.id, o: at(b.x, b.ends[0].W), u: dir(b.ends[0].uin), s: [b.ends[0].start, L - b.ends[1].start] })),
+      actuator: pushing!,
+      ...(swaying ? { frame: swaying } : {}),
+    },
   };
   return { st, parts: out, ok: true, log, ratio: 0, alpha: Infinity, solves: 0, ms: { topology: t1 - t0, solve: 0, geometry: performance.now() - t1 }, nodes: 0, members: {} };
 }
