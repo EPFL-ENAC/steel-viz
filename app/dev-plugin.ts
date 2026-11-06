@@ -22,6 +22,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import type { Plugin } from 'vite';
+import { responseFile } from '../deform.ts';
 import { DEFORMS } from '../deforms.ts';
 import type { Family } from '../sections.ts';
 import { HUB_TABLES, SHAPE_FILES, TABLE_FILES, findHubData } from '../tables.ts';
@@ -105,9 +106,10 @@ const hubFile = (table: string) => (hubData && Object.hasOwn(HUB_TABLES, table) 
 function hubResponses(table: string, id: string) {
   if (!hubData || !Object.hasOwn(DEFORMS, table) || !Object.hasOwn(HUB_TABLES, table)) return undefined;
   const out: Record<string, string> = {};
-  for (const { folder } of DEFORMS[table].responses) {
-    const dir = join(hubData, dirname(HUB_TABLES[table]), folder);
-    if (existsSync(dir) && readdirSync(dir).includes(`${id}.csv`)) out[folder] = readFileSync(join(dir, `${id}.csv`), 'utf8');
+  for (const spec of DEFORMS[table].responses) {
+    const dir = join(hubData, dirname(HUB_TABLES[table]), spec.folder);
+    const file = responseFile(spec, id);
+    if (existsSync(dir) && readdirSync(dir).includes(file)) out[spec.folder] = readFileSync(join(dir, file), 'utf8');
   }
   return out;
 }
