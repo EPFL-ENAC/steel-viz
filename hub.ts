@@ -87,8 +87,10 @@ export function fromHubConnection(rec: HubRecord): ConnSpecimen {
   const ct = text('connection_type');
   const [connection, note] = HUB_CONN[ct] ?? ['welded', `connection type "${ct}" is not known, drawn welded`];
   if (note) notes.push(note);
+  // doubler plates: t_dp is one plate, wd its width
   const ndp = value('n_dp');
-  if (ndp > 0) notes.push(`${ndp} doubler plate${ndp > 1 ? 's' : ''} on the column web, not drawn yet`);
+  if (ndp > 0 && ndp !== 1 && ndp !== 2) throw unsupported('n_dp');
+  const doubler = ndp > 0 ? { n: ndp as 1 | 2, t: num('t_dp'), ...(Number.isFinite(value('wd')) ? { w: num('wd') } : {}) } : undefined;
   const slab = rec.slab;
   if (slab === true || /^(YES|TRUE)$/i.test(text('slab'))) notes.push('the concrete slab is not drawn yet');
   const tcp = value('t_cp');
@@ -96,7 +98,7 @@ export function fromHubConnection(rec: HubRecord): ConnSpecimen {
   const beams: SpecimenBeam[] = (interior ? [0, 180] as const : [0] as const).map((bearing) => ({
     section: beam, bearing, length: interior ? lb / 2 : exterior, connection,
   }));
-  return { id, column: { section: column, height }, beams, continuity: tcp > 0, load, notes };
+  return { id, column: { section: column, height }, beams, continuity: tcp > 0, load, notes, ...(doubler ? { doubler } : {}) };
 }
 
 // ------------------------------------------------------------- braces
