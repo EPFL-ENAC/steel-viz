@@ -686,7 +686,7 @@ export function splicePlates(lo: Geo, hi: Geo, kind: 'bearing' | 'flange'): { fa
   return { faces, boxes, dots };
 }
 
-export type BeamConn = 'shear_tab' | 'end_plate' | 'flange_plates' | 'welded' | 'clip_angles' | 'seated' | 'stiffened_seat' | 'tee' | 'end_plate_stiffened';
+export type BeamConn = 'shear_tab' | 'end_plate' | 'flange_plates' | 'welded' | 'clip_angles' | 'seated' | 'stiffened_seat' | 'tee' | 'end_plate_stiffened' | 'welded_tab';
 export type ConnType = BeamConn | 'gusset' | 'gusset_small' | 'gusset_lap' | 'gusset_cap' | 'clevis';
 // where a beam end lands: on a column flange, on a column web, on the web of a beam
 export type Fit = 'flange' | 'web' | 'beam';
@@ -1052,6 +1052,9 @@ export const CONNS: Record<ConnType, ConnSpec> = {
   end_plate_stiffened: { label: 'stiffened end plate', pinned: false, setback: 25, fits: ['flange', 'web'], past: [90, 90], replaces: 'end_plate', draw: endPlateStiffened },
   seated: { label: 'seated', pinned: true, setback: 13, fits: ['flange', 'web'], past: [SEAT.B, TOP.B], replaces: 'shear_tab', draw: seated },
   stiffened_seat: { label: 'stiffened seat', pinned: true, setback: 13, fits: ['flange', 'web'], past: [SEAT.plate + SEAT.H, TOP.B], replaces: 'shear_tab', draw: stiffenedSeat },
+  // WUF-B (hub tests): the flanges welded like `welded`, a shear tab bolted to the web.
+  // No `replaces` and not in BEAM_CONN: no random draw ever picks it.
+  welded_tab: { label: 'welded flanges, bolted web', pinned: false, setback: 0, fits: ['flange', 'web'], draw: shearTab },
   gusset: { label: 'gusset', pinned: true, setback: 195, draw: (g, r, hw) => gusset(g, r, hw, false) },
   gusset_small: { label: 'small gusset', pinned: true, setback: 130, draw: (g, r, hw) => gusset(g, r, hw, true) },
   gusset_lap: { label: 'lapped gusset', pinned: true, setback: 40, draw: gussetLap },

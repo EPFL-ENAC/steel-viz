@@ -51,7 +51,7 @@ const sectionOf = (name: unknown, d: number, bf: number, tf: number, tw: number)
 // connection_type in the hub: what we draw for it, and what it leaves out
 const HUB_CONN: Record<string, [ConnType, string?]> = {
   'WUF-W': ['welded'],
-  'WUF-B': ['welded', 'WUF-B: the bolted shear tab on the beam web is not drawn yet'],
+  'WUF-B': ['welded_tab'],
   RBS: ['welded', 'RBS: the cut in the beam flanges is not drawn yet'],
   BFP: ['flange_plates'],
   WFP: ['flange_plates', 'WFP: the flange plates are welded, drawn bolted'],
