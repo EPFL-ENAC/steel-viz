@@ -48,6 +48,10 @@ export type ConnSpecimen = {
   column: { section: SectionRef; height: number };
   beams: SpecimenBeam[]; // [] gives a column alone
   continuity?: boolean; // plates across the column at the beam flanges (default true)
+  // doubler plates on the column web, in the panel zone (I column only). n 1:
+  // one plate, on the -x side of the web. n 2: one on each side. t: mm, one
+  // plate. w: mm, its width (default and at most: the web between the flanges).
+  doubler?: { n: 1 | 2; t: number; w?: number };
   // what the actuators push (default beam): the beam tips, or the column top
   // (then the beam tips stand on links). See specimenRig in generate.ts.
   load?: 'beam' | 'column';

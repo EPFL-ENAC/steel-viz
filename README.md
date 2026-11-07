@@ -194,7 +194,7 @@ It can also draw a real test of RESSLab Hub instead of a seed: a specimen. For n
 - An HSS column test: one square or rectangular tube, standing like a column test, or lying on two rollers and pushed at mid span. That's the `hss_columns` table, all its 284 tests. See "HSS column tests" below.
 - An EBF link test: the link of an eccentrically braced frame (the short piece of beam that yields in shear), alone or in a one bay frame. That's the `eccentric_braced_frames` table, all its 240 tests. See "EBF link tests" below.
 
-The sections are the real ones, so there is no fix loop and no sizing. The solver runs once, and the log gives `alphaCr` and the max ratio under `--load`, only as information. The end plates and the continuity plates are drawn. Splices, foot gussets, trusses, rods and posts are not.
+The sections are the real ones, so there is no fix loop and no sizing. The solver runs once, and the log gives `alphaCr` and the max ratio under `--load`, only as information. The end plates, the continuity plates and the doubler plates are drawn. Splices, foot gussets, trusses, rods and posts are not.
 
 The test rig is drawn with lighter lines (parts of kind `rig`, built with `rig.ts`). The column has an end plate on each end. A pin on a floor block holds its foot. A loading head sits on the top end plate. All the pins turn about the same axis, at right angles to the plane of the first beam.
 
@@ -224,6 +224,7 @@ The pin of the link (or of the actuator) on the head is the top pin of the colum
 - `at`: the height of the beam centre line above the column foot. By default, half the column height.
 - `connection`: one of the kinds of "Beam end connections" above that fit a column (`shear_tab`, `end_plate`, `flange_plates`, `welded`, `clip_angles`, `seated`, `stiffened_seat`, `tee`, `end_plate_stiffened`). A beam alone on a pinned kind (a shear tab, clip angles, a seat, a tee) is a mechanism: the log says so, and the drawing still comes out.
 - `continuity: false` leaves out the continuity plates. `beams: []` gives a column alone.
+- `doubler: { "n", "t", "w" }`: doubler plates on the column web, in the panel zone (I column only). `n` 1 puts one plate on the −x side of the web (the side the iso view looks at), `n` 2 one on each side. `t` is one plate, `w` its width (by default, and at most, the web between the flanges, centred). They stop at the continuity plates. With no continuity plates, they go 150 mm past the beam flanges, above and below (the usual 6 in).
 - `load`: `beam` (the default) or `column`, what the actuators push (see the rig above).
 
 From a hub record:
@@ -231,6 +232,7 @@ From a hub record:
 - The sections come from the numbers (`d_c b_cf t_cf t_cw`, `d_b b_bf t_bf t_bw`), not from the names. The names are free text (`build up H section`) and don't link to the section tables.
 - An exterior test has one beam of length `l_b`. Some exterior tests give the whole span in `l_b`: if `l_o` is under 0.7 `l_fc`, the beam ends at `l_o` from the column face. An interior test has two, one on each flange, `l_b / 2` each (there `l_b` is the whole span). The beams are at half the column height `h_c`.
 - `t_cp` 0 means no continuity plates.
+- `n_dp` 1 or 2 gives the doubler plates: `t_dp` is one plate, `wd` its width. The data has no height (`dz` is the clear depth between the beam flanges): we take the rule of `doubler` above. For `n_dp` 1 the data doesn't say which side, we draw it on −x.
 - `specimen_type` gives the load: "Interior - Column Loaded - Subassembly" is column loaded.
 - The connection is the closest one we can draw:
 
@@ -244,13 +246,13 @@ From a hub record:
 | BEEP | end plate | |
 | KBB | flange plates | the Kaiser bracket |
 
-What we draw differently from the real test goes into the log as a note: the connection, the doubler plates (`n_dp`) and the slab. A test that is not a subassembly ("Exterior - Frame"), or a missing number, throws an error that names the field.
+What we draw differently from the real test goes into the log as a note: the connection and the slab. A test that is not a subassembly ("Exterior - Frame"), or a missing number, throws an error that names the field.
 
 ```sh
 node cli.ts --specimen specimens/Chi_and_Uang_2002_DC2.json --view iso   # writes steel-Chi_and_Uang_2002_DC2-iso.svg
 ```
 
-`--specimen` takes the same drawing options as a seed (`--view`, `--detail`, `--animate`, `--frames`, `--painter`, `--size`). The family comes from `--family`, else from the file, else aisc. `--seed`, `--form`, `--arms` and `--height` don't apply. `specimen.test.ts` covers the two hub files, the format and the errors.
+`--specimen` takes the same drawing options as a seed (`--view`, `--detail`, `--animate`, `--frames`, `--painter`, `--size`). The family comes from `--family`, else from the file, else aisc. `--seed`, `--form`, `--arms` and `--height` don't apply. `specimen.test.ts` covers the two hub files, the format and the errors. `doubler.test.ts` covers the doubler plates: the hub fields, where they sit next to the continuity plates, and the panel zone.
 
 ### How many hub tests we draw
 
@@ -382,7 +384,7 @@ The connection model is in `deform-connection.ts`. The column turns with the dri
 
 A test doesn't always have all the files. The rail lists what we estimate instead:
 
-- No `Panel_zone` file: the elastic distortion V / (G d_c t_cw), at most θ / 2.
+- No `Panel_zone` file: the elastic distortion V / (G d_c (t_cw + n_dp t_dp)), at most θ / 2. The doubler plates take shear with the web.
 - No beam file: half of what is left of the drift goes to the beam, half to the column. The moment comes from the actuator force.
 
 The colors come from the data, and the rail shows each value next to its color:

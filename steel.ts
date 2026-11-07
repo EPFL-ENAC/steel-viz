@@ -282,10 +282,11 @@ export function prism(p0: V, p1: V, polys: P2[][], u: V, v: V, w: V, seg: number
   return faces;
 }
 
-// a box: sizes sx, sy, sz along (ay x az), ay, az
-export function box3(centre: V, ay: V, az: V, sx: number, sy: number, sz: number): Face[] {
+// a box: sizes sx, sy, sz along (ay x az), ay, az. seg and cuts split its
+// long faces along az, like a member (cuts in mm from its bottom face)
+export function box3(centre: V, ay: V, az: V, sx: number, sy: number, sz: number, seg = 1e9, cuts: number[] = []): Face[] {
   const v = cross(ay, az);
-  return prism(sub(centre, mul(az, sz / 2)), add(centre, mul(az, sz / 2)), profRect(sy, sx), az, v, ay, 1e9);
+  return prism(sub(centre, mul(az, sz / 2)), add(centre, mul(az, sz / 2)), profRect(sy, sx), az, v, ay, seg, 0, cuts);
 }
 
 // the same box as box3, as a solid
