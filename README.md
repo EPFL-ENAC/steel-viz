@@ -106,8 +106,11 @@ Each beam end has one kind of connection. The kinds are a small catalog, `CONNS`
 | stiffened seat | `stiffened_seat` | column flange, column web | pin | a seat plate under the bottom flange on a welded stiffener, and a small angle on the top flange |
 | tee | `tee` | column flange, column web, beam | pin | a WT: its flange bolted to the face, its stem bolted to the beam web. On a channel, the stem is on the side away from its flanges. |
 | stiffened end plate | `end_plate_stiffened` | column flange, column web | moment | the extended end plate, with a triangle stiffener above the top flange and below the bottom flange |
+| welded flanges, bolted web | `welded_tab` | column flange, column web | moment | the flanges welded like `welded`, and the shear tab on the web |
 
 The fix loop and the sizing only use the first four kinds. The other five come after, from a draw of their own (`connKindsP`, 0.35 by default). Each beam end takes one draw, keyed by its id like the member shapes, so the result doesn't depend on the order of the draws. Under `connKindsP`, the end gets a kind that can take the place of the one it has, and that fits where it lands. Clip angles, the two seats and the tee take the place of a shear tab. The stiffened end plate takes the place of an end plate. Each one has the same pin or moment and the same setback as the kind it replaces. So the solver, the sections and the members don't change, only the plates at the end. A secondary beam on a beam can only get clip angles or a tee. A truss chord keeps its kind.
+
+`welded_tab` is for the WUF-B tests of the hub. No random draw picks it, only `--conn welded_tab` or a specimen. Its tab has the size of the shear tab: 10 mm thick, 115 mm from the face, one line of 2 to 8 bolts at 75 mm, as many as the clear web of the beam takes.
 
 The column splice keeps clear of the seats and the end plates. A new kind that would go through another part goes back to the old one. With `connKindsP` at 0, a seed gives the same parts as before these kinds (`params-conn-kinds-off.test.ts` checks it). With `--conn` set to one kind, there is no draw: every beam end that can take it gets it.
 
@@ -222,7 +225,7 @@ The pin of the link (or of the actuator) on the head is the top pin of the colum
 - `bearing`: 0 and 180 put the beam on a column flange, 90 and 270 on the web.
 - `length`: from the column axis to the beam tip, in mm.
 - `at`: the height of the beam centre line above the column foot. By default, half the column height.
-- `connection`: one of the kinds of "Beam end connections" above that fit a column (`shear_tab`, `end_plate`, `flange_plates`, `welded`, `clip_angles`, `seated`, `stiffened_seat`, `tee`, `end_plate_stiffened`). A beam alone on a pinned kind (a shear tab, clip angles, a seat, a tee) is a mechanism: the log says so, and the drawing still comes out.
+- `connection`: one of the kinds of "Beam end connections" above that fit a column (`shear_tab`, `end_plate`, `flange_plates`, `welded`, `clip_angles`, `seated`, `stiffened_seat`, `tee`, `end_plate_stiffened`, `welded_tab`). A beam alone on a pinned kind (a shear tab, clip angles, a seat, a tee) is a mechanism: the log says so, and the drawing still comes out.
 - `continuity: false` leaves out the continuity plates. `beams: []` gives a column alone.
 - `load`: `beam` (the default) or `column`, what the actuators push (see the rig above).
 
@@ -237,7 +240,7 @@ From a hub record:
 | hub | drawn as | not drawn yet |
 |---|---|---|
 | WUF-W | welded | |
-| WUF-B | welded | the bolted shear tab on the beam web |
+| WUF-B | welded flanges, bolted web (the tab has the shear tab size, `t_pl` is NA) | |
 | RBS | welded, with the cut in the beam flanges (`rbs.ts`) | where the cut is and how long: the data doesn't say, so we take a = 0.625 `b_bf` from the column face and b = 0.75 `d_b` (the middle of the AISC 358 ranges). The depth comes from `b_bf_rbs` |
 | BFP | flange plates | |
 | WFP | flange plates | the plates are welded, we draw them bolted |
