@@ -205,7 +205,9 @@ test('zones: DC2 by hand', () => {
   const arm = r.st.arms[0];
   const free = d.moves.beam1.knots.at(-1)!.s - d.moves.beam1.knots[0].s;
   assert.ok(free > 0.8 * arm.L && free < arm.L);
-  assert.ok(Math.abs(hinge.level - (1000 * free * 1000) / Mp) < 1e-6, `M / Mp ${hinge.level}`);
+  // RBS: M at the center of the cut (a + b / 2 from the face), Z of the cut
+  const s = arm.rbs!.a + arm.rbs!.b / 2;
+  assert.ok(Math.abs(hinge.level - (1000 * (free - s) * 1000) / (7905329.428 * 379.8241715)) < 1e-6, `M / Mp ${hinge.level}`);
 });
 
 test('zones: no capacity in the record gives no zone, and the legend says why', () => {

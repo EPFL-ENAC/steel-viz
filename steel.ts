@@ -306,12 +306,27 @@ export type Geo = {
   d: number;
   tw: number;
   copes: Cope[]; // set from the connections, before the faces are made
+  rbs?: Rbs; // a reduced beam section near p0 (a beam-to-column test only)
 };
 
 // A cope: the end of a beam cut back where it meets the flanges of the beam
 // it frames into. `top` and `bot` are the depths cut away (0 = none), over
 // `len` mm from the end.
 export type Cope = { at: 'from' | 'to'; len: number; top: number; bot: number };
+
+// A reduced beam section (RBS): a circular cut in both edges of both flanges
+// of an I beam. It starts `a` mm from p0, it is `b` mm long, and `c` mm deep
+// at its center. rbs.ts reads it from a hub record.
+export type Rbs = { a: number; b: number; c: number };
+
+// how deep the cut is at x mm from p0: a circle through both ends of the cut
+// and its center, 0 outside the cut
+export function rbsDepth(r: Rbs, x: number): number {
+  const m = x - r.a - r.b / 2;
+  if (Math.abs(m) >= r.b / 2) return 0;
+  const R = (4 * r.c * r.c + r.b * r.b) / (8 * r.c);
+  return Math.max(0, r.c - R + Math.sqrt(R * R - m * m));
+}
 
 export function geo(id: string, sec: Section, p0: V, p1: V, tos: boolean): Geo {
   const { u, v, w } = frame(p0, p1);
@@ -381,6 +396,7 @@ export const isRound = (s: Section) => s.kind === 'ROD' || s.kind === 'CHS';
 
 export function memberFaces(g: Geo, seg: number, cuts: number[] = []): Face[] {
   if (isRound(g.sec)) return smooth(prism(g.p0, g.p1, g.polys, g.u, g.v, g.w, seg, g.sh, cuts));
+  if (g.rbs && g.sec.kind === 'I' && !g.copes.length) return rbsFaces(g, g.rbs, seg, cuts);
   const f = flanged(g.sec);
   if (!g.copes.length || !f) return prism(g.p0, g.p1, g.polys, g.u, g.v, g.w, seg, g.sh, cuts);
   const L = len(sub(g.p1, g.p0));
@@ -442,6 +458,48 @@ export function memberFaces(g: Geo, seg: number, cuts: number[] = []): Face[] {
       }
     }
   });
+  return faces;
+}
+
+// An I beam with an RBS cut: a prism whose flanges get narrower in the cut.
+// Every ring has the same 12 corners in the same order (profI), so two rings
+// share their points and every side face stays flat. Inside the cut the
+// rings are close, at most 2.5° of the arc apart, with one at the center. The edges: along the beam
+// at every corner (so the flange edges follow the arc), and the two end
+// rings. No edge across the beam at the rings inside it: the arc is one
+// smooth edge. hlr.ts finds the same lines from the folds.
+function rbsFaces(g: Geo, r: Rbs, seg: number, cuts: number[]): Face[] {
+  const L = len(sub(g.p1, g.p0));
+  const [a, b] = [Math.max(0, r.a), Math.min(L, r.a + r.b)];
+  const R = (4 * r.c * r.c + r.b * r.b) / (8 * r.c);
+  const turn = (2 * Math.asin(Math.min(1, r.b / 2 / R)) * 180) / Math.PI;
+  const n = 2 * Math.max(4, Math.ceil(turn / 5)); // even: a ring at the center, where the cut is deepest
+  const marks = [...cuts.filter((x) => x > 1 && x < L - 1 && (x < a - 1 || x > b + 1)), a, b].sort((x, y) => x - y);
+  const ts: number[] = [0];
+  for (const m of [...marks, L]) {
+    const t0 = ts[ts.length - 1];
+    if (m - t0 < 1e-6) continue;
+    const k = t0 >= a - 1e-6 && m <= b + 1e-6 ? n : Math.max(1, Math.ceil((m - t0) / seg));
+    for (let j = 1; j <= k; j++) ts.push(t0 + ((m - t0) * j) / k);
+  }
+  const { sec } = g;
+  const rings = ts.map((t) => profI(sec.d, sec.bf - 2 * rbsDepth(r, t), sec.tw, sec.tf)[0]
+    .map(([p, q]) => add(add(add(g.p0, mul(g.u, t)), mul(g.v, p)), mul(g.w, q + g.sh))));
+  const m = rings[0].length;
+  const last = ts.length - 2;
+  const faces: Face[] = [];
+  for (let k = 0; k <= last; k++) {
+    const [A, B] = [rings[k], rings[k + 1]];
+    for (let i = 0; i < m; i++) {
+      const j = (i + 1) % m;
+      const edges: [number, number][] = [[1, 2], [3, 0]];
+      if (k === 0) edges.push([0, 1]);
+      if (k === last) edges.push([2, 3]);
+      faces.push({ pts: [A[i], A[j], B[j], B[i]], edges });
+    }
+  }
+  const ring = (): [number, number][] => [...Array(m).keys()].map((i) => [i, (i + 1) % m]);
+  faces.push({ pts: [...rings[0]].reverse(), edges: ring() }, { pts: rings[rings.length - 1], edges: ring() });
   return faces;
 }
 
