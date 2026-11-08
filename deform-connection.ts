@@ -20,6 +20,7 @@ import type { Result, RigStrut } from './generate.ts';
 import { hdir, panelZone } from './generate.ts';
 import type { HubRecord } from './hub.ts';
 import { hingeSize } from './rig.ts';
+import { cutMoment, hingeAt } from './rbs.ts';
 import { biggest, follow, hermite, I4, movePoint, scaleFor, shift, strut, tilt, type DeformState, type DeformTable, type Knot, type Move, type Sample, type Samples, type Zone } from './deform.ts';
 import type { Specimen } from './specimen.ts';
 
@@ -204,10 +205,19 @@ function shape(r: Result, spec: Specimen, rec: HubRecord, at: Samples, scale: nu
   else if (!Mp) notes.push('No Z and fy in the record: no beam hinge zone.');
   else
     beams.forEach((b, i) => {
-      const c: V = [0, 1, 2].map((k) => b.o[k] + b.u[k] * (b.face + b.d / 2 + 0.5)) as V;
+      // RBS: the hinge is at the center of the cut. M at the face goes down
+      // in a line to 0 at the load, l_o from the face. The beam file gives M
+      // at the face (l_o of the record), Global gives P times b.free.
+      const cut = st.arms[i].rbs;
+      const s = cut ? hingeAt(cut) : 0;
+      const beamFile = i === 0 ? at.Beam_moment_rotation ?? at.Beam_moment_rotation_west : at.Beam_moment_rotation_west ?? at.Beam_moment_rotation;
+      const M = cut ? cutMoment(v.moments[i], s, (beamFile && value(rec, 'l_o')) || b.free) : v.moments[i];
+      const [zb, zr] = [value(rec, 'z_xb'), value(rec, 'z_xb_rbs')];
+      const Mpi = cut && zb && zr ? (Mp * zr) / zb : Mp;
+      const c: V = [0, 1, 2].map((k) => b.o[k] + b.u[k] * (b.face + (cut ? s : b.d / 2 + 0.5))) as V;
       zones.push({
-        c, axes: [b.u, across, up], half: [b.d / 2, b.bf, b.d], slot: MOMENT,
-        level: Math.abs(v.moments[i] * 1000) / Mp, label: beams.length > 1 ? `Beam hinge ${i ? 'west' : 'east'}` : 'Beam hinge', ratio: '|M| / Mp',
+        c, axes: [b.u, across, up], half: [cut ? cut.b / 2 : b.d / 2, b.bf, b.d], slot: MOMENT,
+        level: Math.abs(M * 1000) / Mpi, label: beams.length > 1 ? `Beam hinge ${i ? 'west' : 'east'}` : 'Beam hinge', ratio: cut ? '|M| / Mp at the cut' : '|M| / Mp',
       });
     });
   if (Rn) {
@@ -216,7 +226,10 @@ function shape(r: Result, spec: Specimen, rec: HubRecord, at: Samples, scale: nu
       level: Math.abs(v.shear) / Rn, label: 'Panel zone', ratio: '|V| / Rn',
     });
   } else notes.push('No panel zone capacity in the record: no panel zone color.');
-  if (rec.connection_type === 'RBS') notes.push('RBS: the hinge is drawn at the column face and uses Z of the full beam. The cut is not drawn yet.');
+  if (st.arms.some((a) => a.rbs))
+    notes.push(value(rec, 'z_xb_rbs')
+      ? 'RBS: the hinge is at the center of the cut, with M at the cut (from M at the column face) and Z of the cut section (z_xb_rbs).'
+      : 'RBS: the hinge is at the center of the cut, with M at the cut. No z_xb_rbs in the record: Z of the full beam.');
   if (!at.Panel_zone) notes.push('No panel zone file: elastic estimate of the distortion.');
   if (force && !at.Beam_moment_rotation) notes.push('No beam file: moment from the actuator force, what is left of the drift is half beam, half column.');
   return { moves: follow(r.parts, moves), zones, scale, notes };

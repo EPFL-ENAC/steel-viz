@@ -243,7 +243,7 @@ From a hub record:
 |---|---|---|
 | WUF-W | welded | |
 | WUF-B | welded flanges, bolted web (the tab has the shear tab size, `t_pl` is NA) | |
-| RBS | welded | the cut in the beam flanges |
+| RBS | welded, with the cut in the beam flanges (`rbs.ts`) | where the cut is and how long: the data doesn't say, so we take a = 0.625 `b_bf` from the column face and b = 0.75 `d_b` (the middle of the AISC 358 ranges). The depth comes from `b_bf_rbs` |
 | BFP | flange plates | |
 | WFP | flange plates | the plates are welded, we draw them bolted |
 | BEEP | end plate | |
@@ -392,7 +392,7 @@ A test doesn't always have all the files. The rail lists what we estimate instea
 
 The colors come from the data, and the rail shows each value next to its color:
 
-- Beam hinge, in orange: |M| / Mp at the column face, over one beam depth. Mp is `z_xb` times the beam yield stress. An RBS test uses the Z of the full beam, because the cut isn't drawn yet.
+- Beam hinge, in orange: |M| / Mp at the column face, over one beam depth. Mp is `z_xb` times the beam yield stress. On an RBS test the hinge is at the center of the cut, s = a + b / 2 from the column face, over the length of the cut. M at the cut is M at the face times (l_o - s) / l_o: with the beam file l_o is `l_o` of the record, with Global it is the lever of the actuator force. Mp is `z_xb_rbs` times the same yield stress.
 - Panel zone, in blue: |V| / Rn, between the beam flanges. Rn is `r_n_pl_m_aisc`, else `r_n_pl_n_aisc`, else `r_n_el_n_aisc`.
 
 A test with a missing capacity has no zone for it, and the rail says why. A test with only a `Panel_zone` file has no force, so it has no beam hinge zone, and the rail says why too.

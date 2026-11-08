@@ -16,7 +16,7 @@ import type { Catalog, Section } from './sections.ts';
 import { ANGLE_GAP, rodSection } from './sections.ts';
 import {
   box3, boxOf, flat, geo, hardware, isRound, memberBoxes, memberFaces, resolve, splicePlates, stiffener, supportFace, BEARING_T, BEAM_CONN_KINDS, CONNS, EDGE, PINNED, SETBACK, SPLICE_HALF,
-  type BeamConn, type ConnType, type Fit, type Geo, type P2, type Part, type PartInfo, type Plate,
+  type BeamConn, type ConnType, type Fit, type Geo, type P2, type Part, type PartInfo, type Plate, type Rbs,
 } from './steel.ts';
 import { overlap, own } from './clash.ts';
 import { BEAM_CONNS, findSection, type BraceSpecimen, type ColumnSpecimen, type ConnSpecimen, type LinkSpecimen, type Specimen } from './specimen.ts';
@@ -140,6 +140,7 @@ type Brace = { a: number; zb: number; sec: Section; end: 0 | 1; x?: XKind; cap?:
 type Arm = {
   id: string; col: number; to?: number; z: number; bearing: number; L: number; conn: ConnType; conn2?: ConnType; sec: Section; braces: Brace[];
   truss?: Truss; rod?: Rod; post?: Post; splice?: number; face?: number; skew?: number; gable?: Gable;
+  rbs?: Rbs; // a reduced beam section, mm from the column face (specimens only)
 };
 // A post on the top flange of a beam, `a` along it, `h` high from the top of
 // the beam to the top of its cap plate. Free at the top, where it brings a
@@ -726,7 +727,12 @@ function specimen(spec: ConnSpecimen, cat: Catalog): Structure {
     if (onWeb && col.kind === 'I' && sec.bf + 20 > col.d - 2 * col.tf) throw bad(`${id}: the beam (bf ${sec.bf} mm) does not fit between the column flanges`);
     const z = (b.at ?? H / 2) + sec.d / 2; // top of steel
     if (z > H || z - sec.d < 0) throw bad(`${id}: the beam is not inside the column height (0 to ${H} mm)`);
-    return { id, col: 0, z, bearing: b.bearing, L: b.length, conn: b.connection, sec, braces: [] };
+    const { rbs } = b;
+    if (rbs) {
+      const ok = sec.kind === 'I' && rbs.a >= 0 && rbs.b > 0 && rbs.c > 0 && rbs.c < (sec.bf - sec.tw) / 2 - 5 && face + rbs.a + rbs.b < b.length - 100;
+      if (!ok) throw bad(`${id}: the RBS cut (a ${rbs.a}, b ${rbs.b}, c ${rbs.c} mm) does not fit in the beam`);
+    }
+    return { id, col: 0, z, bearing: b.bearing, L: b.length, conn: b.connection, sec, braces: [], ...(rbs ? { rbs } : {}) };
   });
   for (const a of arms)
     for (const o of arms)
@@ -1614,7 +1620,8 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
       ends.push({ S: Sj, sId: Sj.id, conn: a.conn2!, at: 'to' });
     }
     const g = geo(a.id, a.sec, p0, p1, true);
-    const beam = (a.to === undefined ? 'Cantilever beam' : 'Bay beam') + (a.skew ? `, skewed ${Math.abs(a.skew)}°` : '');
+    if (a.rbs) g.rbs = { ...a.rbs, a: a.rbs.a - SETBACK[a.conn] };
+    const beam = (a.to === undefined ? 'Cantilever beam' : 'Bay beam') + (a.skew ? `, skewed ${Math.abs(a.skew)}°` : '') + (a.rbs ? ', RBS' : '');
     // an arm slides in along its axis, a bay beam is lowered between its columns
     if (a.splice === undefined) {
       armGeo.set(a.id, g);

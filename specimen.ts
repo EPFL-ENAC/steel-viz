@@ -39,6 +39,9 @@ export type SpecimenBeam = {
   length: number; // mm, from the column axis to the beam tip
   at?: number; // mm, beam centre line above the column foot (default: half the column height)
   connection: ConnType; // one of BEAM_CONNS: shear_tab, end_plate, flange_plates, welded, ...
+  // a reduced beam section (an I beam only): the cut starts `a` mm from the
+  // column face, is `b` mm long and `c` mm deep at its center (rbs.ts)
+  rbs?: { a: number; b: number; c: number };
 };
 
 export type ConnSpecimen = {

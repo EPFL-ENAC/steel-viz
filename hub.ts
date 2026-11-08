@@ -9,6 +9,7 @@
 //
 // No three.js and no Node API here: index.ts exports it.
 import type { ConnType } from './steel.ts';
+import { hubRbs } from './rbs.ts';
 import { LINK_CONFIGS, type BraceSpecimen, type ColumnSpecimen, type ConnSpecimen, type LinkSpecimen, type SectionRef, type Specimen, type SpecimenBeam } from './specimen.ts';
 
 export type HubRecord = Record<string, unknown>;
@@ -52,7 +53,7 @@ const sectionOf = (name: unknown, d: number, bf: number, tf: number, tw: number)
 const HUB_CONN: Record<string, [ConnType, string?]> = {
   'WUF-W': ['welded'],
   'WUF-B': ['welded_tab'],
-  RBS: ['welded', 'RBS: the cut in the beam flanges is not drawn yet'],
+  RBS: ['welded'],
   BFP: ['flange_plates'],
   WFP: ['flange_plates', 'WFP: the flange plates are welded, drawn bolted'],
   BEEP: ['end_plate'],
@@ -87,6 +88,8 @@ export function fromHubConnection(rec: HubRecord): ConnSpecimen {
   const ct = text('connection_type');
   const [connection, note] = HUB_CONN[ct] ?? ['welded', `connection type "${ct}" is not known, drawn welded`];
   if (note) notes.push(note);
+  const cut = ct === 'RBS' ? hubRbs(num('b_bf'), num('d_b'), value('b_bf_rbs'), value('rbs_cut')) : undefined;
+  if (cut) notes.push(cut.note);
   // doubler plates: t_dp is one plate, wd its width
   const ndp = value('n_dp');
   if (ndp > 0 && ndp !== 1 && ndp !== 2) throw unsupported('n_dp');
@@ -96,7 +99,7 @@ export function fromHubConnection(rec: HubRecord): ConnSpecimen {
   const tcp = value('t_cp');
 
   const beams: SpecimenBeam[] = (interior ? [0, 180] as const : [0] as const).map((bearing) => ({
-    section: beam, bearing, length: interior ? lb / 2 : exterior, connection,
+    section: beam, bearing, length: interior ? lb / 2 : exterior, connection, ...(cut?.rbs ? { rbs: cut.rbs } : {}),
   }));
   return { id, column: { section: column, height }, beams, continuity: tcp > 0, load, notes, ...(doubler ? { doubler } : {}) };
 }
