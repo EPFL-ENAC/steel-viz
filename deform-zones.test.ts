@@ -57,6 +57,8 @@ const EXAMPLES: Record<string, string[]> = {
   connections: ['Chi_and_Uang_2002_DC2', 'Ricles_et_al_2004_SPEC-1', 'Lee_et_al_2002_CR1'],
   braces: ['Shaback_3A', 'Takeuchi_Matsui_528', 'Wakabayashi_DPC1-1'],
   eccentric_braced_frames: ['Malley_and_Popov_1983_24', 'Stratan_and_Dubina_2003_LL5-m', 'Roeder_and_Popov_1977_TF1-F1', 'Volynkin_and_Clifton_2016_AL-4C'],
+  columns: ['MacRae_C3', 'Nakashima_et_al_S105604', 'Cheng_Chen_Niu_Nethercot_B-H4-0.2-15'],
+  hss_columns: ['Tsuda_Matsui_1998__Matsui-943', 'Sugiyama_Igarashi_1986__Igarashi-14', 'Nakajima_et_al_2009__L-T16-45'],
 };
 
 for (const id of EXAMPLES.connections)
@@ -76,7 +78,7 @@ for (const [table, ids] of Object.entries(EXAMPLES))
       for (const z of b.zones) assert.deepEqual(onEdge(b.parts, z), [], z.label);
     });
 
-for (const table of Object.keys(EXAMPLES))
+for (const table of Object.keys(DEFORMS))
   test(`hub ${table}: no colored face is on the edge of a zone box`, { skip }, () => {
     const bad: string[] = [];
     let seen = 0;
