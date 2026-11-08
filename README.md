@@ -345,7 +345,7 @@ A brace test of our own, as JSON:
 A record of the hub `columns` table (it has an `axis_of_bending`) is a column test. `bench.ts` draws it, with no solve.
 
 - The column is an I from `d_c`, `b_cf`, `t_cf` and `t_cw`. The name is not used (it is often "Built Up S10"). Its length is `l_c`, between the two end plates. Careful: `h_c` is the web height, not a height.
-- The foot end plate is bolted to a floor block. A loading head sits on the top end plate. An actuator pushes the head sideways, from a reaction wall. Vertical actuators above the head bring the axial load. They hang from a crosshead (two posts and a beam).
+- The foot end plate is bolted to a floor block. A loading head sits on the top end plate. An actuator pushes the head sideways, from a reaction wall. Its length follows the column, so its foot stays on the wall at the auto scale: its two pin joints plus 0.25 L, and at least the length of an axial actuator (`pushLength()` in `bench.ts`). Vertical actuators above the head bring the axial load. They hang from a crosshead (two posts and a beam).
 - `boundary_condition` gives the top. Fixed-Free: one vertical actuator, the top is free to turn. Fixed-Fixed: two vertical actuators side by side, on a spreader beam, so the head can't turn. Fixed-Flexible: drawn like Fixed-Free, and the log says the spring is not drawn.
 - `axis_of_bending` turns the column under the push: Strong 0°, Weak 90°. Bi-axial is drawn at 45°, because the table has no loading angle (the log says so). The rig doesn't turn.
 - `t_top_plate` and `t_bottom_plate` give the end plates. Some rows have "NR": then the plate is `max(25, 1.5 t_cf)` thick, and the log says so.
@@ -365,7 +365,7 @@ A column test of our own, as JSON (`angle` in degrees, between the push and the 
 A record of the hub `hss_columns` table (it has a `test_configuration`) is also a column test, of a tube. `bench.ts` draws it, with no solve.
 
 - The tube is an RHS from `depth__mm`, `width__mm` and `flange_thickness__mm` (the wall). The id is `tube_section`. All 284 rows are square or rectangular tubes, so no round tube (CHS) for now.
-- `test_configuration` CF (cantilever): the rig of a Fixed-Free column. DC (double curvature): the rig of a Fixed-Fixed column. 3PB (three-point bending): the tube lies on two rollers, and an actuator pushes it down at mid span, from a crosshead. For the axial load, an end plate at each end: a pin on a reaction block at one end, an actuator from a reaction wall at the other.
+- `test_configuration` CF (cantilever): the rig of a Fixed-Free column. DC (double curvature): the rig of a Fixed-Fixed column. 3PB (three-point bending): the tube lies on two rollers, and an actuator pushes it down at mid span, from a crosshead. Its length uses 0.1 L and not 0.25 L, because mid span moves half as much as the head of a standing column. For the axial load, an end plate at each end: a pin on a reaction block at one end, an actuator from a reaction wall at the other.
 - `length__mm` is read with `stiffness_coefficient` k (the end moment over the chord rotation is k EI / L). k 3: `length__mm` goes from the point of zero moment to the end. So a CF column is `length__mm` high, but a DC column or a 3PB span is twice `length__mm`, and the log says so. k 6: `length__mm` is the whole DC column (or 3PB span). Another k throws an error. The dictionary doesn't say this, it's our reading of the hub images and of the numbers.
 - `loading_angle` turns the tube under the push (0°: the push along the depth).
 - `axial_load_ratio` 0, with a `Constant` sequence: no axial load, so no axial actuator. A DC column keeps its two vertical actuators: they hold the top straight.
@@ -486,7 +486,7 @@ The other rules:
 - The hinge zones are at the base, also at the top for `fixed-fixed`, and at mid span for `3pb`. The level is |M| / Mp. The file has one moment, so the top hinge uses the same level as the base.
 - Mp comes from `axis_of_bending`, not from the folder of the file. `hss_columns` has M in kN m and Mp in kN mm.
 - The axial load does not reduce Mp. We tried the EC3 and AISC rules on the real tests, and they spread the peak levels more. The rail gives P / Py, because a hinge can form below level 1 under a high axial load.
-- The scale can go past what the rig allows. The head can pass the pin of the actuator: the pins then stay two tongues apart, and the whole foot (base, ears, pin) leaves its support in one piece, because `actuatorMove()` moves its mount. The shortening stops at half the length. The rail says so in both cases.
+- The scale can go past what the rig allows. At the auto scale no real column test does this, a test in `deform-rig.test.ts` checks every step. With a scale picked by hand, the head can pass the pin of the actuator: the pins then stay two tongues apart, and the whole foot (base, ears, pin) leaves its support in one piece, because `actuatorMove()` moves its mount. The shortening stops at half the length. The rail says so in both cases.
 
 ### The drawing
 

@@ -146,10 +146,10 @@ test('an actuator past its limit: the whole foot leaves its support, and the rai
 });
 
 const hub = findHubData();
-test('all the real tests: the mounts stay, the tongues turn about their pins', { skip: hub ? false : 'no hub data' }, () => {
-  const wrong: string[] = [];
-  let seen = 0;
-  for (const table of Object.keys(DEFORMS)) {
+
+// every real test of these tables that has a response file, in its rig
+function* realTests(tables: string[]) {
+  for (const table of tables) {
     for (const rec of parseCsv(readFileSync(join(hub!, HUB_TABLES[table]), 'utf8')) as HubRecord[]) {
       let spec;
       try {
@@ -163,11 +163,37 @@ test('all the real tests: the mounts stay, the tongues turn about their pins', {
         if (existsSync(f)) curves[s.folder] = readResponse(readFileSync(f, 'utf8'), s.cols);
       }
       if (!Object.keys(curves).length) continue;
-      const r = generate({ specimen: spec }, cat);
-      for (const line of problems(r.parts, atPeak(table, r, spec, rec, protocol(curves)))) wrong.push(`${table}/${spec.id} ${line}`);
-      seen++;
+      yield { table, rec, spec, r: generate({ specimen: spec }, cat), p: protocol(curves) };
     }
+  }
+}
+
+test('all the real tests: the mounts stay, the tongues turn about their pins', { skip: hub ? false : 'no hub data' }, () => {
+  const wrong: string[] = [];
+  let seen = 0;
+  for (const { table, rec, spec, r, p } of realTests(Object.keys(DEFORMS))) {
+    for (const line of problems(r.parts, atPeak(table, r, spec, rec, p))) wrong.push(`${table}/${spec.id} ${line}`);
+    seen++;
   }
   assert.ok(seen > 500, `only ${seen} tests`);
   assert.deepEqual(wrong.slice(0, 60), [], `${wrong.length} problems`);
+});
+
+test('at the auto scale, no column test goes past its actuator', { skip: hub ? false : 'no hub data' }, () => {
+  const past: string[] = [];
+  let seen = 0;
+  for (const { table, rec, spec, r, p } of realTests(['columns', 'hss_columns'])) {
+    seen++;
+    const T = DEFORMS[table];
+    const scale = T.autoScale(p);
+    // every step: the foot can leave at a step that is not the peak
+    for (let i = 0; i < p.n; i++) {
+      if (T.shape(r, spec, rec, p.at(i), scale).notes?.some((n) => LEAVES.test(n))) {
+        past.push(`${table}/${spec.id} at step ${i}`);
+        break;
+      }
+    }
+  }
+  assert.ok(seen > 300, `only ${seen} tests`);
+  assert.deepEqual(past, []);
 });

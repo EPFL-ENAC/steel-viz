@@ -437,7 +437,8 @@ export function buildColumn(p: Params, spec: ColumnSpecimen, cat: Catalog, detai
       log.push(`${what} thickness not given, drawn ${t} mm`);
       return t;
     },
-    // the actuator pins, the length of an actuator, the crosshead section
+    // the actuator pins, the length of an axial actuator (also the minimum of
+    // the one that pushes, see pushLength), the crosshead section
     Da: clamp(r5(0.2 * big), 40, 80),
     hz: hingeSize(clamp(r5(0.2 * big), 40, 80)),
     reach: Math.max(1000, 14 * clamp(r5(0.2 * big), 40, 80)),
@@ -457,6 +458,13 @@ export function buildColumn(p: Params, spec: ColumnSpecimen, cat: Catalog, detai
   };
   return { st, parts: forDetail(parts, detail), ok: true, log, ratio: 0, alpha: Infinity, solves: 0, ms: { topology: t1 - t0, solve: 0, geometry: performance.now() - t1 }, nodes: 0, members: {} };
 }
+
+// The length of the actuator that pushes a column, between its mount faces: its
+// two pin joints, then room for the move, k L. b.reach is the minimum. The auto
+// scale (scaleFor) can bring the rotation to 0.25 rad, so a standing column takes
+// k = 0.25. A 3pb column moves half as much, and the real tests need only k = 0.1.
+// deform-rig.test.ts checks them all.
+const pushLength = (b: ColumnBench, k: number) => Math.max(b.reach, r5(2 * b.hz.reach + k * b.L));
 
 // The column standing. Its axis is on z, from z = 0 to its length (the end
 // plates are outside it). The column is turned by `angle` in plan, its web
@@ -511,7 +519,7 @@ function standing(b: ColumnBench) {
 
   // the push: from the wall at -y to the head face, at mid head height
   const zc = zh + hh / 2;
-  const y0 = -hy - reach;
+  const y0 = -hy - pushLength(b, 0.25);
   add(block('rig-wall', [0, y0 - 200, (zf + zc + 400) / 2], [Math.max(600, 2 * hx + 200), 400, zc + 400 - zf], ground('Reaction wall')));
   actuator('rig-actuator', [0, y0, zc], [0, -hy, zc], X, Da, ro(['rig-wall', 'rig-head'])).forEach(add);
   struts.push({ id: 'rig-actuator', from: [0, y0, zc], to: [0, -hy, zc], D: Da, kind: 'actuator' });
@@ -573,7 +581,7 @@ function lying(b: ColumnBench) {
   const zs = 2 * ez + hs; // the loading block top
   const [sx, sy] = [r5(Math.max(hz.side + 60, 0.5 * big)), r5(Math.max(2 * ey + 60, hz.width + 60))];
   add(block('rig-saddle', [0, 0, 2 * ez + hs / 2], [sx, sy, hs], ro(['column'], 'Loading block')));
-  const top = zs + reach; // the crosshead beam bottom
+  const top = zs + pushLength(b, 0.1); // the crosshead beam bottom
   const span = r5(Math.max(rl + 200, sy + 200, 600) + R.d + 200);
   add(crosshead('rig-crosshead', [0, 0, top], Y, span, zf, R, ground()));
   actuator('rig-actuator', [0, 0, top], [0, 0, zs], Y, Da, ro(['rig-crosshead', 'rig-saddle'])).forEach(add);
