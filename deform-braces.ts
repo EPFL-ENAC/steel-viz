@@ -24,7 +24,7 @@ import { dot, mul, sub, type V } from './vec.ts';
 import type { BraceRig, Result, RigStrut } from './generate.ts';
 import type { HubRecord } from './hub.ts';
 import { hingeSize } from './rig.ts';
-import { biggest, follow, I4, movePoint, scaleFor, shift, strut, type DeformState, type DeformTable, type Knot, type M4, type Move, type Sample, type Samples, type Zone } from './deform.ts';
+import { biggest, clevisMove, follow, I4, movePoint, scaleFor, shift, strut, type DeformState, type DeformTable, type Knot, type M4, type Move, type Sample, type Samples, type Zone } from './deform.ts';
 import type { Section } from './sections.ts';
 import type { BraceSpecimen, Specimen } from './specimen.ts';
 import { frame } from './steel.ts';
@@ -182,7 +182,7 @@ function shape(r: Result, spec: Specimen, rec: HubRecord, samples: Samples, scal
   let beam: M4;
   let topEnd: M4;
   if (rig.frame) {
-    const { feet, R, top } = rig.frame;
+    const { feet, top } = rig.frame;
     const u = lines[0].u;
     const z0 = feet[0][2];
     const turn = moved / u[1] / (at(lines[0].o, u, L)[2] - z0);
@@ -194,8 +194,7 @@ function shape(r: Result, spec: Specimen, rec: HubRecord, samples: Samples, scal
     feet.forEach((foot, i) => {
       const name = i ? 'B' : 'A';
       moves[`rig-col${name}`] = { o: foot, u: up, n: [0, 0, 0], knots: [], A: topEnd };
-      // the tongue turns with the column, the ears stay
-      moves[`rig-foot${name}`] = { o: foot, u: up, n: [0, 0, 0], knots: [], A: I4(), B: topEnd, split: [-R, R] };
+      moves[`rig-foot${name}`] = clevisMove(r.parts, `rig-foot${name}`, moves[`rig-col${name}`]);
     });
   } else {
     topEnd = shift(mul(lines[0].u, moved));
@@ -209,7 +208,16 @@ function shape(r: Result, spec: Specimen, rec: HubRecord, samples: Samples, scal
   // goes with the rig, the steel between them takes the change of length.
   lines.forEach((l, i) => {
     const m: Move = { o: l.o, u: l.u, n: l.n, knots: bowKnots(l, ends === 'fixed', steps[i].a), A: I4(), B: topEnd, split: l.free };
-    for (const p of r.parts) if (p.id === l.id || p.id.startsWith(`${l.id}-`)) moves[p.id] = m;
+    for (const p of r.parts) if (!p.joint && (p.id === l.id || p.id.startsWith(`${l.id}-`))) moves[p.id] = m;
+    // A pin end: the mount doesn't bend, it stays at the bottom and goes with
+    // the rig at the top. Only the tongue turns, with the end of the bow.
+    for (const p of r.parts) {
+      if (!p.joint?.of.startsWith(`${l.id}-`)) continue;
+      const top = dot(sub(p.joint.pin, l.o), l.u) > L / 2;
+      const A = top ? topEnd : I4();
+      moves[p.id] = { o: l.o, u: l.u, n: l.n, knots: [], A };
+      moves[p.joint.of] = clevisMove(r.parts, p.joint.of, m, A);
+    }
   });
 
   // the working zones

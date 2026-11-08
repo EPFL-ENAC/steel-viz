@@ -123,6 +123,16 @@ function depth(p: Q, sides: Side[], c: Faces, uin: Q): number {
 // from the rig to the brace (it returns the part the brace stands on), the
 // top end from the brace to the rig. rig: the rig parts it is fixed to.
 type Add = (p: Part) => Part;
+// The add() of a test. A part that stands on others gets the next step, a part
+// on the floor (a block, a wall) step 0, a mount the step of its moving part.
+function adder(parts: Part[]): Add {
+  let step = 1;
+  return (pt) => {
+    pt.step = pt.joint ? parts.find((q) => q.id === pt.joint!.of)!.step : pt.supports.length ? step++ : 0;
+    parts.push(pt);
+    return pt;
+  };
+}
 type End = {
   W: Q; uin: Q; sides: Side[];
   start: number;
@@ -196,7 +206,7 @@ function endOf(spec: BraceSpecimen, sec: Section, sz: EndSize, bid: string, top:
     W, uin, sides, start: T + tp, pts,
     keep: [[pts[0], 60], [pts[1], 60], [P(T, hp), 25], [P(T, -hp), 25], [P(T + tp, hp), 25], [P(T + tp, -hp), 25]],
     build: (c, add, brace, rig) => {
-      const pin = (on: string[]) => add(clevis(`${bid}-${name}-pin`, at(x, M), dir(uin), X, D, hz.reach, { step: 0, supports: on, from: fromDir })).id;
+      const pin = (on: string[]) => clevis(`${bid}-${name}-pin`, at(x, M), dir(uin), X, D, hz.reach, { step: 0, supports: on, from: fromDir }).map(add)[0].id;
       const seatHere = (on: string[]) => seatAt(pts, M, hz.side / 2, hz.width, c, on, add);
       if (brace) return seatHere([pin([plate(plus(W, uin, T), tp, hp, wx, [brace], add)]), ...rig]);
       return plate(plus(W, uin, T), tp, hp, wx, [pin([seatHere(rig)])], add);
@@ -228,8 +238,8 @@ function pinnedFrame(R: Section, yA: number, yB: number, zb: number, zt: number,
   add(rigMember('rig-base', R, [0, axA - 300, zb - dR / 2], [0, axB + 300, zb - dR / 2], ro(['rig-block', 'rig-block2'], 'Base beam')));
   const Df = clamp(r5(0.25 * dR), 40, 100);
   const reach = hingeSize(Df).reach;
-  add(clevis('rig-footA', [0, axA, zb], Z, X, Df, reach, ro(['rig-base'])));
-  add(clevis('rig-footB', [0, axB, zb], Z, X, Df, reach, ro(['rig-base'])));
+  clevis('rig-footA', [0, axA, zb], Z, X, Df, reach, ro(['rig-base'])).forEach(add);
+  clevis('rig-footB', [0, axB, zb], Z, X, Df, reach, ro(['rig-base'])).forEach(add);
   add(rigMember('rig-colA', R, [0, axA, zb + reach], [0, axA, zt], ro(['rig-footA'], 'Frame column')));
   add(rigMember('rig-colB', R, [0, axB, zb + reach], [0, axB, zt], ro(['rig-footB'], 'Frame column')));
   return { axA, axB, zfb, reach };
@@ -304,12 +314,7 @@ export function buildBrace(p: Params, spec: BraceSpecimen, cat: Catalog, detail:
   // the parts, in build order. A part that stands on others gets the next
   // step, a part on the floor (a block, a wall) step 0.
   const parts: Part[] = [];
-  let step = 1;
-  const add: Add = (pt) => {
-    pt.step = pt.supports.length ? step++ : 0;
-    parts.push(pt);
-    return pt;
-  };
+  const add = adder(parts);
   const ro = (supports: string[], type?: string): RigOpts => ({ step: 0, supports, ...(type ? { type } : {}) });
   const ground = (type?: string): RigOpts => ({ step: 0, supports: [], from: [0, 0, -1], ...(type ? { type } : {}) });
   const extent = (en: End) => {
@@ -323,7 +328,7 @@ export function buildBrace(p: Params, spec: BraceSpecimen, cat: Catalog, detail:
     const D = clamp(r5(0.2 * R.d), 40, 80);
     const y0 = y1 + s * Math.max(1000, 14 * D);
     add(block('rig-wall', [0, y0 + s * 200, (zf + zc + 400) / 2], [Math.max(600, R.bf + 200), 400, zc + 400 - zf], ground('Reaction wall')));
-    add(actuator('rig-actuator', [0, y0, zc], [0, y1, zc], X, D, ro(['rig-wall', 'rig-beam'])));
+    actuator('rig-actuator', [0, y0, zc], [0, y1, zc], X, D, ro(['rig-wall', 'rig-beam'])).forEach(add);
     pushing = { from: [0, y0, zc], to: [0, y1, zc], D, kind: 'actuator' };
   };
 
@@ -353,7 +358,7 @@ export function buildBrace(p: Params, spec: BraceSpecimen, cat: Catalog, detail:
     const { axA, axB, zfb } = pinnedFrame(R, yA, yB, zb, zt, add, ro, ground);
     // the foot pins of pinnedFrame()
     const hinge = hingeSize(clamp(r5(0.25 * dR), 40, 100));
-    swaying = { feet: [[0, axA, zb + hinge.pin], [0, axB, zb + hinge.pin]], R: hinge.R, top: zt };
+    swaying = { feet: [[0, axA, zb + hinge.pin], [0, axB, zb + hinge.pin]], top: zt };
     add(rigMember('rig-beam', R, [0, yA - dR, zt + dR / 2], [0, yB + dR, zt + dR / 2], ro(['rig-colA', 'rig-colB'], 'Frame beam')));
     bottomRig.push(['rig-base', 'rig-colA'], ['rig-base', 'rig-colB']);
     topRig.push('rig-beam');
@@ -421,7 +426,6 @@ export function buildColumn(p: Params, spec: ColumnSpecimen, cat: Catalog, detai
   const [sa, ca] = [Math.abs(Math.sin(a)), Math.abs(Math.cos(a))];
   const big = Math.max(sec.d, sec.bf);
   const parts: Part[] = [];
-  let step = 1;
   const b: ColumnBench = {
     p, spec, sec, L, detail, log, a,
     across: sa * sec.d / 2 + ca * sec.bf / 2,
@@ -438,11 +442,7 @@ export function buildColumn(p: Params, spec: ColumnSpecimen, cat: Catalog, detai
     hz: hingeSize(clamp(r5(0.2 * big), 40, 80)),
     reach: Math.max(1000, 14 * clamp(r5(0.2 * big), 40, 80)),
     R: rigSection(cat, Math.max(300, Math.min(600, 0.5 * big + 150))),
-    add: (pt) => {
-      pt.step = pt.supports.length ? step++ : 0;
-      parts.push(pt);
-      return pt;
-    },
+    add: adder(parts),
     ro: (supports, type) => ({ step: 0, supports, ...(type ? { type } : {}) }),
     ground: (type) => ({ step: 0, supports: [], from: [0, 0, -1], ...(type ? { type } : {}) }),
   };
@@ -513,7 +513,7 @@ function standing(b: ColumnBench) {
   const zc = zh + hh / 2;
   const y0 = -hy - reach;
   add(block('rig-wall', [0, y0 - 200, (zf + zc + 400) / 2], [Math.max(600, 2 * hx + 200), 400, zc + 400 - zf], ground('Reaction wall')));
-  add(actuator('rig-actuator', [0, y0, zc], [0, -hy, zc], X, Da, ro(['rig-wall', 'rig-head'])));
+  actuator('rig-actuator', [0, y0, zc], [0, -hy, zc], X, Da, ro(['rig-wall', 'rig-head'])).forEach(add);
   struts.push({ id: 'rig-actuator', from: [0, y0, zc], to: [0, -hy, zc], D: Da, kind: 'actuator' });
 
   // the axial load: the crosshead posts clear the floor block and the wall
@@ -527,11 +527,11 @@ function standing(b: ColumnBench) {
     add(rigMember('rig-spreader', R, [0, -e - hz.side / 2 - 100, zs], [0, e + hz.side / 2 + 100, zs], ro(['rig-crosshead'], 'Spreader beam')));
     for (const [k, s] of [[1, -1], [2, 1]]) {
       const id = `rig-axial${k === 1 ? '' : k}`;
-      add(actuator(id, [0, s * e, top - R.d], [0, s * e, zh + hh], X, Da, ro(['rig-spreader', 'rig-head'])));
+      actuator(id, [0, s * e, top - R.d], [0, s * e, zh + hh], X, Da, ro(['rig-spreader', 'rig-head'])).forEach(add);
       struts.push({ id, from: [0, s * e, top - R.d], to: [0, s * e, zh + hh], D: Da, kind: 'actuator' });
     }
   } else {
-    add(actuator('rig-axial', [0, 0, top], [0, 0, zh + hh], X, Da, ro(['rig-crosshead', 'rig-head'])));
+    actuator('rig-axial', [0, 0, top], [0, 0, zh + hh], X, Da, ro(['rig-crosshead', 'rig-head'])).forEach(add);
     struts.push({ id: 'rig-axial', from: [0, 0, top], to: [0, 0, zh + hh], D: Da, kind: 'actuator' });
   }
 }
@@ -576,7 +576,7 @@ function lying(b: ColumnBench) {
   const top = zs + reach; // the crosshead beam bottom
   const span = r5(Math.max(rl + 200, sy + 200, 600) + R.d + 200);
   add(crosshead('rig-crosshead', [0, 0, top], Y, span, zf, R, ground()));
-  add(actuator('rig-actuator', [0, 0, top], [0, 0, zs], Y, Da, ro(['rig-crosshead', 'rig-saddle'])));
+  actuator('rig-actuator', [0, 0, top], [0, 0, zs], Y, Da, ro(['rig-crosshead', 'rig-saddle'])).forEach(add);
   struts.push({ id: 'rig-actuator', from: [0, 0, top], to: [0, 0, zs], D: Da, kind: 'actuator' });
 
   // the axial load, along x at the column axis
@@ -592,11 +592,10 @@ function lying(b: ColumnBench) {
   }
   const xa = -xe - tp[0] - hz.reach; // the reaction block face
   add(block('rig-block', [xa - 200, 0, (zf + zt) / 2], [400, Wb, zt - zf], ground()));
-  add(clevis('rig-pin', [xa, 0, zc], X, Y, Da, hz.reach, ro(['rig-block'])));
-  rig.pin = { at: [xa, 0, zc], along: X, D: Da };
+  clevis('rig-pin', [xa, 0, zc], X, Y, Da, hz.reach, ro(['rig-block'])).forEach(add);
   const xw = xe + tp[1] + reach; // the reaction wall face
   add(block('rig-wall', [xw + 200, 0, (zf + zt) / 2], [400, Wb, zt - zf], ground('Reaction wall')));
-  add(actuator('rig-axial', [xw, 0, zc], [xe + tp[1], 0, zc], Y, Da, ro(['rig-wall', 'column-end2'])));
+  actuator('rig-axial', [xw, 0, zc], [xe + tp[1], 0, zc], Y, Da, ro(['rig-wall', 'column-end2'])).forEach(add);
   struts.push({ id: 'rig-axial', from: [xw, 0, zc], to: [xe + tp[1], 0, zc], D: Da, kind: 'actuator' });
 }
 
@@ -647,12 +646,7 @@ export function buildLink(p: Params, spec: LinkSpecimen, cat: Catalog, detail: D
   const [px, pz] = [bf + (isolated ? 80 : 100), d + 2 * mz];
 
   const parts: Part[] = [];
-  let step = 1;
-  const add: Add = (pt) => {
-    pt.step = pt.supports.length ? step++ : 0;
-    parts.push(pt);
-    return pt;
-  };
+  const add = adder(parts);
   const ro = (supports: string[], type?: string): RigOpts => ({ step: 0, supports, ...(type ? { type } : {}) });
   const ground = (type?: string): RigOpts => ({ step: 0, supports: [], from: [0, 0, -1], ...(type ? { type } : {}) });
   const R = rigSection(cat, Math.max(300, 1.5 * d), bf);
@@ -712,7 +706,7 @@ export function buildLink(p: Params, spec: LinkSpecimen, cat: Catalog, detail: D
     const top = zLt + Math.max(1000, 14 * Da);
     const span = r5(Math.max(px, R.bf, 600) + R.d + 200);
     add(crosshead('rig-crosshead', [0, yL, top], X, span, 0, R, ground()));
-    add(actuator('rig-actuator', [0, yL, top], [0, yL, zLt], X, Da, ro(['rig-crosshead', 'rig-load'])));
+    actuator('rig-actuator', [0, yL, top], [0, yL, zLt], X, Da, ro(['rig-crosshead', 'rig-load'])).forEach(add);
     rig = { y0: 0, zl, actuator: { from: [0, yL, top], to: [0, yL, zLt], D: Da, kind: 'actuator' } };
   } else {
     // the frame size, from the data or a default
@@ -803,12 +797,11 @@ export function buildLink(p: Params, spec: LinkSpecimen, cat: Catalog, detail: D
     const yw = y1 + s * Math.max(1000, 14 * D);
     const zf = zfb - 400;
     add(block('rig-wall', [0, yw + s * 200, (zf + Hf + 400) / 2], [Math.max(600, R.bf + 200), 400, Hf + 400 - zf], ground('Reaction wall')));
-    add(actuator('rig-actuator', [0, yw, Hf], [0, y1, Hf], X, D, ro(['rig-wall', edge ? 'rig-colB' : 'rig-colA'])));
-    const footD = clamp(r5(0.25 * R.d), 40, 100); // the same as in pinnedFrame()
-    const pin = hingeSize(footD).pin;
+    actuator('rig-actuator', [0, yw, Hf], [0, y1, Hf], X, D, ro(['rig-wall', edge ? 'rig-colB' : 'rig-colA'])).forEach(add);
+    const pin = hingeSize(clamp(r5(0.25 * R.d), 40, 100)).pin; // the foot pins of pinnedFrame()
     rig = {
       y0, zl: Hf, actuator: { from: [0, yw, Hf], to: [0, y1, Hf], D, kind: 'actuator' },
-      frame: { feet: [[0, axA, pin], [0, axB, pin]], footD, side: edge ? 1 : 0, braces: braceRig },
+      frame: { feet: [[0, axA, pin], [0, axB, pin]], side: edge ? 1 : 0, braces: braceRig },
     };
   }
   const nst = parts.filter((q) => q.info?.type === 'Stiffener').length;

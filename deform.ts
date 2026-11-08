@@ -154,6 +154,17 @@ export function strut(p0: V, p1: V, q0: V, q1: V, split: [number, number]): Move
   return { o: p0, u, n: [0, 0, 0], knots: [], A: at(p0, q0), B: at(p1, q1), split };
 }
 
+// The tongue of a clevis: one true turn about its pin, so it keeps its length.
+// Its pin goes with the mount (mount: its move, default: it stays), its end
+// turns toward where `on`, the next part, takes that end.
+export function clevisMove(parts: Part[], id: string, on: Move, mount?: M4): Move {
+  const joint = parts.find((p) => p.joint?.of === id)?.joint;
+  if (!joint) throw new Error(`no mount for the pin joint ${id}`);
+  const { pin, end } = joint;
+  const { o, u, A } = strut(pin, end, mount ? applyM(mount, pin) : pin, movePoint(end, on), [0, 0]);
+  return { o, u, n: [0, 0, 0], knots: [], A };
+}
+
 // ------------------------------------------------------------- the responses
 // One file of a test: resslab-hub-data/<table>/<folder>/<id>.csv, x and y its
 // two columns, for the chart.

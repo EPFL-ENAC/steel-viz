@@ -85,6 +85,7 @@ Play the measured response of a hub test in the 3D view. `deform.ts` is the base
 - [x] Brace tests (`braces`).
 - [x] Column tests and HSS column tests (`columns`, `hss_columns`).
 - [x] EBF link tests (`eccentric_braced_frames`): the link in shear, the frames on their pins, the web zone.
+- [x] Actuators and pinned links pivot on their pins: a joint is cut in a mount and a moving part, the bases stay with what they stand on.
 - [x] RBS: the hinge at the cut, with Z of the cut section.
 - [x] Doubler plates in the panel zone: the elastic estimate of the distortion uses the web and the doublers.
 - [ ] `--step` in the CLI, for one deformed frame. The playground has "Copy SVG at this step".

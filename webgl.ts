@@ -714,6 +714,7 @@ export function createViewer(
     pieces = [];
     const lo = [Infinity, Infinity, Infinity];
     const hi = [-Infinity, -Infinity, -Infinity];
+    const indexOf = new Map(parts.map((q, i) => [q.id, i]));
     parts.forEach((part, pi) => {
       const tri: number[] = [];
       const seg: number[] = [];
@@ -738,12 +739,14 @@ export function createViewer(
         }
       }
       if (!tri.length) return;
+      const tag = (part.joint ? indexOf.get(part.joint.of) ?? pi : pi) + 1;
       const p: Piece = {
         part, base, per: part.dots.length ? heads / part.dots.length : 0,
         fill: fillBuf(tri), lines: seg.length ? lineBuf(seg) : undefined,
         // blue marks the bolts (a head, 13 mm high, gets no outline) and the
-        // round parts (outlined with one weight too)
-        id: [((pi + 1) & 255) / 255, ((pi + 1) >> 8) / 255, part.kind === 'bolts' ? 1 : part.round ? 0.5 : 0],
+        // round parts (outlined with one weight too). A pin joint has one id:
+        // no outline inside it, and a pick gives its moving part.
+        id: [(tag & 255) / 255, (tag >> 8) / 255, part.kind === 'bolts' ? 1 : part.round ? 0.5 : 0],
         off: [0, 0, 0], visible: true, color: fg, width: THIN, move: moveOf(part),
       };
       lineStyle(p);
@@ -878,7 +881,7 @@ export function createViewer(
   // the hovered part: its lines in the accent colour, a bit thicker
   let hovered: Part | null = null;
   function lineStyle(p: Piece) {
-    const on = p.part === hovered;
+    const on = p.part === hovered || (!!hovered && p.part.joint?.of === hovered.id);
     p.color = on || p.part.accent ? accent : p.part.kind === 'rig' ? rig : fg;
     p.width = (two ? THIN : ONE) * (on ? 2 : 1);
   }

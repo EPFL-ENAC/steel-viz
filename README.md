@@ -432,7 +432,11 @@ A `ResponseSpec` has two optional fields for a table whose files don't follow th
 A `Move` is the same for all tables, and the vertex shader does the same math as `movePoint()`:
 
 - `knots`: a bend along the axis. Each knot gives the deflection `w`, the slope `t` and the turn `r` of the cross section. If `r` equals `t`, sections stay square to the axis (bending). If not, the part shears (a panel zone, an EBF link).
-- `A`, `B`, `split`: two rigid moves, blended along the axis. A pin has its tongue on `B` and its ears on `A`. An actuator has its cylinder on `A` and its rod on `B`, so it gets longer. A pinned link has a linear blend.
+- `A`, `B`, `split`: two rigid moves, blended along the axis. An actuator has its cylinder on `A` and its rod on `B`, so it gets longer. A pinned link has a linear blend. A clevis tongue has `A` only: one rigid turn about its pin.
+
+A pin joint is cut in parts, so that only the moving side turns. The mount is the base, the ears and the pin. It stays with the part it stands on. The tongue and what comes after it turn about the pin. `clevis()` returns the tongue and `<id>-mount`. `actuator()` and `link()` return the moving part and two mounts, `<id>-mount-from` and `<id>-mount-to`. The moving part keeps the id of the joint, so a table sets its move with `strutMove()` or `clevisMove()`, and it has nothing to do for a mount that follows its support. A mount has a `joint` field (the moving part, the pin, the tongue end). The drawing and the build use it to see the joint as one part: same lines, same weights, same step, and a hover lights up the whole joint. `deform-rig.test.ts` reads the pins from it. For each joint at the peak step, the test makes sure that the mount doesn't move on a static part, moves with a moving part, and meets the tongue at the pin. It also makes sure that the tongue keeps its length.
+
+A tongue is rigid, so the end of a `rig-pin` tongue can be some mm away from the column end after a big turn.
 
 A `Zone` is a box with a level (1 is the capacity), a `slot` for its color, a label and the ratio it shows. `ResponseSpec.slot` gives the chart the same color. `deform-connection.ts` is the example to copy.
 
@@ -456,7 +460,7 @@ The other rules:
 - The hinge zones are at the base, also at the top for `fixed-fixed`, and at mid span for `3pb`. The level is |M| / Mp. The file has one moment, so the top hinge uses the same level as the base.
 - Mp comes from `axis_of_bending`, not from the folder of the file. `hss_columns` has M in kN m and Mp in kN mm.
 - The axial load does not reduce Mp. We tried the EC3 and AISC rules on the real tests, and they spread the peak levels more. The rail gives P / Py, because a hinge can form below level 1 under a high axial load.
-- The scale can go past what the rig allows. The head can pass the pin of the actuator: the pins then stay two tongues apart, and the foot leaves its support. The shortening stops at half the length. The rail says so in both cases.
+- The scale can go past what the rig allows. The head can pass the pin of the actuator: the pins then stay two tongues apart, and the whole foot (base, ears, pin) leaves its support in one piece, because `actuatorMove()` moves its mount. The shortening stops at half the length. The rail says so in both cases.
 
 ### The drawing
 
@@ -524,7 +528,7 @@ Files:
 - `deform.ts`: the deformed shape of a test, for all tables: how a part moves (`Move`, `movePoint`), the response files (`readResponse`), the steps (`protocol`). See "Deformed shape of a test".
 - `deforms.ts`, `deform-connection.ts`, `deform-braces.ts`: the tables that have a deformed shape, the shape of a beam-to-column test and the shape of a brace test. `deform.test.ts` and `deform-braces.test.ts` check them.
 - `deform-column.ts`: the shape of a column test, for `columns` and `hss_columns`. `deform-column.test.ts` checks it.
-- `rig.ts`: the test rig parts (reaction blocks, pins, links, actuators, rollers, rig frame members).
+- `rig.ts`: the test rig parts (reaction blocks, pins, links, actuators, rollers, rig frame members). A pin joint is several parts: a mount and a moving part.
 - `steel.ts`: geometry (profiles, copes, plates, clevis, bolts), camera and the painter renderer.
 - `clash.ts`: do two parts go through each other (each part as a few boxes).
 - `score.ts`, `pick.ts`: the logo score and the variety, and the scan over many seeds.

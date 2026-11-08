@@ -18,8 +18,7 @@
 import type { V } from './vec.ts';
 import type { Result } from './generate.ts';
 import type { HubRecord } from './hub.ts';
-import { hingeSize } from './rig.ts';
-import { biggest, follow, I4, movePoint, mulM, scaleFor, shift, strut, tilt, type DeformState, type DeformTable, type M4, type Move, type Samples } from './deform.ts';
+import { biggest, clevisMove, follow, I4, movePoint, mulM, scaleFor, shift, strut, tilt, type DeformState, type DeformTable, type M4, type Move, type Samples } from './deform.ts';
 import { firstOf, strutMove } from './deform-connection.ts';
 import type { Specimen } from './specimen.ts';
 
@@ -60,10 +59,8 @@ function shape(r: Result, spec: Specimen, rec: HubRecord, at: Samples, scale: nu
   if (frame) {
     const theta = lift / (frame.feet[1][1] - frame.feet[0][1]);
     [MA, MB] = frame.feet.map((f) => tilt(f, Y, Z, theta));
-    const { R } = hingeSize(frame.footD);
-    // the tongue turns with the column, the ears stay
-    moves['rig-footA'] = { o: frame.feet[0], u: Z, n: Y, knots: [], A: I4(), B: MA, split: [-R, R] };
-    moves['rig-footB'] = { o: frame.feet[1], u: Z, n: Y, knots: [], A: I4(), B: MB, split: [-R, R] };
+    moves['rig-footA'] = clevisMove(r.parts, 'rig-footA', rigid(MA));
+    moves['rig-footB'] = clevisMove(r.parts, 'rig-footB', rigid(MB));
     moves['rig-colA'] = rigid(MA);
     moves['rig-colB'] = rigid(MB);
     moves['rig-beamB'] = rigid(MB);

@@ -169,7 +169,7 @@ const column = (beams: ConnSpecimen['beams']): ConnSpecimen => ({ id: 'test', co
 test('a column alone stands up, in its rig', () => {
   const r = generate({ specimen: column([]) }, cats.aisc);
   assert.ok(r.ok, r.log.join('\n'));
-  assert.deepEqual(r.parts.map((p) => p.id), ['foot-block', 'post', 'foot-pin', 'column-foot', 'column', 'column-cap', 'head', 'top-link']);
+  assert.deepEqual(r.parts.map((p) => p.id), ['foot-block', 'post', 'foot-pin', 'foot-pin-mount', 'column-foot', 'column', 'column-cap', 'head', 'top-link', 'top-link-mount-from', 'top-link-mount-to']);
   assert.deepEqual(clashes(r.parts), []);
   assert.deepEqual(floating(r.parts), []);
 });
