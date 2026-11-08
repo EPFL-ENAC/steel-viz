@@ -19,7 +19,8 @@ export type Dot = { p: V; axis?: V; half?: number; n?: V };
 // a solid box, for the clash check (clash.ts): centre, 3 unit axes, half sizes
 export type Box = { c: V; ax: [V, V, V]; h: [number, number, number] };
 // rig: a part of the test rig (rig.ts), not of the specimen. The renderers draw it lighter.
-export type Kind = 'base' | 'column' | 'plate' | 'member' | 'bolts' | 'rig';
+// slab: the concrete slab of a test (slab.ts). The renderers draw it light, and it hides no steel.
+export type Kind = 'base' | 'column' | 'plate' | 'member' | 'bolts' | 'rig' | 'slab';
 // kind and from: how the part arrives in the build animation (from: the 3D
 // direction it comes from)
 // What a part is, for the tooltip of the playground (the renderers don't read
@@ -48,7 +49,7 @@ export function forSize(parts: Part[], size?: number): Part[] {
   if (!size) return parts;
   return parts
     .filter((p) => !(size <= DETAIL.bolts && p.kind === 'bolts'))
-    .filter((p) => !(size <= DETAIL.plates && p.kind === 'plate'))
+    .filter((p) => !(size <= DETAIL.plates && (p.kind === 'plate' || p.kind === 'slab')))
     .filter((p) => !(size <= DETAIL.secondaries && /^sec\d/.test(p.id)))
     .map((p) => (size <= DETAIL.bolts && p.dots.length ? { ...p, dots: [] } : p));
 }
@@ -61,7 +62,7 @@ export function forSize(parts: Part[], size?: number): Part[] {
 export type Slot = { start: number; dur: number; land: number };
 export const BOLT_MS = 60; // between two bolts of one connection
 export const CRANES = 3;
-const MS: Record<Kind, number> = { base: 350, column: 600, plate: 220, member: 550, bolts: 0, rig: 300 };
+const MS: Record<Kind, number> = { base: 350, column: 600, plate: 220, member: 550, bolts: 0, rig: 300, slab: 300 };
 const GAP = { big: 150, plate: 50 };
 // when the last part lands, in ms
 export const buildEnd = (slots: Map<number, Slot>) => Math.max(0, ...[...slots.values()].map((s) => s.land));
@@ -1273,6 +1274,8 @@ export function render(parts: Part[], o: RenderOpts): { svg: string; faces: numb
     `.steel .e{fill:none}.steel .b{fill:currentColor}.steel .a{color:var(--accent,#e30713)}` +
     // the test rig: grey, thinner
     `.steel .g{color:var(--rig,#9e9e9e)}.steel .g .s,.steel .g .e{stroke-width:${f(+sw * 0.7)}}` +
+    // the slab: no fill, so it hides no steel. Only then, so a seed keeps the same svg.
+    (parts.some((p) => p.kind === 'slab') ? '.steel .n path{fill:none}' : '') +
     (o.animate
       ? `.steel g{animation:sb .5s cubic-bezier(.2,.8,.3,1) both;animation-delay:calc(var(--i)*${o.stepMs ?? 60}ms)}` +
         `@keyframes sb{from{opacity:0;transform:translateY(-${drop}px)}}@media (prefers-reduced-motion:reduce){.steel g{animation:none}}`
@@ -1286,7 +1289,7 @@ export function render(parts: Part[], o: RenderOpts): { svg: string; faces: numb
     if (it.part !== cur) {
       if (cur >= 0) out.push('</g>');
       const p = parts[it.part];
-      const cls = p.accent ? ' class="a"' : p.kind === 'rig' ? ' class="g"' : '';
+      const cls = p.accent ? ' class="a"' : p.kind === 'rig' ? ' class="g"' : p.kind === 'slab' ? ' class="g n"' : '';
       out.push(o.animate ? `<g${cls} style="--i:${p.step}">` : `<g${cls}>`);
       cur = it.part;
     }

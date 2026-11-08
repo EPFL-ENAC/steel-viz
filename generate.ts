@@ -23,6 +23,7 @@ import { BEAM_CONNS, findSection, type BraceSpecimen, type ColumnSpecimen, type 
 import { buildBrace, buildColumn, buildLink } from './bench.ts';
 import { actuator, block, clevis, hingeSize, link } from './rig.ts';
 import { cutBoxes, cutEnd, skewHardware } from './skew.ts';
+import { RIB_PITCH, SLAB_GAP, slabParts, TIP_GAP } from './slab.ts';
 import { drawGable, eaveDepth, gableLog, gableModel, gableParts, thrust, type Gable } from './gable.ts';
 
 export type Detail = 'members' | 'plates' | 'bolts';
@@ -210,6 +211,8 @@ export type Structure = {
   load?: 'beam' | 'column'; minA?: Record<string, number>;
   // a beam-to-column test: the doubler plates on the column web (w: the drawn width)
   doubler?: { n: 1 | 2; t: number; w: number };
+  // a beam-to-column test: the concrete slab (slab.ts)
+  slab?: ConnSpecimen['slab'];
   // a brace test (bench.ts): col is the brace section, H the height of its top work point
   brace?: { frame: BraceSpecimen['frame']; L: number; angle: number; ends: BraceSpecimen['ends'] };
   braceRig?: BraceRig;
@@ -748,7 +751,18 @@ function specimen(spec: ConnSpecimen, cat: Catalog): Structure {
       doubler = { n: dp.n, t: dp.t, w: Math.min(dp.w ?? clear, clear) };
     }
   }
-  return { form: 'specimen', id: spec.id, H, col, cols: [{ x: [0, 0, 0] }], arms, secs: [], base: 'none', continuity: spec.continuity, load, ...(doubler ? { doubler } : {}) };
+  const sl = spec.slab;
+  if (sl && arms.length) {
+    if (sl.ribs !== 'parallel' && sl.ribs !== 'perpendicular') throw bad(`slab: ribs must be parallel or perpendicular, not ${JSON.stringify(sl.ribs)}`);
+    for (const k of ['left', 'right', 'concrete', 'rib', 'ribWidth'] as const)
+      if (!(sl[k] > 0)) throw bad(`slab: ${k} must be a number above 0, not ${JSON.stringify(sl[k])}`);
+    if (sl.ribWidth >= RIB_PITCH) throw bad(`slab: ribWidth ${sl.ribWidth} mm is more than the rib spacing (${RIB_PITCH} mm)`);
+    if (arms.some((a) => a.bearing % 180 === 90)) throw bad('slab: a beam on the column web is not supported yet');
+    if (arms.some((a) => a.z !== arms[0].z)) throw bad('slab: all the beams must be at the same height');
+    const edge = col.bf / 2 + SLAB_GAP;
+    if (Math.min(sl.left, sl.right) <= edge) throw bad(`slab: left ${sl.left} and right ${sl.right} mm must be more than the column opening (${edge} mm)`);
+  }
+  return { form: 'specimen', id: spec.id, H, col, cols: [{ x: [0, 0, 0] }], arms, secs: [], base: 'none', continuity: spec.continuity, load, ...(doubler ? { doubler } : {}), ...(sl && arms.length ? { slab: sl } : {}) };
 }
 
 // ------------------------------------------------------------- test rig
@@ -1716,6 +1730,16 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
   for (const q of out) {
     res.push(q);
     res.push(...kept.filter((k) => extras.find((e) => e.part === k)!.after === q.id));
+  }
+  // the slab goes in here, not in the extras: they drop what doesn't fit, with no error
+  if (rig && st.slab && plates) {
+    const beams = st.arms.map((a) => {
+      const o = start(st, a);
+      const h = hdir(a.bearing);
+      const tip = st.rig!.tips.find((k) => k.arm === a.id)!;
+      return { id: a.id, z: a.z, o, h, end: dot(sub(tip.to, o), h) - 1.3 * tip.D - TIP_GAP };
+    });
+    res.push(...slabParts(st.slab, st.col, beams, across(firstDir(st)), res));
   }
   if (rig) res.push(...rig.above);
   // the mount of a pin joint has the step of its moving part, just before it

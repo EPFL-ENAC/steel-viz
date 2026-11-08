@@ -229,6 +229,7 @@ The pin of the link (or of the actuator) on the head is the top pin of the colum
 - `continuity: false` leaves out the continuity plates. `beams: []` gives a column alone.
 - `doubler: { "n", "t", "w" }`: doubler plates on the column web, in the panel zone (I column only). `n` 1 puts one plate on the −x side of the web (the side the iso view looks at), `n` 2 one on each side. `t` is one plate, `w` its width (by default, and at most, the web between the flanges, centred). They stop at the continuity plates. With no continuity plates, they go 150 mm past the beam flanges, above and below (the usual 6 in).
 - `load`: `beam` (the default) or `column`, what the actuators push (see the rig above).
+- `slab: { "left", "right", "concrete", "rib", "ribWidth", "ribs" }`: the concrete slab on the top flange, in mm (see "The concrete slab"). `ribs` is `parallel` or `perpendicular`.
 
 From a hub record:
 
@@ -249,13 +250,38 @@ From a hub record:
 | BEEP | end plate | |
 | KBB | flange plates | the Kaiser bracket |
 
-What we draw differently from the real test goes into the log as a note: the connection and the slab. A test that is not a subassembly ("Exterior - Frame"), or a missing number, throws an error that names the field.
+What we draw differently from the real test goes into the log as a note: the connection, the RBS cut, what we take for the slab. A test that is not a subassembly ("Exterior - Frame"), or a missing number, throws an error that names the field.
 
 ```sh
 node cli.ts --specimen specimens/Chi_and_Uang_2002_DC2.json --view iso   # writes steel-Chi_and_Uang_2002_DC2-iso.svg
 ```
 
 `--specimen` takes the same drawing options as a seed (`--view`, `--detail`, `--animate`, `--frames`, `--painter`, `--size`). The family comes from `--family`, else from the file, else aisc. `--seed`, `--form`, `--arms` and `--height` don't apply. `specimen.test.ts` covers the two hub files, the format and the errors. `doubler.test.ts` covers the doubler plates: the hub fields, where they sit next to the continuity plates, and the panel zone.
+
+### The concrete slab
+
+14 of the 100 `connections` rows have `slab` YES, and we draw 13 of them. `slab.ts` draws the concrete and the deck ribs on the top flange. The reader takes `w_l`, `w_r`, `h_co`, `h_p`, `b_o` and `deck_ribs_orientation` (`perpenticular` in the data, `perpendicular` also works). If a size is missing, the steel is drawn alone and the log says so.
+
+The data doesn't give all of it, so we take these:
+
+| What | We take | Why |
+|---|---|---|
+| Slab length | from the column to 100 mm before the pin plate at the beam tip | the tip rig stays visible from above |
+| Rib spacing | 305 mm | the usual 12 in of a 2 in or 3 in deck |
+| Rib shape | a rectangle of width `b_o` | `b_o` is the mean width |
+| Left and right | one side for all the beams, `w_r` on the right when you look along the first beam | the data doesn't say which side |
+| Opening | the column plus 25 mm on each side | the column goes through with no clash |
+| Behind the column | interior test: each part stops at the column axis. Exterior test: the slab goes around the column, 100 mm past its back flange | the opening stays closed |
+
+Each beam has its own slab part, with the beam as its support. So in the deformed view the slab moves with its beam through `follow()`, with no crack model. The faces of the slab are cut at the stations of the beam, so it bends the same way. The hinge level stays |M| / Mp of the steel beam alone, and the rail says so. So a test with a slab can go above 1 (`Ricles_et_al_2004_SPEC-2` and `SPEC-5`).
+
+The slab must not hide the RBS cut or the top of the joint, so no renderer lets it hide the steel:
+
+- `renderHLR`: the steel lines are hidden against a scene with no slab, so they stay in full line. The slab lines are hidden against everything, and they have the class `g` of the rig.
+- `render` (painter): the slab has the class `g` and no fill. Its back lines show, this is only the fast view.
+- `createViewer`: a light veil on top of the steel, with its own light lines. The steel under it answers the mouse first.
+
+Only a specimen gets a slab, so the seeds don't change. The studs are inside the concrete, so they aren't drawn.
 
 ### How many hub tests we draw
 
@@ -521,6 +547,7 @@ Files:
 - `checks.ts`: the member checks (AISC 360-22 E3, F2, F6, H1-1).
 - `generate.ts`: topology, the fix loop, trusses and rods, posts and beam splices, and the sizing. Also the specimen path (`buildSpecimen`), and it sends a brace test, a column test (also HSS) or a link test to `bench.ts`.
 - `skew.ts`: the end of a skewed arm: the cut end, its clash boxes, the skewed end plate.
+- `slab.ts`: the concrete slab of a beam-to-column test. See "The concrete slab". `slab.test.ts` checks it.
 - `bench.ts`: a brace test, a column test or an EBF link test in its rig (`buildBrace`, `buildColumn`: standing, or lying for 3PB, `buildLink`).
 - `specimen.ts`, `specimens/`: a real test as input (the `Specimen` type, the section lookup), and hub records as examples and test data.
 - `hub.ts`: reads a record of the hub test tables as a `Specimen` (`toSpecimen` and one reader for each table).

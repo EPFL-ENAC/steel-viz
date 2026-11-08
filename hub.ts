@@ -10,6 +10,7 @@
 // No three.js and no Node API here: index.ts exports it.
 import type { ConnType } from './steel.ts';
 import { hubRbs } from './rbs.ts';
+import { SLAB_NOTE } from './slab.ts';
 import { LINK_CONFIGS, type BraceSpecimen, type ColumnSpecimen, type ConnSpecimen, type LinkSpecimen, type SectionRef, type Specimen, type SpecimenBeam } from './specimen.ts';
 
 export type HubRecord = Record<string, unknown>;
@@ -94,14 +95,28 @@ export function fromHubConnection(rec: HubRecord): ConnSpecimen {
   const ndp = value('n_dp');
   if (ndp > 0 && ndp !== 1 && ndp !== 2) throw unsupported('n_dp');
   const doubler = ndp > 0 ? { n: ndp as 1 | 2, t: num('t_dp'), ...(Number.isFinite(value('wd')) ? { w: num('wd') } : {}) } : undefined;
-  const slab = rec.slab;
-  if (slab === true || /^(YES|TRUE)$/i.test(text('slab'))) notes.push('the concrete slab is not drawn yet');
+  const slab = hubSlab(rec, id, notes);
   const tcp = value('t_cp');
 
   const beams: SpecimenBeam[] = (interior ? [0, 180] as const : [0] as const).map((bearing) => ({
     section: beam, bearing, length: interior ? lb / 2 : exterior, connection, ...(cut?.rbs ? { rbs: cut.rbs } : {}),
   }));
-  return { id, column: { section: column, height }, beams, continuity: tcp > 0, load, notes, ...(doubler ? { doubler } : {}) };
+  return { id, column: { section: column, height }, beams, continuity: tcp > 0, load, notes, ...(doubler ? { doubler } : {}), ...(slab ? { slab } : {}) };
+}
+
+// The concrete slab of a connection record. The data writes "perpenticular".
+// With a size missing, the test keeps its steel and gets a note.
+function hubSlab(rec: HubRecord, id: string, notes: string[]): ConnSpecimen['slab'] {
+  const { text, value, num, unsupported } = fields(rec, id);
+  if (rec.slab !== true && !/^(YES|TRUE)$/i.test(text('slab'))) return undefined;
+  const orientation = text('deck_ribs_orientation').toLowerCase();
+  if (orientation && !/^(parallel|perpendicular|perpenticular)$/.test(orientation)) throw unsupported('deck_ribs_orientation');
+  if (!orientation || !['w_l', 'w_r', 'h_co', 'h_p', 'b_o'].every((f) => value(f) > 0)) {
+    notes.push('the slab sizes are missing, the slab is not drawn');
+    return undefined;
+  }
+  notes.push(SLAB_NOTE);
+  return { left: num('w_l'), right: num('w_r'), concrete: num('h_co'), rib: num('h_p'), ribWidth: num('b_o'), ribs: orientation === 'parallel' ? 'parallel' : 'perpendicular' };
 }
 
 // ------------------------------------------------------------- braces

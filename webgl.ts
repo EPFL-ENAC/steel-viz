@@ -30,6 +30,7 @@ const DEEP = 50; // mm: a jump in depth bigger than this makes an outline
 const THIN = 1; // px
 const THICK = 2.25; // px
 const ONE = 1.6; // px, the lines with one weight
+const VEIL = 0.3; // how far the slab goes toward the rig color
 
 // rig: the lines of the test rig (default: half way between fg and bg).
 // zones: the color of the working zones, by Zone.slot (default: accent)
@@ -538,14 +539,15 @@ export function createViewer(
     return zs.length;
   };
   // the faces, with their part id as colour (ids) or the background. The rig
-  // and the bolts take no zone color.
-  const fills = (M: Float32Array, ids: boolean) => {
+  // and the bolts take no zone color. The slab has its own pass (veil), so the
+  // steel under it keeps its faces, its lines and its outlines.
+  const fills = (M: Float32Array, ids: boolean, slab = false) => {
     const P = ids ? fillP : zoneP;
     gl.useProgram(P.p);
     gl.uniformMatrix4fv(P.u.M, false, M);
     const nz = ids ? 0 : zonesIn(P);
     for (const p of pieces) {
-      if (!p.visible || !p.fill.draw) continue;
+      if (!p.visible || !p.fill.draw || (p.part.kind === 'slab') !== slab) continue;
       gl.uniform3fv(P.u.off, p.off);
       gl.uniform4f(P.u.color, ...(ids ? p.id : bg), 1);
       if (!ids) gl.uniform1i(P.u.nz, p.part.kind === 'rig' || p.part.kind === 'bolts' ? 0 : nz);
@@ -554,12 +556,12 @@ export function createViewer(
       gl.drawArrays(gl.TRIANGLES, 0, p.fill.draw);
     }
   };
-  const lines = (M: Float32Array) => {
+  const lines = (M: Float32Array, slab = false) => {
     gl.useProgram(lineP.p);
     gl.uniformMatrix4fv(lineP.u.M, false, M);
     gl.uniform2f(lineP.u.res, canvas.width, canvas.height);
     for (const p of pieces) {
-      if (!p.visible || !p.lines?.draw) continue;
+      if (!p.visible || !p.lines?.draw || (p.part.kind === 'slab') !== slab) continue;
       gl.uniform3fv(lineP.u.off, p.off);
       gl.uniform4f(lineP.u.color, ...p.color, 1);
       gl.uniform1f(lineP.u.width, p.width);
@@ -567,6 +569,34 @@ export function createViewer(
       gl.bindVertexArray(p.lines.vao);
       gl.drawElementsInstanced(gl.TRIANGLES, QUAD_IDX.length, gl.UNSIGNED_SHORT, 0, p.lines.draw);
     }
+  };
+  // The slab, as a light veil on top of the steel. The depth goes first, so each
+  // pixel gets the color once and the veil stays even. Steel in front hides it.
+  const veil = (M: Float32Array) => {
+    const slabs = pieces.filter((p) => p.visible && p.fill.draw && p.part.kind === 'slab');
+    if (!slabs.length) return;
+    gl.useProgram(fillP.p);
+    gl.uniformMatrix4fv(fillP.u.M, false, M);
+    const draw = () => {
+      for (const p of slabs) {
+        gl.uniform3fv(fillP.u.off, p.off);
+        gl.uniform4f(fillP.u.color, ...rig, VEIL);
+        moveBy(fillP, p.move);
+        gl.bindVertexArray(p.fill.vao);
+        gl.drawArrays(gl.TRIANGLES, 0, p.fill.draw);
+      }
+    };
+    gl.enable(gl.POLYGON_OFFSET_FILL);
+    gl.colorMask(false, false, false, false);
+    draw();
+    gl.colorMask(true, true, true, true);
+    gl.depthMask(false);
+    gl.enable(gl.BLEND);
+    draw();
+    gl.disable(gl.BLEND);
+    gl.depthMask(true);
+    gl.disable(gl.POLYGON_OFFSET_FILL);
+    lines(M, true);
   };
   const tex = (unit: number, t: WebGLTexture, loc: WebGLUniformLocation | null) => {
     gl.activeTexture(gl.TEXTURE0 + unit);
@@ -619,6 +649,7 @@ export function createViewer(
     fills(M, false);
     gl.disable(gl.POLYGON_OFFSET_FILL);
     lines(M);
+    veil(M);
     if (outlines) {
       gl.disable(gl.DEPTH_TEST);
       gl.enable(gl.BLEND);
@@ -680,7 +711,7 @@ export function createViewer(
         return;
       }
       const k = ease(Math.min(1, Math.max(0, (t - sl.start) / sl.dur)));
-      const far = p.part.kind === 'plate' || p.part.kind === 'base' ? 0.12 * radius : 2.6 * radius;
+      const far = p.part.kind === 'plate' || p.part.kind === 'base' || p.part.kind === 'slab' ? 0.12 * radius : 2.6 * radius;
       p.off = mul(anim!.dirs[i], far * (1 - k));
     });
     if (t < anim.end) return true;
@@ -873,8 +904,15 @@ export function createViewer(
     gl.depthMask(true);
     gl.clearColor(0, 0, 0, 1);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-    fills(matrix([x, y]), true);
+    const m = matrix([x, y]);
+    fills(m, true);
     gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
+    // the steel answers first, also under the slab
+    if (!shown[pixel[0] + pixel[1] * 256 - 1]) {
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      fills(m, true, true);
+      gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
+    }
     bind(null);
     return shown[pixel[0] + pixel[1] * 256 - 1] ?? null;
   };
@@ -882,7 +920,7 @@ export function createViewer(
   let hovered: Part | null = null;
   function lineStyle(p: Piece) {
     const on = p.part === hovered || (!!hovered && p.part.joint?.of === hovered.id);
-    p.color = on || p.part.accent ? accent : p.part.kind === 'rig' ? rig : fg;
+    p.color = on || p.part.accent ? accent : p.part.kind === 'rig' || p.part.kind === 'slab' ? rig : fg;
     p.width = (two ? THIN : ONE) * (on ? 2 : 1);
   }
   const setHover = (part: Part | null, x = 0, y = 0) => {
