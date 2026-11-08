@@ -62,7 +62,7 @@ The specimen input draws five tables of the hub, each test in its test rig. `nod
 - [x] RBS: the cut in the beam flanges. Where it starts and how long it is come from the AISC 358 rule, the data doesn't give them.
 - [x] WUF-B: the bolted shear tab on the beam web, next to the welded flanges. Done: `welded_tab`, the tab has the size of the shear tab (`t_pl` is NA).
 - [ ] KBB: the Kaiser bracket, today drawn as bolted flange plates. WFP: welded flange plates, today drawn bolted.
-- [ ] Doubler plates on the column web (`n_dp`).
+- [x] Doubler plates on the column web (`n_dp`).
 - [ ] The concrete slab (`slab`).
 - [ ] Continuity plates as thick as in the test (`t_cp`). Today they take the thickness of the column flange.
 - [ ] "Exterior - Frame" (one test in the hub, Del_Caprio_et_al_2014_RBS-A).
@@ -86,7 +86,7 @@ Play the measured response of a hub test in the 3D view. `deform.ts` is the base
 - [x] Column tests and HSS column tests (`columns`, `hss_columns`).
 - [x] EBF link tests (`eccentric_braced_frames`): the link in shear, the frames on their pins, the web zone.
 - [x] RBS: the hinge at the cut, with Z of the cut section.
-- [ ] Doubler plates in the panel zone: the elastic estimate of the distortion uses the column web alone.
+- [x] Doubler plates in the panel zone: the elastic estimate of the distortion uses the web and the doublers.
 - [ ] `--step` in the CLI, for one deformed frame. The playground has "Copy SVG at this step".
 
 ## Playground

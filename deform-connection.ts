@@ -98,7 +98,8 @@ function readStep(at: Samples, g: Geometry, r: Result, rec: HubRecord, spec: Ext
   const fromChord = chord.some(Boolean) ? mean(chord.map((c, i) => (c ? (c.along * beams[i].free) / beams[i].tip : 0))) : undefined;
   const drifts0 = global.map((s) => s?.along);
   const known = drifts0.filter((x) => x !== undefined) as number[];
-  const elastic = (shear * 1000) / (G * st.col.d * st.col.tw);
+  // the web and its doubler plates
+  const elastic = (shear * 1000) / (G * st.col.d * (st.col.tw + (st.doubler ? st.doubler.n * st.doubler.t : 0)));
   const theta0 = known.length ? mean(known) : (at.Panel_zone?.along ?? 0) + (fromChord ?? 0);
   const gamma = at.Panel_zone ? at.Panel_zone.along : Math.sign(theta0) * Math.min(elastic, Math.abs(theta0) / 2);
   const phiB = fromChord ?? (theta0 - gamma) / 2;

@@ -116,8 +116,8 @@ test('the hub connection types and the notes', () => {
   assert.equal(conn('BEEP').beams[0].connection, 'end_plate');
   assert.match(conn('KBB').notes!.join(), /Kaiser/);
   assert.match(conn('XYZ').notes!.join(), /not known/);
-  const s = fromHubConnection({ ...base, n_dp: 2, slab: true });
-  assert.match(s.notes!.join(), /doubler/);
+  const s = fromHubConnection({ ...base, n_dp: 2, t_dp: 12.7, slab: true });
+  assert.deepEqual(s.doubler, { n: 2, t: 12.7 });
   assert.match(s.notes!.join(), /slab/);
   // a free text name: the id comes from the dimensions
   assert.equal((fromHubConnection({ ...base, section_c: 'build up H section' }).column.section as { id: string }).id, 'H 713.74x355.6x19.05x34.036');
