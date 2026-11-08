@@ -25,7 +25,13 @@ node pick.ts --count 150 --top 12 --sheet best.html
 node pick.ts --by variety --top 12 --sheet v.html  # sort by the kinds of detail (score.ts), or --by mix
 node cli.ts --specimen specimens/Chi_and_Uang_2002_DC2.json --view iso   # a real test from a JSON file (specimen.ts)
 node hub-count.ts         # how many tests of each hub table we draw (needs resslab-hub-data next to the repo, or give its path)
+node shot.ts connections/Lee_et_al_2002_CR1 --out cr1.png            # a PNG of the 3D view, at rest
+node shot.ts connections/Lee_et_al_2002_CR1 --step 440 --out cr1.png # at one step
+node shot.ts connections/Lee_et_al_2002_CR1 --peak --out cr1.png     # at the step with the biggest move of one point
+node shot.ts --seed 5 --out s5.png                                   # a seed. Also --az and --el for the angle, --dpr for more pixels (default 2)
 ```
+
+To look at what you change in the 3D view, you must use `shot.ts` and read the PNG (the Read tool shows images). `curl` can't reach the playground pane from the sandbox, and `shot.ts` doesn't need it: it starts its own Vite and its own headless Chrome and stops them at the end. It prints the notes of the rail and the page errors, and it exits 1 on a page error or when there is no canvas. It needs `google-chrome` on the PATH, or the env `CHROME`. A reaction wall can hide an actuator, so try another angle before you say a part is missing.
 
 Run `node --test` after every change to `generate.ts`, `gable.ts`, `steel.ts`, `skew.ts`, `slab.ts`, `clash.ts`, `bench.ts`, `rig.ts`, `hub.ts` or `deform*.ts`. `cli.ts` prints the solver log, the part count and `FLOATING` if a part comes before the part it stands on. It's the fastest way to look at one seed.
 
@@ -42,6 +48,8 @@ Node only strips the types. `pnpm run type-check` checks them (`tsc` with `tscon
 7. The deformed shape of a hub test: `deform.ts` has what all tables share (`Move`, `readResponse`, `protocol`), `DEFORMS` in `deforms.ts` lists the tables, `deform-connection.ts` is the first one, `deform-braces.ts` is the brace tests (its bow stays at real size, only the axial move takes the scale), `deform-column.ts` has one model for `columns` and `hss_columns` (`st.columnRig` gives it the rig). `deform-links.ts` has the EBF links. `viewer.deform(state)` in `webgl.ts` bends in the vertex shader: its `MOVE` chunk and `movePoint()` must stay the same math. `app/response.ts` holds the step and the shape, `app/Response.vue` is the control. A new table needs no change in `app/` or `webgl.ts`: the README says what to do. `deform*.ts` must not import `tables.ts` (no Node API). The shape is schematic, the UI must keep saying so.
 
 `hub-count.ts` is a Node script, the core never imports it. It reads every table of `HUB_TABLES` (in `tables.ts`, with `findHubData()`) from `resslab-hub-data` (read only, never write in it) and prints how many tests we draw, with the errors grouped by field. `hub.test.ts` runs the same loop and fails on a clash, a floating part or an error in another form. CI has no copy of the data, so there it is skipped.
+
+`shot.ts` is a Node script too. The core never imports it, and it isn't in the package. `shot.test.ts` tests only what runs without Chrome (the arguments, the peak step), because CI has no Chrome. The script reads the tests like the page does, with its own small loader, because `app/dev-plugin.ts` loads `esbuild`.
 
 Seeds must stay stable. `generate()` uses a separate `mulberry32` random stream for each stage (form, topology, trusses and rods, details). When you add a new random feature, give it its own stream. If it takes draws from the main `rng`, every seed after it changes, and the seeds picked for the logo change too. The shape of a member (`shapeP`: double angle brace, channel secondary, tee chord) is one draw per member, seeded from the seed and the member id (`shaped()` in `generate.ts`), so it doesn't depend on the order of the other draws.
 
