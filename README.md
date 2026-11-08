@@ -106,8 +106,11 @@ Each beam end has one kind of connection. The kinds are a small catalog, `CONNS`
 | stiffened seat | `stiffened_seat` | column flange, column web | pin | a seat plate under the bottom flange on a welded stiffener, and a small angle on the top flange |
 | tee | `tee` | column flange, column web, beam | pin | a WT: its flange bolted to the face, its stem bolted to the beam web. On a channel, the stem is on the side away from its flanges. |
 | stiffened end plate | `end_plate_stiffened` | column flange, column web | moment | the extended end plate, with a triangle stiffener above the top flange and below the bottom flange |
+| welded flanges, bolted web | `welded_tab` | column flange, column web | moment | the flanges welded like `welded`, and the shear tab on the web |
 
 The fix loop and the sizing only use the first four kinds. The other five come after, from a draw of their own (`connKindsP`, 0.35 by default). Each beam end takes one draw, keyed by its id like the member shapes, so the result doesn't depend on the order of the draws. Under `connKindsP`, the end gets a kind that can take the place of the one it has, and that fits where it lands. Clip angles, the two seats and the tee take the place of a shear tab. The stiffened end plate takes the place of an end plate. Each one has the same pin or moment and the same setback as the kind it replaces. So the solver, the sections and the members don't change, only the plates at the end. A secondary beam on a beam can only get clip angles or a tee. A truss chord keeps its kind.
+
+`welded_tab` is for the WUF-B tests of the hub. No random draw picks it, only `--conn welded_tab` or a specimen. Its tab has the size of the shear tab: 10 mm thick, 115 mm from the face, one line of 2 to 8 bolts at 75 mm, as many as the clear web of the beam takes.
 
 The column splice keeps clear of the seats and the end plates. A new kind that would go through another part goes back to the old one. With `connKindsP` at 0, a seed gives the same parts as before these kinds (`params-conn-kinds-off.test.ts` checks it). With `--conn` set to one kind, there is no draw: every beam end that can take it gets it.
 
@@ -194,7 +197,7 @@ It can also draw a real test of RESSLab Hub instead of a seed: a specimen. For n
 - An HSS column test: one square or rectangular tube, standing like a column test, or lying on two rollers and pushed at mid span. That's the `hss_columns` table, all its 284 tests. See "HSS column tests" below.
 - An EBF link test: the link of an eccentrically braced frame (the short piece of beam that yields in shear), alone or in a one bay frame. That's the `eccentric_braced_frames` table, all its 240 tests. See "EBF link tests" below.
 
-The sections are the real ones, so there is no fix loop and no sizing. The solver runs once, and the log gives `alphaCr` and the max ratio under `--load`, only as information. The end plates and the continuity plates are drawn. Splices, foot gussets, trusses, rods and posts are not.
+The sections are the real ones, so there is no fix loop and no sizing. The solver runs once, and the log gives `alphaCr` and the max ratio under `--load`, only as information. The end plates, the continuity plates and the doubler plates are drawn. Splices, foot gussets, trusses, rods and posts are not.
 
 The test rig is drawn with lighter lines (parts of kind `rig`, built with `rig.ts`). The column has an end plate on each end. A pin on a floor block holds its foot. A loading head sits on the top end plate. All the pins turn about the same axis, at right angles to the plane of the first beam.
 
@@ -222,8 +225,9 @@ The pin of the link (or of the actuator) on the head is the top pin of the colum
 - `bearing`: 0 and 180 put the beam on a column flange, 90 and 270 on the web.
 - `length`: from the column axis to the beam tip, in mm.
 - `at`: the height of the beam centre line above the column foot. By default, half the column height.
-- `connection`: one of the kinds of "Beam end connections" above that fit a column (`shear_tab`, `end_plate`, `flange_plates`, `welded`, `clip_angles`, `seated`, `stiffened_seat`, `tee`, `end_plate_stiffened`). A beam alone on a pinned kind (a shear tab, clip angles, a seat, a tee) is a mechanism: the log says so, and the drawing still comes out.
+- `connection`: one of the kinds of "Beam end connections" above that fit a column (`shear_tab`, `end_plate`, `flange_plates`, `welded`, `clip_angles`, `seated`, `stiffened_seat`, `tee`, `end_plate_stiffened`, `welded_tab`). A beam alone on a pinned kind (a shear tab, clip angles, a seat, a tee) is a mechanism: the log says so, and the drawing still comes out.
 - `continuity: false` leaves out the continuity plates. `beams: []` gives a column alone.
+- `doubler: { "n", "t", "w" }`: doubler plates on the column web, in the panel zone (I column only). `n` 1 puts one plate on the −x side of the web (the side the iso view looks at), `n` 2 one on each side. `t` is one plate, `w` its width (by default, and at most, the web between the flanges, centred). They stop at the continuity plates. With no continuity plates, they go 150 mm past the beam flanges, above and below (the usual 6 in).
 - `load`: `beam` (the default) or `column`, what the actuators push (see the rig above).
 
 From a hub record:
@@ -231,26 +235,27 @@ From a hub record:
 - The sections come from the numbers (`d_c b_cf t_cf t_cw`, `d_b b_bf t_bf t_bw`), not from the names. The names are free text (`build up H section`) and don't link to the section tables.
 - An exterior test has one beam of length `l_b`. Some exterior tests give the whole span in `l_b`: if `l_o` is under 0.7 `l_fc`, the beam ends at `l_o` from the column face. An interior test has two, one on each flange, `l_b / 2` each (there `l_b` is the whole span). The beams are at half the column height `h_c`.
 - `t_cp` 0 means no continuity plates.
+- `n_dp` 1 or 2 gives the doubler plates: `t_dp` is one plate, `wd` its width. The data has no height (`dz` is the clear depth between the beam flanges): we take the rule of `doubler` above. For `n_dp` 1 the data doesn't say which side, we draw it on −x.
 - `specimen_type` gives the load: "Interior - Column Loaded - Subassembly" is column loaded.
 - The connection is the closest one we can draw:
 
 | hub | drawn as | not drawn yet |
 |---|---|---|
 | WUF-W | welded | |
-| WUF-B | welded | the bolted shear tab on the beam web |
-| RBS | welded | the cut in the beam flanges |
+| WUF-B | welded flanges, bolted web (the tab has the shear tab size, `t_pl` is NA) | |
+| RBS | welded, with the cut in the beam flanges (`rbs.ts`) | where the cut is and how long: the data doesn't say, so we take a = 0.625 `b_bf` from the column face and b = 0.75 `d_b` (the middle of the AISC 358 ranges). The depth comes from `b_bf_rbs` |
 | BFP | flange plates | |
 | WFP | flange plates | the plates are welded, we draw them bolted |
 | BEEP | end plate | |
 | KBB | flange plates | the Kaiser bracket |
 
-What we draw differently from the real test goes into the log as a note: the connection, the doubler plates (`n_dp`) and the slab. A test that is not a subassembly ("Exterior - Frame"), or a missing number, throws an error that names the field.
+What we draw differently from the real test goes into the log as a note: the connection and the slab. A test that is not a subassembly ("Exterior - Frame"), or a missing number, throws an error that names the field.
 
 ```sh
 node cli.ts --specimen specimens/Chi_and_Uang_2002_DC2.json --view iso   # writes steel-Chi_and_Uang_2002_DC2-iso.svg
 ```
 
-`--specimen` takes the same drawing options as a seed (`--view`, `--detail`, `--animate`, `--frames`, `--painter`, `--size`). The family comes from `--family`, else from the file, else aisc. `--seed`, `--form`, `--arms` and `--height` don't apply. `specimen.test.ts` covers the two hub files, the format and the errors.
+`--specimen` takes the same drawing options as a seed (`--view`, `--detail`, `--animate`, `--frames`, `--painter`, `--size`). The family comes from `--family`, else from the file, else aisc. `--seed`, `--form`, `--arms` and `--height` don't apply. `specimen.test.ts` covers the two hub files, the format and the errors. `doubler.test.ts` covers the doubler plates: the hub fields, where they sit next to the continuity plates, and the panel zone.
 
 ### How many hub tests we draw
 
@@ -382,12 +387,12 @@ The connection model is in `deform-connection.ts`. The column turns with the dri
 
 A test doesn't always have all the files. The rail lists what we estimate instead:
 
-- No `Panel_zone` file: the elastic distortion V / (G d_c t_cw), at most θ / 2.
+- No `Panel_zone` file: the elastic distortion V / (G d_c (t_cw + n_dp t_dp)), at most θ / 2. The doubler plates take shear with the web.
 - No beam file: half of what is left of the drift goes to the beam, half to the column. The moment comes from the actuator force.
 
 The colors come from the data, and the rail shows each value next to its color:
 
-- Beam hinge, in orange: |M| / Mp at the column face, over one beam depth. Mp is `z_xb` times the beam yield stress. An RBS test uses the Z of the full beam, because the cut isn't drawn yet.
+- Beam hinge, in orange: |M| / Mp at the column face, over one beam depth. Mp is `z_xb` times the beam yield stress. On an RBS test the hinge is at the center of the cut, s = a + b / 2 from the column face, over the length of the cut. M at the cut is M at the face times (l_o - s) / l_o: with the beam file l_o is `l_o` of the record, with Global it is the lever of the actuator force. Mp is `z_xb_rbs` times the same yield stress.
 - Panel zone, in blue: |V| / Rn, between the beam flanges. Rn is `r_n_pl_m_aisc`, else `r_n_pl_n_aisc`, else `r_n_el_n_aisc`.
 
 A test with a missing capacity has no zone for it, and the rail says why. A test with only a `Panel_zone` file has no force, so it has no beam hinge zone, and the rail says why too.

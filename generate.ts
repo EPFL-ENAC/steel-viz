@@ -16,7 +16,7 @@ import type { Catalog, Section } from './sections.ts';
 import { ANGLE_GAP, rodSection } from './sections.ts';
 import {
   box3, boxOf, flat, geo, hardware, isRound, memberBoxes, memberFaces, resolve, splicePlates, stiffener, supportFace, BEARING_T, BEAM_CONN_KINDS, CONNS, EDGE, PINNED, SETBACK, SPLICE_HALF,
-  type BeamConn, type ConnType, type Fit, type Geo, type P2, type Part, type PartInfo, type Plate,
+  type BeamConn, type ConnType, type Fit, type Geo, type P2, type Part, type PartInfo, type Plate, type Rbs,
 } from './steel.ts';
 import { overlap, own } from './clash.ts';
 import { BEAM_CONNS, findSection, type BraceSpecimen, type ColumnSpecimen, type ConnSpecimen, type LinkSpecimen, type Specimen } from './specimen.ts';
@@ -140,6 +140,7 @@ type Brace = { a: number; zb: number; sec: Section; end: 0 | 1; x?: XKind; cap?:
 type Arm = {
   id: string; col: number; to?: number; z: number; bearing: number; L: number; conn: ConnType; conn2?: ConnType; sec: Section; braces: Brace[];
   truss?: Truss; rod?: Rod; post?: Post; splice?: number; face?: number; skew?: number; gable?: Gable;
+  rbs?: Rbs; // a reduced beam section, mm from the column face (specimens only)
 };
 // A post on the top flange of a beam, `a` along it, `h` high from the top of
 // the beam to the top of its cap plate. Free at the top, where it brings a
@@ -207,6 +208,8 @@ export type LinkRig = {
 export type Structure = {
   form: Form | 'specimen'; id?: string; H: number; col: Section; cols: Col[]; arms: Arm[]; secs: Secondary[]; splice?: Splice; base?: Base; continuity?: boolean;
   load?: 'beam' | 'column'; minA?: Record<string, number>;
+  // a beam-to-column test: the doubler plates on the column web (w: the drawn width)
+  doubler?: { n: 1 | 2; t: number; w: number };
   // a brace test (bench.ts): col is the brace section, H the height of its top work point
   brace?: { frame: BraceSpecimen['frame']; L: number; angle: number; ends: BraceSpecimen['ends'] };
   braceRig?: BraceRig;
@@ -723,12 +726,29 @@ function specimen(spec: ConnSpecimen, cat: Catalog): Structure {
     if (onWeb && col.kind === 'I' && sec.bf + 20 > col.d - 2 * col.tf) throw bad(`${id}: the beam (bf ${sec.bf} mm) does not fit between the column flanges`);
     const z = (b.at ?? H / 2) + sec.d / 2; // top of steel
     if (z > H || z - sec.d < 0) throw bad(`${id}: the beam is not inside the column height (0 to ${H} mm)`);
-    return { id, col: 0, z, bearing: b.bearing, L: b.length, conn: b.connection, sec, braces: [] };
+    const { rbs } = b;
+    if (rbs) {
+      const ok = sec.kind === 'I' && rbs.a >= 0 && rbs.b > 0 && rbs.c > 0 && rbs.c < (sec.bf - sec.tw) / 2 - 5 && face + rbs.a + rbs.b < b.length - 100;
+      if (!ok) throw bad(`${id}: the RBS cut (a ${rbs.a}, b ${rbs.b}, c ${rbs.c} mm) does not fit in the beam`);
+    }
+    return { id, col: 0, z, bearing: b.bearing, L: b.length, conn: b.connection, sec, braces: [], ...(rbs ? { rbs } : {}) };
   });
   for (const a of arms)
     for (const o of arms)
       if (a !== o && a.bearing === o.bearing && a.z - a.sec.d < o.z && o.z - o.sec.d < a.z) throw bad(`${a.id} and ${o.id} are on the same face at the same height`);
-  return { form: 'specimen', id: spec.id, H, col, cols: [{ x: [0, 0, 0] }], arms, secs: [], base: 'none', continuity: spec.continuity, load };
+  const dp = spec.doubler;
+  let doubler: Structure['doubler'];
+  if (dp) {
+    if (dp.n !== 1 && dp.n !== 2) throw bad(`doubler: n must be 1 or 2, not ${JSON.stringify(dp.n)}`);
+    if (!(dp.t > 0)) throw bad(`doubler: t must be a number above 0, not ${JSON.stringify(dp.t)}`);
+    if (dp.w !== undefined && !(dp.w > 0)) throw bad(`doubler: w must be a number above 0, not ${JSON.stringify(dp.w)}`);
+    if (col.kind !== 'I') throw bad('doubler plates need an I column');
+    if (arms.length) {
+      const clear = col.d - 2 * col.tf;
+      doubler = { n: dp.n, t: dp.t, w: Math.min(dp.w ?? clear, clear) };
+    }
+  }
+  return { form: 'specimen', id: spec.id, H, col, cols: [{ x: [0, 0, 0] }], arms, secs: [], base: 'none', continuity: spec.continuity, load, ...(doubler ? { doubler } : {}) };
 }
 
 // ------------------------------------------------------------- test rig
@@ -1599,7 +1619,8 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
       ends.push({ S: Sj, sId: Sj.id, conn: a.conn2!, at: 'to' });
     }
     const g = geo(a.id, a.sec, p0, p1, true);
-    const beam = (a.to === undefined ? 'Cantilever beam' : 'Bay beam') + (a.skew ? `, skewed ${Math.abs(a.skew)}°` : '');
+    if (a.rbs) g.rbs = { ...a.rbs, a: a.rbs.a - SETBACK[a.conn] };
+    const beam = (a.to === undefined ? 'Cantilever beam' : 'Bay beam') + (a.skew ? `, skewed ${Math.abs(a.skew)}°` : '') + (a.rbs ? ', RBS' : '');
     // an arm slides in along its axis, a bay beam is lowered between its columns
     if (a.splice === undefined) {
       armGeo.set(a.id, g);
@@ -1681,7 +1702,7 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
     const g = geo(s.id, s.sec, add(at, mul(side, supportFace(ag, side) + SETBACK[s.conn])), add(at, mul(side, s.L)), true);
     member(g, [{ S: ag, sId: ag.id, conn: s.conn, at: 'from' }], side, 'Secondary beam', s.id);
   }
-  details(st, cols, armGeo, colAt, extra);
+  details(st, cols, armGeo, colAt, extra, seg);
 
   // keep the details that fit: one that goes through a part already there is left out
   const kept: Part[] = [];
@@ -1714,7 +1735,7 @@ const pieceAt = (armGeo: Map<string, Geo>, a: Arm, t: number): Geo =>
 const moment = (c: ConnType) => !CONNS[c].pinned && CONNS[c].fits !== undefined;
 function details(
   st: Structure, cols: { lo: Geo; hi: Geo }[], armGeo: Map<string, Geo>, colAt: (ci: number, z: number) => Geo,
-  extra: (id: string, on: string, ps: Plate[], from: V, type: string) => void,
+  extra: (id: string, on: string, ps: Plate[], from: V, type: string) => void, seg: number,
 ) {
   const [X, Y, Z]: V[] = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
   const down: V = [0, 0, -1];
@@ -1736,13 +1757,32 @@ function details(
       for (const z of sec.kind === 'T' ? [zt - sec.tf / 2] : [zt - sec.tf / 2, zt - sec.d + sec.tf / 2])
         if (levels.every((l) => Math.abs(l - z) > 30)) levels.push(z);
     }
+    const cpT = (sec: Section) => Math.max(10, Math.round(sec.tf));
     levels.sort((p, q) => p - q).forEach((z, k) => {
       const S = colAt(ci, z);
       const o = add(c.x, [0, 0, z]);
-      const t = Math.max(10, Math.round(S.sec.tf));
+      const t = cpT(S.sec);
       // one part per side of the web: a beam that frames into the web there leaves no room
       for (const s of [-1, 1]) extra(`${id}-stiffener${k + 1}${s < 0 ? 'w' : 'e'}`, S.id, [stiffener(S.sec, o, mul(X, s), Y, t)], mul(X, s), 'Continuity plate');
     });
+    // Doubler plates on the web of a specimen column (no splice there). They
+    // stop at the continuity plates. With none, they go 150 mm past the beam
+    // flanges, cut where the column is cut (panelZone) so they bend with it.
+    const dp = st.doubler;
+    if (dp && ci === 0) {
+      const sec = lo.sec;
+      const [z0, z1] = levels.length > 1
+        ? [levels[0] + cpT(sec) / 2, levels[levels.length - 1] - cpT(sec) / 2]
+        : [Math.max(0, Math.min(...st.arms.map((a) => a.z - a.sec.d)) - 150), Math.min(st.H, Math.max(...st.arms.map((a) => a.z)) + 150)];
+      const pz = panelZone(st);
+      const cuts = [pz.z0 - pz.ramp, pz.z0, pz.z1, pz.z1 + pz.ramp].map((z) => z - z0);
+      // n 1: on the -x side, the side the iso view looks at
+      for (const s of dp.n === 2 ? [-1, 1] : [-1]) {
+        const o = add(c.x, [s * (sec.tw / 2 + dp.t / 2), 0, (z0 + z1) / 2]);
+        const plate: Plate = { faces: box3(o, Y, Z, dp.t, dp.w, z1 - z0, seg, cuts), box: boxOf(o, Y, Z, dp.t, dp.w, z1 - z0) };
+        extra(`${id}-doubler${s < 0 ? 'w' : 'e'}`, lo.id, [plate], mul(X, s), 'Doubler plate');
+      }
+    }
     // gussets at the foot: on the two flange faces, or on all four faces
     if (st.base && st.base !== 'none') {
       const { d, bf, tw } = lo.sec;

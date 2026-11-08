@@ -39,6 +39,9 @@ export type SpecimenBeam = {
   length: number; // mm, from the column axis to the beam tip
   at?: number; // mm, beam centre line above the column foot (default: half the column height)
   connection: ConnType; // one of BEAM_CONNS: shear_tab, end_plate, flange_plates, welded, ...
+  // a reduced beam section (an I beam only): the cut starts `a` mm from the
+  // column face, is `b` mm long and `c` mm deep at its center (rbs.ts)
+  rbs?: { a: number; b: number; c: number };
 };
 
 export type ConnSpecimen = {
@@ -48,6 +51,10 @@ export type ConnSpecimen = {
   column: { section: SectionRef; height: number };
   beams: SpecimenBeam[]; // [] gives a column alone
   continuity?: boolean; // plates across the column at the beam flanges (default true)
+  // doubler plates on the column web, in the panel zone (I column only). n 1:
+  // one plate, on the -x side of the web. n 2: one on each side. t: mm, one
+  // plate. w: mm, its width (default and at most: the web between the flanges).
+  doubler?: { n: 1 | 2; t: number; w?: number };
   // what the actuators push (default beam): the beam tips, or the column top
   // (then the beam tips stand on links). See specimenRig in generate.ts.
   load?: 'beam' | 'column';
