@@ -174,7 +174,7 @@ function shape(r: Result, spec: Specimen, rec: HubRecord, at: Samples, scale: nu
   const h = Math.min(d, L / 4);
   const zone = (s: number, label: string) => {
     if (level === undefined) return;
-    zones.push({ c: along(o, u, s), axes: [web, minor, u], half: [d / 2 + 1, bf / 2 + 1, h / 2], level, slot: MOMENT, label, ratio: '|M| / Mp' });
+    zones.push({ c: along(o, u, s), axes: [web, minor, u], half: [d / 2 + 1, bf / 2 + 1, h / 2 - 1], level, slot: MOMENT, label, ratio: '|M| / Mp' });
   };
   if (lying) zone(L / 2, 'Mid span hinge');
   else zone(h / 2, 'Base hinge');

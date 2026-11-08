@@ -286,8 +286,8 @@ test('the hinges: at the base, and also at the top for fixed-fixed, above the pl
   assert.equal(d.zones[0].level, d.zones[1].level);
   assert.ok(d.notes?.some((n) => /top hinge/.test(n)));
   const [base, head] = d.zones;
-  assert.ok(Math.abs(base.c[2] - base.half[2]) < 1e-9);
-  assert.ok(Math.abs(head.c[2] + head.half[2] - b.spec.length) < 1e-9);
+  assert.ok(Math.abs(base.c[2] - base.half[2] - 1) < 1e-9, 'the base box stops 1 mm from the end');
+  assert.ok(Math.abs(head.c[2] + head.half[2] + 1 - b.spec.length) < 1e-9, 'the top box stops 1 mm from the end');
 });
 
 test('the level, columns: M in kN mm over Z fy, Z from axis_of_bending and not from the folder', () => {

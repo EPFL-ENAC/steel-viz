@@ -464,7 +464,7 @@ A pin joint is cut in parts, so that only the moving side turns. The mount is th
 
 A tongue is rigid, so the end of a `rig-pin` tongue can be some mm away from the column end after a big turn.
 
-A `Zone` is a box with a level (1 is the capacity), a `slot` for its color, a label and the ratio it shows. `ResponseSpec.slot` gives the chart the same color. `deform-connection.ts` is the example to copy.
+A `Zone` is a box with a level (1 is the capacity), a `slot` for its color, a label and the ratio it shows. `ResponseSpec.slot` gives the chart the same color. `deform-connection.ts` is the example to copy. Keep every face that takes a color at least 1 mm off the edges of the box: the shader tests `<=`, so a face exactly on an edge gets jagged bands. `deform-zones.test.ts` checks it.
 
 #### The shape of a column test
 

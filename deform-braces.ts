@@ -230,7 +230,7 @@ function shape(r: Result, spec: Specimen, rec: HubRecord, samples: Samples, scal
     const across = sec.bf / 2 + 2; // no more: the other brace of a DBF is 10 mm away
     const { axial, hinge, force } = steps[i];
     const [s0, s1] = l.free;
-    if (axial !== undefined) zones.push({ c: at(l.o, l.u, (s0 + s1) / 2), axes, half: [(s1 - s0) / 2, across, sec.d], level: axial, slot: AXIAL, label: name, ratio: force >= 0 ? 'N / Pt' : '|N| / Pc' });
+    if (axial !== undefined) zones.push({ c: at(l.o, l.u, (s0 + s1) / 2), axes, half: [(s1 - s0) / 2 - 1, across, sec.d], level: axial, slot: AXIAL, label: name, ratio: force >= 0 ? 'N / Pt' : '|N| / Pc' });
     if (hinge !== undefined) zones.push({ c: at(l.o, l.u, (l.bend[0] + l.bend[1]) / 2), axes, half: [Math.max(sec.d, l.Lb / 10), across, sec.d], level: hinge, slot: MOMENT, label: `${name} hinge`, ratio: '|N| a / Mp' });
   });
   if (!lines.every((l) => l.Mp)) notes.push('No Z and fy: no hinge zone.');
