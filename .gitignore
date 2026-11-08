@@ -2,6 +2,7 @@ node_modules/
 dist/
 lib/
 *.svg
+/*.png
 
 # wtx: per-worktree files, local to one checkout
 .env.worktree
