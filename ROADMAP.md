@@ -63,7 +63,8 @@ The specimen input draws five tables of the hub, each test in its test rig. `nod
 - [x] WUF-B: the bolted shear tab on the beam web, next to the welded flanges. Done: `welded_tab`, the tab has the size of the shear tab (`t_pl` is NA).
 - [ ] KBB: the Kaiser bracket, today drawn as bolted flange plates. WFP: welded flange plates, today drawn bolted.
 - [x] Doubler plates on the column web (`n_dp`).
-- [ ] The concrete slab (`slab`).
+- [x] The concrete slab (`slab`): the concrete and the deck ribs, in light lines, on the 13 tests we draw. The data has no slab length and no rib spacing, so we take them. The shear studs are not drawn, they are inside the concrete.
+- [ ] The slab of the EBF tests (TF2c, TF3c, TF4c, 20 tests). Their rows give no size for it, so they keep their note.
 - [ ] Continuity plates as thick as in the test (`t_cp`). Today they take the thickness of the column flange.
 - [ ] "Exterior - Frame" (one test in the hub, Del_Caprio_et_al_2014_RBS-A).
 - [x] Brace tests (`braces`), SB, SBF and DBF: 281 of 294 (the 2 flat bars too).

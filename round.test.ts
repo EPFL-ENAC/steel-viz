@@ -19,6 +19,8 @@ const cats = { aisc: loadCatalog('aisc', ...readTables('aisc')), eu: loadCatalog
 // such faces too, but in one plane. Only faces longer than wide: not the 12 mm
 // round cap plate of a tube end (a plate, not a bar).
 function roundBar(p: Part): boolean {
+  // the cells of a slab have long sides with no end lines too, but no bar
+  if (p.kind === 'slab') return false;
   const dirs: V[] = [];
   for (const f of p.faces) {
     if (f.pts.length !== 4) continue;

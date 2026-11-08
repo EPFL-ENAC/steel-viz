@@ -55,6 +55,10 @@ export type ConnSpecimen = {
   // one plate, on the -x side of the web. n 2: one on each side. t: mm, one
   // plate. w: mm, its width (default and at most: the web between the flanges).
   doubler?: { n: 1 | 2; t: number; w?: number };
+  // the concrete slab on the top flange (slab.ts). All in mm. left, right: its
+  // width on each side of the beam, looking along the first beam. concrete: the
+  // depth above the deck. rib: the deck height. ribWidth: the mean width of a rib.
+  slab?: { left: number; right: number; concrete: number; rib: number; ribWidth: number; ribs: 'parallel' | 'perpendicular' };
   // what the actuators push (default beam): the beam tips, or the column top
   // (then the beam tips stand on links). See specimenRig in generate.ts.
   load?: 'beam' | 'column';

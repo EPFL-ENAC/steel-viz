@@ -228,6 +228,7 @@ function shape(r: Result, spec: Specimen, rec: HubRecord, at: Samples, scale: nu
     notes.push(value(rec, 'z_xb_rbs')
       ? 'RBS: the hinge is at the center of the cut, with M at the cut (from M at the column face) and Z of the cut section (z_xb_rbs).'
       : 'RBS: the hinge is at the center of the cut, with M at the cut. No z_xb_rbs in the record: Z of the full beam.');
+  if (st.slab) notes.push('The slab is not counted: the hinge level is |M| / Mp of the steel beam alone, so it can go above 1.');
   if (!at.Panel_zone) notes.push('No panel zone file: elastic estimate of the distortion.');
   if (force && !at.Beam_moment_rotation) notes.push('No beam file: moment from the actuator force, what is left of the drift is half beam, half column.');
   return { moves: follow(r.parts, moves), zones, scale, notes };

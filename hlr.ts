@@ -277,10 +277,13 @@ function hide(sc: Scene, a: V, b: V, stamp: Int32Array, mark: number): [number, 
 
 // the visible and the hidden pieces of the lines of each part, as
 // [x0, d0, y0, x1, d1, y1]
-function project(per: number[][], sc: Scene): { vis: number[][]; hid: number[][] }[] {
-  const stamp = new Int32Array(sc.dmax.length).fill(-1);
+function project(per: number[][], sceneOf: (part: number) => Scene): { vis: number[][]; hid: number[][] }[] {
+  const stamps = new Map<Scene, Int32Array>();
   let mark = 0;
-  return per.map((tri) => {
+  return per.map((tri, pi) => {
+    const sc = sceneOf(pi);
+    let stamp = stamps.get(sc);
+    if (!stamp) stamps.set(sc, (stamp = new Int32Array(sc.dmax.length).fill(-1)));
     const lines: V[][] = [];
     edgesOf(tri, lines);
     const vis: number[][] = [];
@@ -289,7 +292,7 @@ function project(per: number[][], sc: Scene): { vis: number[][]; hid: number[][]
       const at = (t: number) => [0, 1, 2].map((k) => a[k] + (b[k] - a[k]) * t);
       const piece = (t0: number, t1: number) => [...at(t0), ...at(t1)];
       let t = 0;
-      for (const [h0, h1] of hide(sc, a, b, stamp, mark++)) {
+      for (const [h0, h1] of hide(sc, a, b, stamp!, mark++)) {
         if (h0 > t) vis.push(piece(t, h0));
         hid.push(piece(h0, h1));
         t = Math.max(t, h1);
@@ -335,9 +338,15 @@ export function renderHLR(parts: Part[], o: RenderOpts): { svg: string; faces: n
     nFaces += faces.length;
     return tri;
   });
-  const sc = scene(per);
-  const result = project(per, sc);
-  const box = sc.box;
+  // The slab hides no steel: sc is the scene without it, and the steel lines are
+  // hidden against sc. The slab lines are hidden against everything, so the slab
+  // still reads as a solid. With no slab, it's one scene.
+  const slabs = shown.map((p) => p.kind === 'slab');
+  const hasSlab = slabs.some(Boolean);
+  const sc = scene(hasSlab ? per.map((t, i) => (slabs[i] ? [] : t)) : per);
+  const all = hasSlab ? scene(per) : sc;
+  const result = project(per, (pi) => (slabs[pi] ? all : sc));
+  const box = all.box;
 
   // the first surface seen at screen point (x, y): its depth and its part
   const NONE = { d: -Infinity, part: -1 };
@@ -545,7 +554,7 @@ export function renderHLR(parts: Part[], o: RenderOpts): { svg: string; faces: n
     if (l < 0.3) [ux, uy] = [0, -1];
     else [ux, uy] = [ux / l, uy / l];
     // plates, the base and the rig only slide a little, members come from outside
-    const t = p.kind === 'plate' || p.kind === 'base' || p.kind === 'rig' ? 0.06 * (x1 - x0) : away(pi, ux, uy);
+    const t = p.kind === 'plate' || p.kind === 'base' || p.kind === 'rig' || p.kind === 'slab' ? 0.06 * (x1 - x0) : away(pi, ux, uy);
     return `--dx:${f(ux * t)}px;--dy:${f(uy * t)}px;animation-delay:${ms(sl.start)};animation-duration:${ms(sl.dur)}`;
   };
   const hidden = (pi: number) => [...outs[pi].until].map(([s, list]) => `<path class="h" style="animation-delay:${ms(landAt(s))}" d="${list.join('')}"/>`);
@@ -563,7 +572,7 @@ export function renderHLR(parts: Part[], o: RenderOpts): { svg: string; faces: n
     const { vis, edge } = lines[pi];
     if (!vis && !edge && !until.size && !fills.length) continue;
     nDots += fills.length;
-    const acc = p.accent ? 'a' : p.kind === 'rig' ? 'g' : '';
+    const acc = p.accent ? 'a' : p.kind === 'rig' || p.kind === 'slab' ? 'g' : '';
     if (o.animate && p.kind === 'bolts') {
       // one group per bolt, each line goes with the nearest head
       const start = slots.get(p.step)!.start;
