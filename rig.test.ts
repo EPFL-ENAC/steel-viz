@@ -23,12 +23,12 @@ function smallRig() {
   const top = 400 + reach;
   return [
     block('floor', [0, 0, 200], [800, 800, 400], { step: 0 }),
-    clevis('foot', [0, 0, 400], Z, X, D, reach, { step: 1, supports: ['floor'] }),
+    ...clevis('foot', [0, 0, 400], Z, X, D, reach, { step: 1, supports: ['floor'] }),
     rigMember('post', sec, [0, 0, top], [0, 0, top + 2000], { step: 2, supports: ['foot'] }),
     block('wall', [0, -2500, 1500], [800, 600, 3000], { step: 0 }),
-    actuator('jack', [0, -2200, top + 1800], [0, -sec.d / 2, top + 1800], X, D, { step: 3, supports: ['wall', 'post'] }),
+    ...actuator('jack', [0, -2200, top + 1800], [0, -sec.d / 2, top + 1800], X, D, { step: 3, supports: ['wall', 'post'] }),
     block('anchor', [0, 2500, 1500], [800, 600, 3000], { step: 0 }),
-    link('tie', [0, 2200, top + 1000], [0, sec.d / 2, top + 1000], X, D, { step: 3, supports: ['anchor', 'post'] }),
+    ...link('tie', [0, 2200, top + 1000], [0, sec.d / 2, top + 1000], X, D, { step: 3, supports: ['anchor', 'post'] }),
     roller('roll', [2000, 0, 300], X, 80, 400, { step: 0 }),
     crosshead('head', [-2000, 0, 3000], X, 1500, 0, sec, { step: 0 }),
   ];
@@ -50,10 +50,30 @@ test('a small rig: no clash, no floating part', () => {
 });
 
 test('the clevis ends where it says: its tongue touches the next part', () => {
-  const [, foot] = smallRig();
-  const zs = foot.faces.flatMap((f) => f.pts.map((p) => p[2]));
-  assert.ok(Math.abs(Math.max(...zs) - (400 + reach)) < 1e-6);
-  assert.ok(Math.abs(Math.min(...zs) - 400) < 1e-6);
+  const ps = smallRig();
+  const zs = (id: string) => ps.find((p) => p.id === id)!.faces.flatMap((f) => f.pts.map((p) => p[2]));
+  assert.ok(Math.abs(Math.max(...zs('foot')) - (400 + reach)) < 1e-6);
+  assert.ok(Math.abs(Math.min(...zs('foot-mount')) - 400) < 1e-6);
+});
+
+test('a joint is cut in parts: each mount stands on its own side, the moving part on both', () => {
+  const ps = smallRig();
+  const on = (id: string) => ps.find((p) => p.id === id)!;
+  assert.deepEqual(on('foot').supports, ['floor']);
+  assert.deepEqual(on('foot-mount').supports, ['floor']);
+  assert.deepEqual(on('jack').supports, ['wall', 'post']);
+  assert.deepEqual(on('jack-mount-from').supports, ['wall']);
+  assert.deepEqual(on('jack-mount-to').supports, ['post']);
+  assert.deepEqual(on('tie-mount-to').supports, ['post']);
+  for (const id of ['foot-mount', 'jack-mount-from', 'jack-mount-to', 'tie-mount-from', 'tie-mount-to']) {
+    assert.equal(on(id).step, on(on(id).joint!.of).step, id);
+    assert.equal(on(id).info?.type, on(on(id).joint!.of).info?.type, id);
+    assert.ok(on(id).round, id);
+  }
+  assert.ok(on('foot').round && on('jack').round && on('tie').round);
+  // the pin centre and the tongue end, from the size of the hinge
+  const { pin } = hingeSize(D);
+  assert.deepEqual(on('foot-mount').joint, { of: 'foot', pin: [0, 0, 400 + pin], end: [0, 0, 400 + reach] });
 });
 
 test('the renderers draw the rig with its own class', () => {

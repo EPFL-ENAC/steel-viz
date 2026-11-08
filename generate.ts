@@ -180,22 +180,21 @@ export type RigStrut = { from: V; to: V; D: number; kind: 'link' | 'actuator' };
 // What the deformed shape of a brace test needs. lines: each brace. o: its
 // bottom work point. u: along it. s: where its steel starts and ends, mm from o.
 // actuator: the actuator on the loaded beam. frame, in a frame only: the foot
-// pin centres, their radius, and the z of the column tops.
+// pin centres, and the z of the column tops.
 export type BraceRig = {
   lines: { id: string; o: V; u: V; s: [number, number] }[];
   actuator: RigStrut;
-  frame?: { feet: V[]; R: number; top: number };
+  frame?: { feet: V[]; top: number };
 };
 // The mount points of the rig of a beam-to-column test. dir: the first beam.
-// axis: the pins. foot: the foot pin centre, footD its diameter. The pin
-// centres of a strut come from hingeSize(D).pin.
-export type SpecimenRig = { dir: V; axis: V; foot: V; footD: number; top: RigStrut; tips: (RigStrut & { arm: string })[] };
+// axis: the pins. foot: the foot pin centre. The pin centres of a strut come
+// from hingeSize(D).pin.
+export type SpecimenRig = { dir: V; axis: V; foot: V; top: RigStrut; tips: (RigStrut & { arm: string })[] };
 // The rig of a column test, for the deformed shape. o: where the column starts
 // to bend (the top of the foot plate, or the first roller). u: along the axis.
 // web, minor: the two directions of the section. push: the way the actuator
-// pushes. struts: the actuators, id is the part. pin: the clevis at the end of
-// a lying column with axial load: at on its mount face, along toward the column.
-export type ColumnRig = { o: V; u: V; web: V; minor: V; push: V; struts: (RigStrut & { id: string })[]; pin?: { at: V; along: V; D: number } };
+// pushes. struts: the actuators, id is the part.
+export type ColumnRig = { o: V; u: V; web: V; minor: V; push: V; struts: (RigStrut & { id: string })[] };
 // The rig of a link test, for the deformed shape. y0, zl: the link starts at
 // [0, y0, zl] and goes along +y. actuator: its `to` is on a frame column, or on
 // the loading beam of TF1. frame (not for TF1): feet, the foot pin centres of
@@ -203,7 +202,7 @@ export type ColumnRig = { o: V; u: V; web: V; minor: V; push: V; struts: (RigStr
 // braces: from their foot on the base beam to the link end on the beam axis.
 export type LinkRig = {
   y0: number; zl: number; actuator: RigStrut;
-  frame?: { feet: [V, V]; footD: number; side: 0 | 1; braces: { id: string; from: V; to: V; side: 0 | 1 }[] };
+  frame?: { feet: [V, V]; side: 0 | 1; braces: { id: string; from: V; to: V; side: 0 | 1 }[] };
 };
 export type Structure = {
   form: Form | 'specimen'; id?: string; H: number; col: Section; cols: Col[]; arms: Arm[]; secs: Secondary[]; splice?: Splice; base?: Base; continuity?: boolean;
@@ -804,21 +803,21 @@ function specimenRig(st: Structure): { below: Part[]; above: Part[] } {
     block(wall, add(mul(s, far + depth / 2), [0, 0, (floor + wallTop) / 2]), sx ? [depth, wide, wallTop - floor] : [wide, depth, wallTop - floor],
       { ...o, from: up, type: beam ? 'Reaction post' : 'Reaction wall' }),
     ...tips.map((k) => block(`${k.id}-block`, [k.P[0], k.P[1], (floor + k.top) / 2], [k.size, k.size, k.top - floor], { ...o, from: up })),
-    clevis('foot-pin', [0, 0, zf], [0, 0, 1], A, Dc, reach, { ...o, supports: ['foot-block'] }),
+    ...clevis('foot-pin', [0, 0, zf], [0, 0, 1], A, Dc, reach, { ...o, supports: ['foot-block'] }),
   ];
   const [from, to]: V[] = [add(mul(s, far), [0, 0, zl]), add(mul(s, hs), [0, 0, zl])];
   const tops = { ...o, supports: [wall, 'head'] };
   const above = [
     block('head', [0, 0, H + tp + hh / 2], [col.bf + 30, col.d + 30, hh], { ...o, supports: ['column-cap'], type: 'Loading head' }),
-    beam ? link('top-link', from, to, A, Da, tops) : actuator('top-actuator', from, to, A, Da, tops),
-    ...tips.map((k) => {
+    ...(beam ? link('top-link', from, to, A, Da, tops) : actuator('top-actuator', from, to, A, Da, tops)),
+    ...tips.flatMap((k) => {
       const [p0, p1]: V[] = [[k.P[0], k.P[1], k.top], [k.P[0], k.P[1], k.zb]];
       const ko = { ...o, supports: [`${k.id}-block`, k.id] };
       return beam ? actuator(`${k.id}-actuator`, p0, p1, across(k.h), k.D, ko) : link(`${k.id}-link`, p0, p1, across(k.h), k.D, ko);
     }),
   ];
   st.rig = {
-    dir: firstDir(st), axis: A, foot: [0, 0, zf + hingeSize(Dc).pin], footD: Dc,
+    dir: firstDir(st), axis: A, foot: [0, 0, zf + hingeSize(Dc).pin],
     top: { from, to, D: Da, kind: beam ? 'link' : 'actuator' },
     tips: tips.map((k) => ({ arm: k.id, from: [k.P[0], k.P[1], k.top], to: [k.P[0], k.P[1], k.zb], D: k.D, kind: beam ? 'actuator' : 'link' })),
   };
@@ -1698,7 +1697,10 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
     res.push(...kept.filter((k) => extras.find((e) => e.part === k)!.after === q.id));
   }
   if (rig) res.push(...rig.above);
-  res.forEach((q, i) => (q.step = i));
+  // the mount of a pin joint has the step of its moving part, just before it
+  let next = 0;
+  const byId = new Map(res.map((q) => [q.id, q]));
+  for (const q of res) q.step = q.joint ? byId.get(q.joint.of)!.step : next++;
   return res;
 }
 

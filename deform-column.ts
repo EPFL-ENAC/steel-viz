@@ -29,7 +29,7 @@ import { add, dot, mul, sub, type V } from './vec.ts';
 import type { ColumnRig, Result, RigStrut } from './generate.ts';
 import type { HubRecord } from './hub.ts';
 import { hingeSize } from './rig.ts';
-import { biggest, follow, I4, movePoint, scaleFor, shift, strut, type DeformState, type DeformTable, type Knot, type Move, type Protocol, type Samples, type Zone } from './deform.ts';
+import { biggest, clevisMove, follow, I4, movePoint, scaleFor, shift, strut, type DeformState, type DeformTable, type Knot, type Move, type Protocol, type Samples, type Zone } from './deform.ts';
 import { strutMove } from './deform-connection.ts';
 import type { ColumnSpecimen, Specimen } from './specimen.ts';
 
@@ -126,17 +126,19 @@ const along = (p: V, u: V, s: number): V => add(p, mul(u, s));
 // An actuator on the column. A rig is drawn for the real test, but the scale
 // can push the head past the pin on the reaction, and the actuator would turn
 // over. So the two pins stay at least two tongues apart, and the foot leaves
-// its reaction.
-function actuatorMove(s: RigStrut, col: Move, notes: string[]): Move {
+// its reaction: the mount goes back along the bar, with the bar's end on its pin.
+function actuatorMove(id: string, s: RigStrut, col: Move, moves: Record<string, Move>, notes: string[]) {
   const m = strutMove(s, col);
+  moves[id] = m;
   const { pin, reach } = hingeSize(s.D);
   const p1 = along(s.to, m.u, -pin);
   const q1 = movePoint(p1, col);
   const over = 2 * (reach - pin) - dot(sub(q1, m.o), m.u);
-  if (over <= 0) return m;
+  if (over <= 0) return;
   const note = 'At this scale the column goes past the actuator: its foot leaves its support.';
   if (!notes.includes(note)) notes.push(note);
-  return strut(m.o, p1, along(m.o, m.u, -over), q1, m.split!);
+  moves[id] = strut(m.o, p1, along(m.o, m.u, -over), q1, m.split!);
+  moves[`${id}-mount-from`] = { o: m.o, u: m.u, n: [0, 0, 0], knots: [], A: shift(mul(m.u, -over)) };
 }
 
 function shape(r: Result, spec: Specimen, rec: HubRecord, at: Samples, scale: number, read: typeof columnStep): DeformState {
@@ -163,13 +165,8 @@ function shape(r: Result, spec: Specimen, rec: HubRecord, at: Samples, scale: nu
   } else notes.push('No axial shortening file: no shortening drawn.');
 
   const moves: Record<string, Move> = { column: col };
-  for (const s of rig.struts) moves[s.id] = actuatorMove(s, col, notes);
-  if (rig.pin) {
-    // the ears stay on the block, the tongue end stays on the end plate
-    const { pin, reach } = hingeSize(rig.pin.D);
-    const end = along(rig.pin.at, rig.pin.along, reach);
-    moves['rig-pin'] = { o: rig.pin.at, u: rig.pin.along, n, knots: [], A: I4(), B: shift(sub(movePoint(end, col), end)), split: [pin, reach] };
-  }
+  for (const s of rig.struts) actuatorMove(s.id, s, col, moves, notes);
+  if (r.parts.some((p) => p.id === 'rig-pin')) moves['rig-pin'] = clevisMove(r.parts, 'rig-pin', col);
 
   // the hinges: a box just around the section, so the plates stay out of it
   const zones: Zone[] = [];

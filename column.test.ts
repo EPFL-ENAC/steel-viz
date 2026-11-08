@@ -27,6 +27,8 @@ const range = (p: Part, n: V) => {
   return [Math.min(...xs), Math.max(...xs)];
 };
 const spread = (p: Part, n: V) => range(p, n)[1] - range(p, n)[0];
+// a pin joint as one part: the moving part and its mounts
+const joint = (ps: Part[], id: string): Part => ({ ...part(ps, id), faces: ps.filter((p) => p.id === id || p.joint?.of === id).flatMap((p) => p.faces) });
 const Z: V = [0, 0, 1];
 
 const sound = (r: ReturnType<typeof generate>) => {
@@ -73,14 +75,14 @@ for (const c of CASES)
     // the rig: every part that is not the specimen
     const axial = c.axial === 2 ? ['rig-spreader', 'rig-axial', 'rig-axial2'] : ['rig-axial'];
     for (const id of ['rig-floor', 'rig-head', 'rig-wall', 'rig-actuator', 'rig-crosshead', ...axial]) assert.equal(part(r.parts, id).kind, 'rig', id);
-    assert.equal(r.parts.filter((p) => /^rig-axial/.test(p.id)).length, c.axial);
+    assert.equal(r.parts.filter((p) => /^rig-axial\d?$/.test(p.id)).length, c.axial);
     for (const p of r.parts) assert.ok(['column', 'plate', 'rig'].includes(p.kind ?? ''), `${p.id}: kind ${p.kind}`);
     // the push along y, from the wall to the head; the axial load on the head
     assert.deepEqual(part(r.parts, 'rig-actuator').supports, ['rig-wall', 'rig-head']);
-    assert.ok(spread(part(r.parts, 'rig-actuator'), [0, 1, 0]) > 1000);
+    assert.ok(spread(joint(r.parts, 'rig-actuator'), [0, 1, 0]) > 1000);
     for (const id of axial.filter((a) => a.startsWith('rig-axial'))) {
       assert.ok(part(r.parts, id).supports.includes('rig-head'), id);
-      near(range(part(r.parts, id), Z)[0], range(part(r.parts, 'rig-head'), Z)[1], `${id} on the head`, 0.5);
+      near(range(part(r.parts, `${id}-mount-to`), Z)[0], range(part(r.parts, 'rig-head'), Z)[1], `${id} on the head`, 0.5);
     }
 
     // every level of detail stands up (members: no plate)
@@ -105,7 +107,7 @@ for (const ends of ['fixed-free', 'fixed-fixed', 'fixed-flexible'] as const)
     test(`${ends}, pushed at ${angle}° from the web: no clash, no floating part`, () => {
       const r = generate({ specimen: column({ ends, angle }) }, cat);
       sound(r);
-      assert.equal(r.parts.filter((p) => /^rig-axial/.test(p.id)).length, ends === 'fixed-fixed' ? 2 : 1);
+      assert.equal(r.parts.filter((p) => /^rig-axial\d?$/.test(p.id)).length, ends === 'fixed-fixed' ? 2 : 1);
       // the web is turned by the angle: the depth runs along (sin a, cos a)
       const a = (angle * Math.PI) / 180;
       const col = part(r.parts, 'column');

@@ -167,17 +167,21 @@ test('3pb: mid span moves θ L/2 down, the rollers stay, the ends lift', () => {
   assert.equal(HSS.shape(r, spec, rec, { [MR]: sample(theta, 5) }, scale).zones[0].label, 'Mid span hinge');
 });
 
-test('3pb with axial load: the pin stays on its block, its tongue stays on the end plate', () => {
+test('3pb with axial load: the mount stays on its block, the tongue turns about its pin', () => {
   const { rec, spec, r } = build(record(HSS_3PB), { axial: true });
   const d = HSS.shape(r, spec, rec, { [MR]: sample(0.02) }, 5);
-  const pin = r.st.columnRig!.pin!;
-  const z = hingeSize(pin.D);
-  const end = add(pin.at, mul(pin.along, z.reach));
-  near(movePoint(end, d.moves['rig-pin']), movePoint(end, d.moves.column), 1e-6, 'tongue end');
-  near(movePoint(pin.at, d.moves['rig-pin']), pin.at, 1e-9, 'ears');
+  const { pin, end } = r.parts.find((p) => p.id === 'rig-pin-mount')!.joint!;
+  assert.ok(!d.moves['rig-pin-mount'], 'the mount stays');
+  near(movePoint(pin, d.moves['rig-pin']), pin, 1e-9, 'the pin');
+  // one true turn: the tongue keeps its length and points at the end plate
+  const [q, want] = [movePoint(end, d.moves['rig-pin']), movePoint(end, d.moves.column)];
+  const len = Math.hypot(...sub(end, pin));
+  assert.ok(Math.abs(Math.hypot(...sub(q, pin)) - len) < 1e-6, 'its length');
+  near(norm(sub(q, pin)), norm(sub(want, pin)), 1e-9, 'its direction');
+  assert.ok(Math.hypot(...sub(q, want)) < 5, 'the tongue end stays near the end plate');
   assert.equal(d.moves['column-end'], d.moves.column);
   const s = r.st.columnRig!.struts.find((q) => q.id === 'rig-axial')!;
-  const p1 = add(s.to, mul(norm(sub(s.to, s.from)), -z.pin));
+  const p1 = add(s.to, mul(norm(sub(s.to, s.from)), -hingeSize(s.D).pin));
   near(movePoint(p1, d.moves['rig-axial']), movePoint(p1, d.moves.column), 1e-6, 'axial actuator');
 });
 

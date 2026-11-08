@@ -56,7 +56,7 @@ test('tension: the top end goes along the brace, the beam and the top gusset go 
   nearV(moved(l.o, d.moves['brace-from-conn']), [0, 0, 0], 'bottom gusset');
   near(dot(moved(middle(l), d.moves.brace), l.n), 0, 'no bow');
   near(dot(moved(middle(l), d.moves.brace), l.u), 10, 'the middle takes half of the stretch', 0.5);
-  assert.ok(r.parts.every((p) => !p.id.startsWith('rig-') || p.id === 'rig-beam' || p.id === 'rig-actuator' || !d.moves[p.id]), 'floor and wall stay');
+  assert.ok(r.parts.every((p) => !p.id.startsWith('rig-') || p.id === 'rig-beam' || p.id === 'rig-actuator' || p.id === 'rig-actuator-mount-to' || !d.moves[p.id]), 'floor and wall stay');
 });
 
 test('compression: the middle moves by the formula, past the elastic part only', () => {
@@ -154,7 +154,7 @@ for (const id of [SBF, DBF])
       nearV(moved(foot, col), [0, 0, 0], 'the column turns about its foot pin');
       nearV(moved([foot[0], foot[1], top], col), moved([foot[0], foot[1], top], d.moves['rig-beam']), 'column top and beam');
       nearV(moved(foot, d.moves[i ? 'rig-footB' : 'rig-footA']), [0, 0, 0], 'the foot pin');
-      nearV(moved(sub(foot, [0, 0, 100]), d.moves[i ? 'rig-footB' : 'rig-footA']), [0, 0, 0], 'the foot stays');
+      assert.ok(!d.moves[i ? 'rig-footB-mount' : 'rig-footA-mount'], 'the foot stays');
     });
     for (const line of g.lines) {
       const end = at(line.o, line.u, g.spec.L);

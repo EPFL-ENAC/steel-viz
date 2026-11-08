@@ -126,9 +126,8 @@ for (const [name, config] of [[TF2, 'TF2'], [TF4, 'TF4'], [TF4_PLATES, 'TF4']] a
       const col = frame.side ? 'rig-colB' : 'rig-colA';
       const lever = at(d, col, end);
       assert.ok(Math.abs(lever[1] - end[1] - (zl - fA[2]) * theta) < 1e-6, 'the column moves the actuator end');
-      // the ears of the foot stay, the tongue turns
-      const foot = d.moves['rig-footA'];
-      assert.equal(movePoint([0, fA[1], fA[2] - 500], foot)[1], fA[1]);
+      // the mount of the foot stays, the tongue turns
+      assert.ok(!d.moves['rig-footA-mount'] && !d.moves['rig-footB-mount']);
     });
 
 test('the middle link and the edge link follow the same rule', () => {

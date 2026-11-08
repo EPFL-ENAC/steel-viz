@@ -2,15 +2,18 @@
 // pins, rollers, actuators, frame members. They are not steel of the
 // specimen: their kind is 'rig', and the renderers draw them lighter.
 //
-// Each builder returns one Part. The caller gives its step and the parts it
-// stands on (supports), so floating() can check the build order. The parts
-// only touch each other and the specimen, so clashes() passes with no
-// special rule. Sizes are in mm, like everywhere.
+// Each builder returns one Part, but a pin joint is cut in two, so that the
+// deformed shape can turn the tongue and not the mount (see Part.joint):
+// clevis(), actuator() and link() return the moving part first, then its
+// mounts. The caller gives the step and the parts it stands on (supports), so
+// floating() can check the build order. The parts only touch each other and
+// the specimen, so clashes() passes with no special rule. Sizes are in mm,
+// like everywhere.
 //
 // No three.js here.
 import { add, cross, len, mul, norm, sub, type V } from './vec.ts';
 import { rodSection, type Catalog, type Section } from './sections.ts';
-import { box3, boxOf, flat, geo, isRound, memberBoxes, memberFaces, type Box, type Face, type P2, type Part } from './steel.ts';
+import { box3, boxOf, flat, geo, isRound, memberBoxes, memberFaces, type Box, type Face, type Joint, type P2, type Part } from './steel.ts';
 
 // step, supports: as for any part. type: the name in the tooltip. from: the
 // direction it comes from in the build animation (default: from above).
@@ -56,7 +59,9 @@ export function hingeSize(D: number) {
 // tongue between the ears, on to the next part. at: on the mount face. along:
 // away from it. axis: the pin axis, at right angles to along (the free
 // rotation). reach: from the mount face to the tongue end.
-function hinge(at: V, along: V, axis: V, D: number, reach: number): Solid & { pin: V } {
+// mount: the base plate, the ears and the pin. tongue: what turns. The pin goes
+// through the tongue, so the box of the tongue starts past the ears and the pin.
+function hinge(at: V, along: V, axis: V, D: number, reach: number): { mount: Solid; tongue: Solid; pin: V; end: V } {
   const z = hingeSize(D);
   const { R, te, tt, tb, gap, pin } = z;
   if (reach < z.reach - 1e-6) throw new Error(`a pin joint of ${D} mm needs ${Math.ceil(z.reach)} mm, not ${Math.round(reach)}`);
@@ -68,8 +73,20 @@ function hinge(at: V, along: V, axis: V, D: number, reach: number): Solid & { pi
   const pc = add(at, mul(along, pin));
   const half = gap / 2 + te + 0.3 * D;
   const rod = bar(rodSection('pin', D), sub(pc, mul(axis, half)), add(pc, mul(axis, half)));
-  const plates = [base, ...ears, tongue];
-  return { ...join({ faces: plates.flatMap((p) => p.faces), boxes: plates.map((p) => p.box) }, rod), pin: pc };
+  const plates = [base, ...ears];
+  const free = (reach - pin - R) / 2; // half the length of the box of the tongue
+  return {
+    mount: join({ faces: plates.flatMap((p) => p.faces), boxes: plates.map((p) => p.box) }, rod),
+    tongue: { faces: tongue.faces, boxes: [{ ...tongue.box, c: add(at, mul(along, reach - free)), h: [R, free, tt / 2] }] },
+    pin: pc,
+    end: add(at, mul(along, reach)),
+  };
+}
+
+// The fixed side of a joint, as a part. supports: the part it is bolted to.
+function mountPart(id: string, of: string, h: ReturnType<typeof hinge>, supports: string[], o: RigOpts, type: string): Part {
+  const joint: Joint = { of, pin: h.pin, end: h.end };
+  return { ...rigPart(id, h.mount, { ...o, supports }, type), joint };
 }
 
 // ------------------------------------------------------------- the parts
@@ -81,9 +98,27 @@ export function block(id: string, centre: V, size: V, o: RigOpts): Part {
 }
 
 // A clevis: a pin joint on a mount face (see hinge). The tongue ends at
-// at + along * reach, where the specimen (or a link) starts.
-export function clevis(id: string, at: V, along: V, axis: V, D: number, reach: number, o: RigOpts): Part {
-  return rigPart(id, hinge(at, norm(along), norm(axis), D, reach), o, 'Pin');
+// at + along * reach, where the specimen (or a link) starts. It returns
+// [the tongue, <id>-mount].
+export function clevis(id: string, at: V, along: V, axis: V, D: number, reach: number, o: RigOpts): Part[] {
+  const h = hinge(at, norm(along), norm(axis), D, reach);
+  // round as the mount is: the 3D view outlines the joint with one weight
+  return [rigPart(id, { ...h.tongue, round: true }, o, 'Pin'), mountPart(`${id}-mount`, id, h, o.supports ?? [], o, 'Pin')];
+}
+
+// A strut, an actuator or a link: the bars and the two tongues move, and the
+// two mounts stay on their supports, [reaction, moving side]. It returns
+// [the moving part, <id>-mount-from, <id>-mount-to].
+function strutParts(id: string, from: V, to: V, axis: V, D: number, bars: Solid[], o: RigOpts, type: string): Part[] {
+  const u = norm(sub(to, from));
+  const ends = [hinge(from, u, axis, D, hingeSize(D).reach), hinge(to, mul(u, -1), axis, D, hingeSize(D).reach)];
+  const opts = { from: u, ...o };
+  const on = o.supports ?? [];
+  return [
+    rigPart(id, join(ends[0].tongue, ends[1].tongue, ...bars), opts, type),
+    mountPart(`${id}-mount-from`, id, ends[0], on.slice(0, 1), opts, type),
+    mountPart(`${id}-mount-to`, id, ends[1], on.slice(1, 2), opts, type),
+  ];
 }
 
 // A roller under a specimen: a round bar along axis, on a seat. top: where
@@ -100,8 +135,9 @@ export function roller(id: string, top: V, axis: V, D: number, length: number, o
 
 // A hydraulic actuator from a reaction (from) to the specimen (to): a pin
 // joint on each mount face, the cylinder, then the thinner piston rod. axis:
-// the pin axis of both joints. D: the pin diameter.
-export function actuator(id: string, from: V, to: V, axis: V, D: number, o: RigOpts): Part {
+// the pin axis of both joints. D: the pin diameter. It returns the parts of
+// strutParts().
+export function actuator(id: string, from: V, to: V, axis: V, D: number, o: RigOpts): Part[] {
   const L = len(sub(to, from));
   const u = norm(sub(to, from));
   const ax = norm(axis);
@@ -109,29 +145,19 @@ export function actuator(id: string, from: V, to: V, axis: V, D: number, o: RigO
   if (L < 2 * r + 4 * D) throw new Error(`actuator ${id}: ${Math.round(L)} mm is too short for its pins`);
   const [a, b] = [add(from, mul(u, r)), sub(to, mul(u, r))];
   const m = add(a, mul(u, 0.6 * (L - 2 * r)));
-  const s = join(
-    hinge(from, u, ax, D, r),
-    hinge(to, mul(u, -1), ax, D, r),
-    bar(rodSection('cylinder', 2.4 * D), a, m),
-    bar(rodSection('rod', 1.2 * D), m, b),
-  );
-  return rigPart(id, s, { from: u, ...o }, 'Actuator');
+  return strutParts(id, from, to, ax, D, [bar(rodSection('cylinder', 2.4 * D), a, m), bar(rodSection('rod', 1.2 * D), m, b)], o, 'Actuator');
 }
 
 // A pinned link: a pin joint on each mount face and a round bar between them.
 // It holds the two faces along the bar only. axis: the pin axis of both joints.
-export function link(id: string, from: V, to: V, axis: V, D: number, o: RigOpts): Part {
+// It returns the parts of strutParts().
+export function link(id: string, from: V, to: V, axis: V, D: number, o: RigOpts): Part[] {
   const L = len(sub(to, from));
   const u = norm(sub(to, from));
   const ax = norm(axis);
   const r = hingeSize(D).reach;
   if (L < 2 * r + 2 * D) throw new Error(`link ${id}: ${Math.round(L)} mm is too short for its pins`);
-  const s = join(
-    hinge(from, u, ax, D, r),
-    hinge(to, mul(u, -1), ax, D, r),
-    bar(rodSection('link', 1.4 * D), add(from, mul(u, r)), sub(to, mul(u, r))),
-  );
-  return rigPart(id, s, { from: u, ...o }, 'Link');
+  return strutParts(id, from, to, ax, D, [bar(rodSection('link', 1.4 * D), add(from, mul(u, r)), sub(to, mul(u, r)))], o, 'Link');
 }
 
 // A seat: a steel block that holds the end of a specimen on the rig (a

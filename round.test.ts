@@ -54,7 +54,9 @@ test('every part with a round bar has the round flag, and only those', () => {
   const seen = new Set<string>();
   for (const [at, parts] of cases())
     for (const p of parts) {
-      assert.equal(!!p.round, roundBar(p), `${at} ${p.id}: round is ${p.round}`);
+      // a clevis tongue has no bar, but its joint is one part for the 3D view
+      const want = roundBar(p) || parts.some((q) => q.joint?.of === p.id && roundBar(q));
+      assert.equal(!!p.round, want, `${at} ${p.id}: round is ${p.round}`);
       if (p.round) seen.add(p.info?.sec?.kind ?? p.info?.type ?? '');
     }
   for (const k of ['Actuator', 'Link', 'Roller', 'Pin', 'Turnbuckle', 'ROD', 'CHS']) assert.ok(seen.has(k), `no round ${k} in the cases (${[...seen].join(', ')})`);

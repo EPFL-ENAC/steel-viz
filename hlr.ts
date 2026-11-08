@@ -312,6 +312,7 @@ export function renderHLR(parts: Part[], o: RenderOpts): { svg: string; faces: n
   // the triangles of each part; bolt heads are real solids
   // less detail when the drawing is small
   const shown = forSize(parts, o.size).filter((p) => o.maxStep === undefined || p.step <= o.maxStep);
+  const whole = shown.map((p) => p.joint?.of ?? p.id); // a pin joint is one part here
   const heads: { part: number; corners: V[] }[] = [];
   let nFaces = 0;
   const per: number[][] = shown.map((part, pi) => {
@@ -375,7 +376,7 @@ export function renderHLR(parts: Part[], o: RenderOpts): { svg: string; faces: n
       const [x, d, y] = [q[0] + dx * f, q[1] + (q[4] - q[1]) * f, q[2] + dy * f];
       const out = (s: number) => {
         const h = seen(x + s * nx, y + s * ny);
-        return h.d < d - DEEP || (h.part !== pi && h.d < d - 1);
+        return h.d < d - DEEP || (h.part !== pi && whole[h.part] !== whole[pi] && h.d < d - 1);
       };
       return out(1) || out(-1);
     };

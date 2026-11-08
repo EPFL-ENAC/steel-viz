@@ -30,9 +30,15 @@ export type PartInfo = { type: string; of?: string; sec?: Section; L?: number; c
 // round: the part has a round bar (a rod, a round tube, a pin). Its long sides
 // have no line of their own, so the 3D view outlines it, also with one weight
 // (webgl.ts). Set where the bar is built (isRound).
+// joint, on the mount of a pin joint only (rig.ts): the base, the ears and the
+// pin are a part of their own, so that they stay with what they're bolted to,
+// and only the tongue turns. of: the moving part, pin: the pin centre, end: the
+// tongue end. A joint draws, arrives and is picked as one part: a mount has the
+// step of `of`, and the renderers don't see an edge between the two.
+export type Joint = { of: string; pin: V; end: V };
 export type Part = {
   id: string; step: number; faces: Face[]; dots: Dot[]; supports: string[]; boxes?: Box[]; accent?: boolean; kind?: Kind; from?: V; info?: PartInfo;
-  round?: boolean;
+  round?: boolean; joint?: Joint;
 };
 
 // Less detail when the drawing is small: at 160 px or less bolts are only
@@ -127,6 +133,7 @@ function sequence(parts: Part[], speed: number): Map<number, Slot> {
     return (q && out.get(q.step)?.land) ?? 0;
   };
   for (const p of [...parts].sort((a, b) => a.step - b.step)) {
+    if (p.joint) continue; // the moving part sets the slot of the step
     const ready = Math.max(0, ...p.supports.map(landOf));
     const kind = p.kind ?? 'plate';
     let slot: Slot;

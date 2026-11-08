@@ -29,6 +29,8 @@ const range = (p: Part, n: V) => {
   return [Math.min(...xs), Math.max(...xs)];
 };
 const spread = (p: Part, n: V) => range(p, n)[1] - range(p, n)[0];
+// a pin joint as one part: the moving part and its mounts
+const joint = (ps: Part[], id: string): Part => ({ ...part(ps, id), faces: ps.filter((p) => p.id === id || p.joint?.of === id).flatMap((p) => p.faces) });
 const [X, Z]: V[] = [[1, 0, 0], [0, 0, 1]];
 
 const sound = (r: ReturnType<typeof generate>) => {
@@ -84,11 +86,11 @@ test('Yamada No-14: a tube on two rollers (3pb), with the axial load', () => {
   // the push down at mid span, the axial load along x
   const act = part(r.parts, 'rig-actuator');
   assert.deepEqual(act.supports, ['rig-crosshead', 'rig-saddle']);
-  near(range(act, Z)[0], range(part(r.parts, 'rig-saddle'), Z)[1], 'actuator on the loading block', 0.5);
+  near(range(part(r.parts, 'rig-actuator-mount-to'), Z)[0], range(part(r.parts, 'rig-saddle'), Z)[1], 'actuator on the loading block', 0.5);
   assert.deepEqual(part(r.parts, 'rig-saddle').supports, ['column']);
   assert.deepEqual(part(r.parts, 'rig-axial').supports, ['rig-wall', 'column-end2']);
   assert.deepEqual(part(r.parts, 'rig-pin').supports, ['rig-block']);
-  assert.ok(spread(part(r.parts, 'rig-axial'), X) >= 1000 - 0.5);
+  assert.ok(spread(joint(r.parts, 'rig-axial'), X) >= 1000 - 0.5);
   for (const id of ['column-end', 'column-end2']) {
     assert.equal(part(r.parts, id).kind, 'plate');
     assert.deepEqual(part(r.parts, id).supports, ['column']);
@@ -138,7 +140,7 @@ test('no axial load: a cantilever has no vertical actuator, fixed-fixed keeps it
   logs(cf, /no axial load/);
   const dc = generate({ specimen: column({ ends: 'fixed-fixed', axial: false, angle: 45 }) }, cat);
   sound(dc);
-  assert.equal(dc.parts.filter((p) => /^rig-axial/.test(p.id)).length, 2);
+  assert.equal(dc.parts.filter((p) => /^rig-axial\d?$/.test(p.id)).length, 2);
   logs(dc, /the two vertical actuators only hold the top straight/);
 });
 

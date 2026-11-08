@@ -20,7 +20,7 @@ import type { Result, RigStrut } from './generate.ts';
 import { hdir, panelZone } from './generate.ts';
 import type { HubRecord } from './hub.ts';
 import { hingeSize } from './rig.ts';
-import { biggest, follow, hermite, I4, movePoint, scaleFor, shift, strut, tilt, type DeformState, type DeformTable, type Knot, type Move, type Sample, type Samples, type Zone } from './deform.ts';
+import { biggest, clevisMove, follow, hermite, I4, movePoint, scaleFor, shift, strut, type DeformState, type DeformTable, type Knot, type Move, type Sample, type Samples, type Zone } from './deform.ts';
 import type { Specimen } from './specimen.ts';
 
 const G = 77000; // shear modulus of steel, MPa
@@ -170,12 +170,10 @@ function shape(r: Result, spec: Specimen, rec: HubRecord, at: Samples, scale: nu
     o: rig.foot, u: up, n: h, A: I4(),
     knots: columnKnots(-zF, st.H - zF, pz.z0 - zF, pz.z1 - zF, pz.ramp, g.zTop - zF, theta, phiC, phiB, rho),
   };
-  const { R } = hingeSize(rig.footD);
   const moves: Record<string, Move> = {
     column: col,
     'column-foot': col,
-    // the tongue turns with the column, the ears stay
-    'foot-pin': { o: rig.foot, u: up, n: h, knots: [], A: I4(), B: tilt(rig.foot, h, up, col.knots[0].t), split: [-R, R] },
+    'foot-pin': clevisMove(r.parts, 'foot-pin', col),
   };
   const top = strutMove(rig.top, col);
   moves[rig.top.kind === 'link' ? 'top-link' : 'top-actuator'] = top;
