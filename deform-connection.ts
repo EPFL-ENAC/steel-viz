@@ -220,7 +220,7 @@ function shape(r: Result, spec: Specimen, rec: HubRecord, at: Samples, scale: nu
     });
   if (Rn) {
     zones.push({
-      c: [0, 0, (pz.z0 + pz.z1) / 2], axes: [h, across, up], half: [st.col.d / 2, st.col.bf, (pz.z1 - pz.z0) / 2], slot: SHEAR,
+      c: [0, 0, (pz.z0 + pz.z1) / 2], axes: [h, across, up], half: [st.col.d / 2 + 1, st.col.bf, (pz.z1 - pz.z0) / 2], slot: SHEAR,
       level: Math.abs(v.shear) / Rn, label: 'Panel zone', ratio: '|V| / Rn',
     });
   } else notes.push('No panel zone capacity in the record: no panel zone color.');

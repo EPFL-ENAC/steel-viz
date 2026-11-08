@@ -185,7 +185,7 @@ test('the zone sits on the web and follows |V|', () => {
   assert.equal(z.slot, spec0.slot);
   assert.equal(z.label, 'Link web');
   near(z.c, [0, rig.y0 + link.e / 2, rig.zl], 'zone centre');
-  assert.ok(Math.abs(z.half[2] - (r.st.col.d / 2 - r.st.col.tf)) < 1e-9, 'between the flanges');
+  assert.ok(Math.abs(z.half[2] - (r.st.col.d / 2 - r.st.col.tf - 1)) < 1e-9, 'between the flanges, 1 mm off them');
   assert.ok(Math.abs(z.level - 100 / cap.V) < 1e-12);
   assert.equal(T.shape(r, spec, row, step(0.02, -250), 1).zones[0].level, 250 / cap.V);
 });

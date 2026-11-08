@@ -84,7 +84,7 @@ function shape(r: Result, spec: Specimen, rec: HubRecord, at: Samples, scale: nu
   const cap = linkCapacity(rec, e);
   const zones = cap
     ? [{
-      c: [0, y0 + e / 2, zl] as V, axes: [Y, X, Z] as [V, V, V], half: [e / 2, sec.bf / 2, sec.d / 2 - sec.tf] as V, slot: SHEAR,
+      c: [0, y0 + e / 2, zl] as V, axes: [Y, X, Z] as [V, V, V], half: [e / 2 - 1, sec.bf / 2, sec.d / 2 - sec.tf - 1] as V, slot: SHEAR,
       level: Math.abs(s?.y ?? 0) / cap.V, label: 'Link web', ratio: cap.ratio,
     }]
     : [];

@@ -30,7 +30,9 @@ export type Knot = { s: number; w: number; t: number; r: number };
 // they are equal). No knots: no bend. No B: A alone.
 export type Move = { o: V; u: V; n: V; knots: Knot[]; A: M4; B?: M4; split?: [number, number] };
 // A working zone: a box in the undeformed frame, colored by level (1: the
-// capacity). slot: its color in Colors.zones. 0 moment, 1 shear.
+// capacity). slot: its color in Colors.zones. 0 moment, 1 shear. No face that
+// takes a color can be exactly on an edge of the box: ZONE_FS tests <= on an
+// interpolated point, so rounding decides and the face gets jagged bands.
 export type Zone = { c: V; axes: [V, V, V]; half: V; level: number; slot: number; label: string; ratio: string };
 // notes: what the model had to guess, for the legend
 export type DeformState = { moves: Record<string, Move>; zones: Zone[]; scale: number; notes?: string[] };
