@@ -1,12 +1,12 @@
 // The text of the tooltip on a part of the 3D view: what the part is, and for
 // a member its section, its length, its connections and its check.
 import type { Result } from '../generate.ts';
-import type { Section } from '../sections.ts';
+import { ANGLE_GAP, type Section } from '../sections.ts';
 import { CONNS, type ConnType, type Part } from '../steel.ts';
 
 export type Tip = { title: string; id: string; rows: [string, string][]; warn?: boolean };
 
-const SHAPE: Record<Section['kind'], string> = { I: 'I', C: 'channel', T: 'tee', '2L': 'double angle', RHS: 'tube', ROD: 'round bar', CHS: 'round tube', L: 'angle', FB: 'flat bar' };
+const SHAPE: Record<Section['kind'], string> = { I: 'I', C: 'channel', T: 'tee', '2L': 'double angle', RHS: 'tube', ROD: 'round bar', CHS: 'round tube', L: 'angle', FB: 'flat bar', '2C': 'double channel' };
 // the beam end kinds have their label in the catalog, these say more
 const CONN: Record<string, string> = {
   gusset: 'gusset, knife plate', gusset_small: 'small gusset', gusset_lap: 'lapped gusset plate', gusset_cap: 'end cap plate, tab on the gusset', clevis: 'clevis and pin',
@@ -22,6 +22,7 @@ function dims(s: Section): string {
     case 'CHS': return `Ø ${n1(s.d)}, t ${n1(s.tf)} mm`;
     case 'RHS': return `${n1(s.d)} × ${n1(s.bf)}, t ${n1(s.tf)} mm`;
     case '2L': return `2 L ${n1(s.d)} × ${n1(s.d)}, t ${n1(s.tf)} mm`;
+    case '2C': return `2 C, d ${n1(s.d)}, b ${n1((s.bf - ANGLE_GAP) / 2)}, tw ${n1(s.tw)}, tf ${n1(s.tf)} mm`;
     case 'L': return `L ${n1(s.d)} × ${n1(s.bf)}, t ${n1(s.tf)} mm`;
     case 'FB': return `${n1(s.d)} × ${n1(s.bf)} mm`;
     default: return `d ${n1(s.d)}, bf ${n1(s.bf)}, tw ${n1(s.tw)}, tf ${n1(s.tf)} mm`;

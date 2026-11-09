@@ -67,9 +67,9 @@ The specimen input draws five tables of the hub, each test in its test rig. `nod
 - [ ] The slab of the EBF tests (TF2c, TF3c, TF4c, 20 tests). Their rows give no size for it, so they keep their note.
 - [ ] Continuity plates as thick as in the test (`t_cp`). Today they take the thickness of the column flange.
 - [ ] "Exterior - Frame" (one test in the hub, Del_Caprio_et_al_2014_RBS-A).
-- [x] Brace tests (`braces`), SB, SBF and DBF: 281 of 294 (the 2 flat bars too).
-- [ ] Angle and Double Channel braces (8 and 5 tests). `findSection` knows the I sections, the tees, the tubes, the round tubes, the rods, the double angles and the flat bars, but not these.
-- [ ] The single `Angle` braces (8 tests): `singleAngle()` in `sections.ts` gives the section, but they need their own reader in `hub.ts` and the offset of an angle on its end plates, like the flat bar in `bench.ts`.
+- [x] Brace tests (`braces`), SB, SBF and DBF: 294 of 294 (the 2 flat bars too).
+- [x] Double Channel braces (5 tests): `2C` in `sections.ts`, `doubleChannel()` in `hub.ts`.
+- [x] The single `Angle` braces (8 tests): the angle lies on one face of its gusset (`sideShift()` in `bench.ts`).
 - [ ] The gusset outline of a brace from `l_1t` to `l_8b`, when someone tells us what the 8 lengths are. Today the gussets have a generic outline.
 - [x] Column tests (`columns`): 153 of 153.
 - [x] HSS column tests (`hss_columns`), CF, DC and 3PB: 284 of 284. How we read `length__mm` is our own guess (RESSLab-Team/resslab-hub-data#75).
