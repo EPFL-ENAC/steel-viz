@@ -24,8 +24,14 @@ import { BOLT_MS, buildEnd, camera, timeline, type Part } from './steel.ts';
 import { triangles } from './triangles.ts';
 import { I4, MAX_KNOTS, MAX_ZONES, type DeformState, type Move } from './deform.ts';
 
-const HEAD = 13; // bolt head height, mm, as in hlr.ts
-const R = 17; // bolt head, corner to centre, mm
+// an M20 bolt, mm
+const HEAD = 13; // head height, as in hlr.ts
+const R = 17; // head and nut, corner to centre
+const NUT = 18; // nut height
+const SHANK = 10; // the radius of the bolt end past the nut
+// how far it goes past the nut. Short on purpose: its sides have no line,
+// so a long end shows as a ring in the air.
+const TIP = 8;
 const DEEP = 50; // mm: a jump in depth bigger than this makes an outline
 const THIN = 1; // px
 const THICK = 2.25; // px
@@ -57,26 +63,43 @@ export type Viewer = {
   canvas: HTMLCanvasElement;
 };
 
-// one bolt head on point b, looking along nn: its triangles and its lines
-function head(b: V, nn: V, tri: number[], seg: number[]) {
+// The ends of the bolts. A head or a nut is a hex prism on point b, looking
+// along nn: its sides, its top, and its lines (both rings and the corners).
+// The bottom ring is where it sits on the plate. The bolt end past a nut is
+// a short round bar (12 faces) with a ring at each end, and the corners on
+// its outline.
+// rad: 3 numbers per line of seg. 0, 0, 0 for a plain line. For a corner of
+// a round bar, the direction from its axis to the corner: the line shader
+// draws the corner only where one of its two faces looks toward the eye and
+// the other one away, so the bar shows its two sides from any view. The
+// bolts get no outline (see id in show()), so these are their only side lines.
+type Geo = { tri: number[]; seg: number[]; rad: number[] };
+const BAR = 12; // the faces of a round bar. LINE_VS needs tan(pi / BAR)
+function frame(nn: V) {
   const ref: V = Math.abs(nn[2]) > 0.9 ? [1, 0, 0] : [0, 0, 1];
   const a1 = norm(cross(nn, ref));
-  const a2 = cross(nn, a1);
-  const at = (h: number, r: number, t: number) => add(add(b, mul(nn, h)), add(mul(a1, r * Math.cos(t)), mul(a2, r * Math.sin(t))));
-  const lo = [0, 1, 2, 3, 4, 5].map((k) => at(0, R, (k * Math.PI) / 3));
-  const hi = [0, 1, 2, 3, 4, 5].map((k) => at(HEAD, R, (k * Math.PI) / 3));
+  return [a1, cross(nn, a1)];
+}
+function prism(b: V, nn: V, h: number, r: number, k: number, { tri, seg, rad }: Geo) {
+  const [a1, a2] = frame(nn);
+  // from the axis to corner i
+  const out = Array.from({ length: k }, (_, i) => add(mul(a1, Math.cos((2 * i * Math.PI) / k)), mul(a2, Math.sin((2 * i * Math.PI) / k))));
+  const lo = out.map((u) => add(b, mul(u, r)));
+  const hi = out.map((u) => add(add(b, mul(nn, h)), mul(u, r)));
   triangles(hi, tri);
-  for (let i = 0; i < 6; i++) {
-    const j = (i + 1) % 6;
+  for (let i = 0; i < k; i++) {
+    const j = (i + 1) % k;
     triangles([lo[i], lo[j], hi[j], hi[i]], tri);
-    // the top ring and the corners only: the bottom ring is 13 mm below the
-    // top one, on screen the two merge into a blob
-    seg.push(...hi[i], ...hi[j], ...lo[i], ...hi[i]);
+    seg.push(...lo[i], ...lo[j], ...hi[i], ...hi[j], ...lo[i], ...hi[i]);
+    // a hex shows all its corners
+    rad.push(0, 0, 0, 0, 0, 0, ...(k === 6 ? [0, 0, 0] : out[i]));
   }
 }
-// a head is always this many floats
-const HEAD_TRI = 9 * (4 + 6 * 2);
-const HEAD_SEG = 6 * 6 * 2;
+const head = (b: V, nn: V, g: Geo) => prism(b, nn, HEAD, R, 6, g);
+function nut(b: V, nn: V, g: Geo) {
+  prism(b, nn, NUT, R, 6, g);
+  prism(add(b, mul(nn, NUT)), nn, TIP, SHANK, BAR, g);
+}
 
 // ---- shaders (GLSL ES 3.00). The colours are sRGB from end to end.
 // highp for the samplers too: their default is lowp, too coarse for a depth
@@ -167,14 +190,28 @@ uniform mat4 M;
 uniform vec3 off;
 uniform vec2 res;
 uniform float width;
+uniform vec3 view; // toward the eye
 layout(location = 0) in vec4 corner;
 layout(location = 1) in vec3 start;
 layout(location = 2) in vec3 end;
+layout(location = 3) in vec3 rad; // see Geo: 0, or a corner of a round bar
 out vec2 uv;
 ${MOVE}
 void main() {
-  vec4 a = M * vec4(move(start) + off, 1.0);
-  vec4 b = M * vec4(move(end) + off, 1.0);
+  vec3 s = move(start);
+  vec3 e = move(end);
+  if (rad != vec3(0.0)) {
+    // the normals of its two faces are rad +- t (times a scale), t square
+    // to rad and to the axis, and |t| = tan(pi / BAR)
+    vec3 t = ${Math.tan(Math.PI / BAR).toFixed(5)} * normalize(cross(e - s, rad));
+    if (dot(rad + t, view) * dot(rad - t, view) > 0.0) {
+      gl_Position = vec4(2.0, 2.0, 2.0, 1.0); // not on the outline: off screen
+      uv = vec2(0.0);
+      return;
+    }
+  }
+  vec4 a = M * vec4(s + off, 1.0);
+  vec4 b = M * vec4(e + off, 1.0);
   float aspect = res.x / res.y;
   vec2 dir = b.xy - a.xy;
   dir.x *= aspect;
@@ -297,12 +334,12 @@ const STILL = pack({ o: [0, 0, 0], u: [1, 0, 0], n: [0, 0, 1], knots: [], A: I4(
 type Program = { p: WebGLProgram; u: Record<string, WebGLUniformLocation | null> };
 // a render target: a colour texture, and a depth texture or buffer
 type Target = { fb: WebGLFramebuffer; color: WebGLTexture; depth?: WebGLTexture; rb?: WebGLRenderbuffer; w: number; h: number };
-type Buf = { vao: WebGLVertexArrayObject; buf: WebGLBuffer; n: number; draw: number };
-// base: the triangle and line floats before the bolt heads; per: heads per
+type Buf = { vao: WebGLVertexArrayObject; buf: WebGLBuffer; rad?: WebGLBuffer; n: number; draw: number };
+// ends: the triangle and line floats before the first bolt, then after each
 // bolt. fill.n counts vertices, lines.n counts segments; draw: how many of
 // them the build animation shows now. off: where the animation moves it, mm.
 type Piece = {
-  part: Part; fill: Buf; lines?: Buf; base: [number, number]; per: number;
+  part: Part; fill: Buf; lines?: Buf; ends: [number, number][];
   id: RGB; off: V; visible: boolean; color: RGB; width: number; move: Packed;
 };
 
@@ -430,6 +467,7 @@ export function createViewer(
     gl.depthFunc(gl.LEQUAL);
     gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
     gl.polygonOffset(0.5, 2);
+    gl.vertexAttrib3f(3, 0, 0, 0); // rad, for the lines that have none
   };
   init();
 
@@ -444,7 +482,8 @@ export function createViewer(
     gl.bindVertexArray(null);
     return { vao, buf, n: tri.length / 3, draw: tri.length / 3 };
   };
-  const lineBuf = (seg: number[]): Buf => {
+  // rad: see Geo, only when some line has one
+  const lineBuf = (seg: number[], rad?: number[]): Buf => {
     const vao = gl.createVertexArray();
     const buf = gl.createBuffer();
     gl.bindVertexArray(vao);
@@ -459,13 +498,23 @@ export function createViewer(
       gl.vertexAttribPointer(k, 3, gl.FLOAT, false, 24, (k - 1) * 12);
       gl.vertexAttribDivisor(k, 1);
     }
+    let radBuf: WebGLBuffer | undefined;
+    if (rad) {
+      radBuf = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, radBuf);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(rad), gl.STATIC_DRAW);
+      gl.enableVertexAttribArray(3);
+      gl.vertexAttribPointer(3, 3, gl.FLOAT, false, 0, 0);
+      gl.vertexAttribDivisor(3, 1);
+    }
     gl.bindVertexArray(null);
-    return { vao, buf, n: seg.length / 6, draw: seg.length / 6 };
+    return { vao, buf, rad: radBuf, n: seg.length / 6, draw: seg.length / 6 };
   };
   const free = (b?: Buf) => {
     if (!b) return;
     gl.deleteVertexArray(b.vao);
     gl.deleteBuffer(b.buf);
+    if (b.rad) gl.deleteBuffer(b.rad);
   };
 
   // ---- camera, from the same az and el as the SVG
@@ -560,6 +609,7 @@ export function createViewer(
     gl.useProgram(lineP.p);
     gl.uniformMatrix4fv(lineP.u.M, false, M);
     gl.uniform2f(lineP.u.res, canvas.width, canvas.height);
+    gl.uniform3f(lineP.u.view, ...cam.Z);
     for (const p of pieces) {
       if (!p.visible || !p.lines?.draw || (p.part.kind === 'slab') !== slab) continue;
       gl.uniform3fv(lineP.u.off, p.off);
@@ -705,9 +755,9 @@ export function createViewer(
       p.visible = t >= sl.start;
       if (p.part.kind === 'bolts') {
         // one bolt after the other
-        const n = Math.min(p.part.dots.length, Math.max(0, Math.floor((t - sl.start) / anim!.bolt) + 1)) * p.per;
-        p.fill.draw = Math.min(p.fill.n, (p.base[0] + n * HEAD_TRI) / 3);
-        if (p.lines) p.lines.draw = Math.min(p.lines.n, (p.base[1] + n * HEAD_SEG) / 6);
+        const n = Math.min(p.part.dots.length, Math.max(0, Math.floor((t - sl.start) / anim!.bolt) + 1));
+        p.fill.draw = p.ends[n][0] / 3;
+        if (p.lines) p.lines.draw = p.ends[n][1] / 6;
         return;
       }
       const k = ease(Math.min(1, Math.max(0, (t - sl.start) / sl.dur)));
@@ -749,32 +799,33 @@ export function createViewer(
     parts.forEach((part, pi) => {
       const tri: number[] = [];
       const seg: number[] = [];
-      let heads = 0;
       for (const fc of part.faces) {
         triangles(fc.pts, tri);
         for (const [i, j] of fc.edges) seg.push(...fc.pts[i], ...fc.pts[j]);
         for (const p of fc.pts) for (let k = 0; k < 3; k++) [lo[k], hi[k]] = [Math.min(lo[k], p[k]), Math.max(hi[k], p[k])];
       }
-      const base: [number, number] = [tri.length, seg.length];
-      // a bolt through two plates gets a head on both ends
+      // the bolts (Dot in steel.ts): the head, and the nut on the far side
+      // when we know it
+      const ends: [number, number][] = [[tri.length, seg.length]];
+      const g: Geo = { tri, seg, rad: new Array<number>(seg.length / 2).fill(0) };
       for (const dt of part.dots) {
         if (dt.axis) {
-          for (const s of [1, -1]) {
-            const nn = mul(dt.axis, s);
-            head(add(dt.p, mul(nn, dt.half ?? 0)), nn, tri, seg);
-            heads++;
-          }
-        } else if (dt.n) {
-          head(dt.p, dt.n, tri, seg);
-          heads++;
+          const h = dt.half ?? 0;
+          head(add(dt.p, mul(dt.axis, h)), dt.axis, g);
+          nut(sub(dt.p, mul(dt.axis, h)), mul(dt.axis, -1), g);
+        } else if (dt.n && dt.anchor) nut(dt.p, dt.n, g);
+        else if (dt.n && !dt.far) {
+          head(dt.p, dt.n, g);
+          if (dt.grip !== undefined) nut(sub(dt.p, mul(dt.n, dt.grip)), mul(dt.n, -1), g);
         }
+        ends.push([tri.length, seg.length]);
       }
       if (!tri.length) return;
       const tag = (part.joint ? indexOf.get(part.joint.of) ?? pi : pi) + 1;
       const p: Piece = {
-        part, base, per: part.dots.length ? heads / part.dots.length : 0,
-        fill: fillBuf(tri), lines: seg.length ? lineBuf(seg) : undefined,
-        // blue marks the bolts (a head, 13 mm high, gets no outline) and the
+        part, ends,
+        fill: fillBuf(tri), lines: seg.length ? lineBuf(seg, g.rad.some((x) => x) ? g.rad : undefined) : undefined,
+        // blue marks the bolts (a head or a nut gets no outline) and the
         // round parts (outlined with one weight too). A pin joint has one id:
         // no outline inside it, and a pick gives its moving part.
         id: [(tag & 255) / 255, (tag >> 8) / 255, part.kind === 'bolts' ? 1 : part.round ? 0.5 : 0],
@@ -1032,7 +1083,7 @@ export function createViewer(
       let [faces, bolts, lines] = [0, 0, 0];
       for (const p of pieces) {
         faces += p.part.faces.length;
-        bolts += p.part.dots.length;
+        bolts += p.part.dots.filter((d) => !d.far).length;
         lines += p.lines?.n ?? 0;
       }
       return { faces, bolts, lines };
