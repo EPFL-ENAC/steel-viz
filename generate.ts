@@ -16,7 +16,7 @@ import type { Catalog, Section } from './sections.ts';
 import { ANGLE_GAP, rodSection } from './sections.ts';
 import {
   box3, boxOf, flat, geo, hardware, isRound, memberBoxes, memberFaces, resolve, splicePlates, stiffener, supportFace, BEARING_T, BEAM_CONN_KINDS, CONNS, EDGE, PINNED, SETBACK, SPLICE_HALF,
-  type BeamConn, type ConnType, type Fit, type Geo, type P2, type Part, type PartInfo, type Plate, type Rbs,
+  type BeamConn, type ConnType, type Fit, type Geo, type Haunch, type P2, type Part, type PartInfo, type Plate, type Rbs,
 } from './steel.ts';
 import { overlap, own } from './clash.ts';
 import { BEAM_CONNS, findSection, type BraceSpecimen, type ColumnSpecimen, type ConnSpecimen, type LinkSpecimen, type Specimen } from './specimen.ts';
@@ -142,6 +142,8 @@ type Arm = {
   id: string; col: number; to?: number; z: number; bearing: number; L: number; conn: ConnType; conn2?: ConnType; sec: Section; braces: Brace[];
   truss?: Truss; rod?: Rod; post?: Post; splice?: number; face?: number; skew?: number; gable?: Gable;
   rbs?: Rbs; // a reduced beam section, mm from the column face (specimens only)
+  tPlate?: number; // welded_plates: the thickness of the flange plates (specimens only)
+  haunch?: Haunch; // welded_haunch: under the bottom flange (specimens only)
 };
 // A post on the top flange of a beam, `a` along it, `h` high from the top of
 // the beam to the top of its cap plate. Free at the top, where it brings a
@@ -734,7 +736,14 @@ function specimen(spec: ConnSpecimen, cat: Catalog): Structure {
       const ok = sec.kind === 'I' && rbs.a >= 0 && rbs.b > 0 && rbs.c > 0 && rbs.c < (sec.bf - sec.tw) / 2 - 5 && face + rbs.a + rbs.b < b.length - 100;
       if (!ok) throw bad(`${id}: the RBS cut (a ${rbs.a}, b ${rbs.b}, c ${rbs.c} mm) does not fit in the beam`);
     }
-    return { id, col: 0, z, bearing: b.bearing, L: b.length, conn: b.connection, sec, braces: [], ...(rbs ? { rbs } : {}) };
+    const { tPlate, haunch } = b;
+    if (tPlate !== undefined && !(tPlate > 0)) throw bad(`${id}: tPlate must be a number above 0, not ${JSON.stringify(tPlate)}`);
+    if (b.connection === 'welded_haunch' && !haunch) throw bad(`${id}: welded_haunch needs a haunch`);
+    if (haunch) {
+      const ok = b.connection === 'welded_haunch' && !onWeb && sec.kind === 'I' && haunch.depth > 2 * sec.tf && haunch.length > 2 * sec.tf && face + haunch.length < b.length - 100 && z - sec.d - haunch.depth >= 0;
+      if (!ok) throw bad(`${id}: the haunch (depth ${haunch.depth}, length ${haunch.length} mm) does not fit on this beam`);
+    }
+    return { id, col: 0, z, bearing: b.bearing, L: b.length, conn: b.connection, sec, braces: [], ...(rbs ? { rbs } : {}), ...(tPlate ? { tPlate } : {}), ...(haunch ? { haunch } : {}) };
   });
   for (const a of arms)
     for (const o of arms)
@@ -1577,6 +1586,8 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
     const n = ends.find((e) => e.skew)?.skew;
     const [faces, boxes] = [memberFaces(g, seg, cuts), memberBoxes(g)];
     out.push({ id: g.id, step: step++, supports, kind: 'member', from, faces: n ? cutEnd(faces, g, n) : faces, boxes: n ? cutBoxes(boxes, g, n) : boxes, dots: [], info, round: isRound(g.sec) });
+    for (const { e, hw } of hws)
+      if (plates && hw.after) out.push({ id: `${g.id}-${e.at}-haunch`, step: step++, supports: [g.id, e.sId], kind: 'plate', from: g.w, faces: hw.after.faces, boxes: hw.after.boxes, dots: [], info: { type: 'Connection', of: g.id, conn: [e.conn] } });
     const dots = hws.flatMap(({ hw }) => hw.dots);
     if (bolts && dots.length) out.push({ id: `${g.id}-bolts`, step: step++, supports: [g.id, ...supports], kind: 'bolts', faces: [], dots, info: { type: 'Bolts', of: g.id, conn: ends.map((e) => e.conn) } });
   };
@@ -1634,6 +1645,8 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
     }
     const g = geo(a.id, a.sec, p0, p1, true);
     if (a.rbs) g.rbs = { ...a.rbs, a: a.rbs.a - SETBACK[a.conn] };
+    if (a.tPlate) g.tPlate = a.tPlate;
+    if (a.haunch) g.haunch = a.haunch;
     const beam = (a.to === undefined ? 'Cantilever beam' : 'Bay beam') + (a.skew ? `, skewed ${Math.abs(a.skew)}°` : '') + (a.rbs ? ', RBS' : '');
     // an arm slides in along its axis, a bay beam is lowered between its columns
     if (a.splice === undefined) {
@@ -1782,7 +1795,12 @@ function details(
         if (levels.every((l) => Math.abs(l - z) > 30)) levels.push(z);
     }
     const cpT = (sec: Section) => Math.max(10, Math.round(sec.tf));
-    levels.sort((p, q) => p - q).forEach((z, k) => {
+    levels.sort((p, q) => p - q);
+    // a haunch pushes on the column flange at its bottom too. Not in `levels`:
+    // the doubler below stops at the plates of the beam flanges.
+    const haunches = st.continuity === false ? [] : st.arms.filter((a) => a.haunch && a.col === ci).map((a) => a.z - a.sec.d - a.haunch!.depth + a.sec.tf / 2);
+    const below = haunches.filter((z, k) => levels.every((l) => Math.abs(l - z) > 30) && haunches.slice(0, k).every((l) => Math.abs(l - z) > 30));
+    [...below, ...levels].sort((p, q) => p - q).forEach((z, k) => {
       const S = colAt(ci, z);
       const o = add(c.x, [0, 0, z]);
       const t = cpT(S.sec);
