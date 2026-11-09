@@ -9,6 +9,7 @@
 //
 // No three.js and no Node API here: index.ts exports it.
 import type { ConnType } from './steel.ts';
+import { HAUNCH_NOTE, hubHaunch } from './haunch.ts';
 import { hubRbs } from './rbs.ts';
 import { SLAB_NOTE } from './slab.ts';
 import { LINK_CONFIGS, type BraceSpecimen, type ColumnSpecimen, type ConnSpecimen, type LinkSpecimen, type SectionRef, type Specimen, type SpecimenBeam } from './specimen.ts';
@@ -56,9 +57,9 @@ const HUB_CONN: Record<string, [ConnType, string?]> = {
   'WUF-B': ['welded_tab'],
   RBS: ['welded'],
   BFP: ['flange_plates'],
-  WFP: ['flange_plates', 'WFP: the flange plates are welded, drawn bolted'],
+  WFP: ['welded_plates'],
   BEEP: ['end_plate'],
-  KBB: ['flange_plates', 'KBB: the Kaiser bracket is drawn as bolted flange plates'],
+  KBB: ['welded_haunch', HAUNCH_NOTE],
 };
 
 // one record of the hub `connection` table (connections.csv): one column and
@@ -91,6 +92,8 @@ export function fromHubConnection(rec: HubRecord): ConnSpecimen {
   if (note) notes.push(note);
   const cut = ct === 'RBS' ? hubRbs(num('b_bf'), num('d_b'), value('b_bf_rbs'), value('rbs_cut')) : undefined;
   if (cut) notes.push(cut.note);
+  const plates = ct === 'WFP' ? { tPlate: num('t_pl') } : {};
+  const haunch = ct === 'KBB' ? { haunch: hubHaunch(mm(num('d_h')), mm(num('s_h')), text('comments')) } : {};
   // doubler plates: t_dp is one plate, wd its width
   const ndp = value('n_dp');
   if (ndp > 0 && ndp !== 1 && ndp !== 2) throw unsupported('n_dp');
@@ -99,7 +102,7 @@ export function fromHubConnection(rec: HubRecord): ConnSpecimen {
   const tcp = value('t_cp');
 
   const beams: SpecimenBeam[] = (interior ? [0, 180] as const : [0] as const).map((bearing) => ({
-    section: beam, bearing, length: interior ? lb / 2 : exterior, connection, ...(cut?.rbs ? { rbs: cut.rbs } : {}),
+    section: beam, bearing, length: interior ? lb / 2 : exterior, connection, ...(cut?.rbs ? { rbs: cut.rbs } : {}), ...plates, ...haunch,
   }));
   return { id, column: { section: column, height }, beams, continuity: tcp > 0, load, notes, ...(doubler ? { doubler } : {}), ...(slab ? { slab } : {}) };
 }
