@@ -20,7 +20,7 @@
 // buckling, because the brace carries less. The hinge in the middle is the
 // moment there over Mp: the force drops but the bow grows, so it stays near 1
 // while the middle works hardest.
-import { dot, mul, sub, type V } from './vec.ts';
+import { add, dot, mul, sub, type V } from './vec.ts';
 import type { BraceRig, Result, RigStrut } from './generate.ts';
 import type { HubRecord } from './hub.ts';
 import { hingeSize } from './rig.ts';
@@ -88,6 +88,14 @@ const signFlipped = (rec: HubRecord, frameKind: BraceSpecimen['frame']) => frame
 type Line = { id: string; o: V; u: V; n: V; bend: [number, number]; free: [number, number]; Lb: number; Mp?: number };
 type Geometry = { spec: NonNullable<Result['st']['brace']>; rig: BraceRig; sec: Section; lines: Line[] };
 
+// An angle lies on one face of its gusset, and a gusset is one flat plate with
+// no cut along the brace. A bow that starts under the plate pushes the end of
+// the angle through it, so the bow of an angle starts where the gussets end.
+function pastGussets(r: Result, l: BraceRig['lines'][number]): [number, number] {
+  const along = (end: string) => r.parts.find((p) => p.id === `${l.id}-${end}-conn`)?.faces.flatMap((f) => f.pts.map((q) => dot(sub(q, l.o), l.u))) ?? [];
+  return [Math.max(l.s[0], ...along('from')), Math.min(l.s[1], ...along('to'))];
+}
+
 const geometries = new WeakMap<Result, Map<HubRecord, Geometry>>();
 export function geometry(r: Result, rec: HubRecord): Geometry {
   const known = geometries.get(r)?.get(rec);
@@ -97,7 +105,7 @@ export function geometry(r: Result, rec: HubRecord): Geometry {
   const sec = r.st.col;
   const lines = rig.lines.map((l, i): Line => {
     const n = mul(bendDirection(spec.ends, sec, l.u), i ? -1 : 1); // the two braces of a DBF bow apart
-    const bend: [number, number] = spec.ends === 'pin' ? [0, spec.L] : l.s;
+    const bend: [number, number] = spec.ends === 'pin' ? [0, spec.L] : spec.ends === 'gusset' && sec.kind === 'L' ? pastGussets(r, l) : l.s;
     return { ...l, n, bend, free: l.s, Lb: bend[1] - bend[0], Mp: plasticMoment(rec, sec, n, l.u) };
   });
   const g = { spec, rig, sec, lines };
@@ -227,11 +235,16 @@ function shape(r: Result, spec: Specimen, rec: HubRecord, samples: Samples, scal
     const { v, w } = frame([0, 0, 0], l.u);
     const axes: [V, V, V] = [l.u, v, w];
     const name = lines.length > 1 ? `Brace ${i + 1}` : 'Brace';
-    const across = sec.bf / 2 + 2; // no more: the other brace of a DBF is 10 mm away
+    // Across the brace, from its drawn part: an angle isn't centered on the axis.
+    // 2 mm more and no more: the other brace of a DBF is 10 mm away.
+    const drawn = r.parts.find((p) => p.id === l.id)?.faces.flatMap((f) => f.pts.map((pt) => dot(sub(pt, l.o), v))) ?? [-sec.bf / 2, sec.bf / 2];
+    const [lo, hi] = [Math.min(...drawn), Math.max(...drawn)];
+    const across = (hi - lo) / 2 + 2;
+    const onto = (c: V): V => add(c, mul(v, (lo + hi) / 2));
     const { axial, hinge, force } = steps[i];
     const [s0, s1] = l.free;
-    if (axial !== undefined) zones.push({ c: at(l.o, l.u, (s0 + s1) / 2), axes, half: [(s1 - s0) / 2 - 1, across, sec.d], level: axial, slot: AXIAL, label: name, ratio: force >= 0 ? 'N / Pt' : '|N| / Pc' });
-    if (hinge !== undefined) zones.push({ c: at(l.o, l.u, (l.bend[0] + l.bend[1]) / 2), axes, half: [Math.max(sec.d, l.Lb / 10), across, sec.d], level: hinge, slot: MOMENT, label: `${name} hinge`, ratio: '|N| a / Mp' });
+    if (axial !== undefined) zones.push({ c: onto(at(l.o, l.u, (s0 + s1) / 2)), axes, half: [(s1 - s0) / 2 - 1, across, sec.d], level: axial, slot: AXIAL, label: name, ratio: force >= 0 ? 'N / Pt' : '|N| / Pc' });
+    if (hinge !== undefined) zones.push({ c: onto(at(l.o, l.u, (l.bend[0] + l.bend[1]) / 2)), axes, half: [Math.max(sec.d, l.Lb / 10), across, sec.d], level: hinge, slot: MOMENT, label: `${name} hinge`, ratio: '|N| a / Mp' });
   });
   if (!lines.every((l) => l.Mp)) notes.push('No Z and fy: no hinge zone.');
   if (steps[0].axial === undefined) notes.push('No capacity in the record: no axial zone.');

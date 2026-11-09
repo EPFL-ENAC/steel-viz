@@ -9,13 +9,14 @@
 // L: one equal angle, FB: a flat bar. Both sit where the +v angle of a 2L
 // is, their back on v = ANGLE_GAP / 2: a plate in the middle (gusset_lap)
 // fits them like a 2L (an X brace, see generate.ts).
-export type Kind = 'I' | 'RHS' | 'ROD' | 'CHS' | 'C' | '2L' | 'T' | 'L' | 'FB';
+// 2C: two channels back to back, ANGLE_GAP apart, the flanges outward (a brace test only).
+export type Kind = 'I' | 'RHS' | 'ROD' | 'CHS' | 'C' | '2L' | 'T' | 'L' | 'FB' | '2C';
 
 export type Section = {
   id: string;
   kind: Kind;
   d: number; // depth (2L and L: the leg along the gap, FB: the width)
-  bf: number; // flange width (RHS: width, ROD and CHS: the diameter, 2L: both outstanding legs and the gap, L: the outstanding leg, FB: the thickness)
+  bf: number; // flange width (RHS: width, ROD and CHS: the diameter, 2L: both outstanding legs and the gap, 2C: both channels and the gap, L: the outstanding leg, FB: the thickness)
   tf: number; // flange thickness (RHS and CHS: wall, 2L and L: angle thickness, FB: the thickness)
   tw: number; // web thickness (RHS and CHS: wall, 2L and L: angle thickness, FB: the thickness)
   A: number;
@@ -102,6 +103,13 @@ export function rects(s: Section): Rect[] {
       const g = ANGLE_GAP / 2;
       return [[-w, -g, -h, -h + tf], [g, w, -h, -h + tf], [-g - tw, -g, -h + tf, h], [g, g + tw, -h + tf, h]];
     }
+    case '2C': {
+      const g = ANGLE_GAP / 2;
+      return [
+        [-w, -g, -h, -h + tf], [g, w, -h, -h + tf], [-w, -g, h - tf, h], [g, w, h - tf, h],
+        [-g - tw, -g, -h + tf, h - tf], [g, g + tw, -h + tf, h - tf],
+      ];
+    }
     case 'L': {
       const g = ANGLE_GAP / 2;
       return [[g, g + s.bf, -h, -h + tf], [g, g + tw, -h + tf, h]];
@@ -181,6 +189,10 @@ export const channelSection = (id: string, d: number, bf: number, tf: number, tw
 // two angles back to back, ANGLE_GAP apart: `long` is the leg along the gap,
 // `short` the outstanding leg of one angle (a specimen brace, 2 L89x64x6.4)
 export const doubleAngleOf = (id: string, long: number, short: number, t: number) => shaped(id, '2L', long, 2 * short + ANGLE_GAP, t, t);
+
+// two channels back to back, ANGLE_GAP apart: b is the flange of one channel.
+// The gusset goes in the gap, like a double angle (a specimen brace, 2 C100X8)
+export const doubleChannelOf = (id: string, d: number, b: number, tf: number, tw: number) => shaped(id, '2C', d, 2 * b + ANGLE_GAP, tf, tw);
 
 // two equal angles (leg x leg x t) back to back: 2L4X4X1/2, 2L 100x100x10
 export const doubleAngle = (id: string, leg: number, t: number) => doubleAngleOf(`2${id}`, leg, leg, t);

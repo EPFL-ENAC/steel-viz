@@ -218,6 +218,14 @@ export function prof2L(d: number, bf: number, t: number): P2[][] {
   return [ccw(right), ccw(right.map(([a, b]): P2 => [-a, b]))];
 }
 
+// two channels back to back, ANGLE_GAP apart: the webs along the gap, the
+// flanges outward
+export function prof2C(d: number, bf: number, tf: number, tw: number): P2[][] {
+  const [h, g, w] = [d / 2, ANGLE_GAP / 2, bf / 2];
+  const right: P2[] = [[g, -h], [w, -h], [w, -h + tf], [g + tw, -h + tf], [g + tw, h - tf], [w, h - tf], [w, h], [g, h]];
+  return [ccw(right), ccw(right.map(([a, b]): P2 => [-a, b]))];
+}
+
 // one angle, the +v half of a 2L (an X brace)
 export const profL = (d: number, bf: number, t: number): P2[][] => [ccw(angleRight(d / 2, ANGLE_GAP / 2 + bf, t))];
 
@@ -233,6 +241,7 @@ export function profile(s: Section): P2[][] {
     case 'C': return profC(s.d, s.bf, s.tw, s.tf);
     case 'T': return profT(s.d, s.bf, s.tw, s.tf);
     case '2L': return prof2L(s.d, s.bf, s.tf);
+    case '2C': return prof2C(s.d, s.bf, s.tf, s.tw);
     case 'L': return profL(s.d, s.bf, s.tf);
     case 'FB': return profFB(s.d, s.bf);
     case 'ROD': return profRound(s.d);

@@ -196,7 +196,7 @@ Parts must not go through each other. A secondary beam is coped (its flanges cut
 It can also draw a real test of RESSLab Hub instead of a seed: a specimen. For now it draws four kinds of test, each one in its test rig:
 
 - A beam-to-column subassembly (the test of one connection): one column with one or two beams. That's the `connection` table of the hub, 99 of its 100 tests.
-- A brace test: one brace, alone or in a test frame. That's the `braces` table, 281 of its 294 tests. See "Brace tests" below.
+- A brace test: one brace, alone or in a test frame. That's the `braces` table, all its 294 tests. See "Brace tests" below.
 - A column test: one column, pushed sideways at its top under an axial load. That's the `columns` table, all its 153 tests. See "Column tests" below.
 - An HSS column test: one square or rectangular tube, standing like a column test, or lying on two rollers and pushed at mid span. That's the `hss_columns` table, all its 284 tests. See "HSS column tests" below.
 - An EBF link test: the link of an eccentrically braced frame (the short piece of beam that yields in shear), alone or in a one bay frame. That's the `eccentric_braced_frames` table, all its 240 tests. See "EBF link tests" below.
@@ -302,9 +302,7 @@ It prints one line for each table, then the errors grouped by field (November 20
 ```text
 connections: 99 / 100 drawn, 0 mechanism, 0 clash, 0 floating
   specimen_type "Exterior - Frame" is not supported yet: 1 (Del_Caprio_et_al_2014_RBS-A)
-braces: 281 / 294 drawn, 0 mechanism, 0 clash, 0 floating
-  cross_section_shape "Angle" is not supported yet: 8 (Jain_1L, Jain_2L, Jain_3L, Jain_4L, Jain_5L, ...)
-  cross_section_shape "Double Channel" is not supported yet: 5 (Black_Strut-11, Lehman_Roeder_HSS29, Aslani_C1, Aslani_C2, Aslani_C3)
+braces: 294 / 294 drawn, 0 mechanism, 0 clash, 0 floating
 columns: 153 / 153 drawn, 0 mechanism, 0 clash, 0 floating
 hss_columns: 284 / 284 drawn, 0 mechanism, 0 clash, 0 floating
 eccentric_braced_frames: 240 / 240 drawn, 0 mechanism, 0 clash, 0 floating
@@ -334,7 +332,10 @@ The section comes from the numbers:
 | I-shaped | an I. `t_br` is the flange and `w_br` the web (the data dictionary says the other way round). A `WT` name gives a tee. |
 | Double Angle | from the name. `L152x89x9.5` and `2 L89x64x6.4` are long leg x short leg x t, long legs back to back. `49.7x3.88` has equal legs. `d_br` and `b_br` don't mean the same thing in every row, so they are used only when the name doesn't read. |
 | Flat Bar | a flat bar, `b_br` x `t_br`, on the middle of its end plates |
-| Angle, Double Channel | not drawn yet (13 rows) |
+| Angle | one equal angle, `d_br` x `t_br`. Its back lies on one face of the gusset, the outstanding leg points away from it. Unequal legs are not supported. The rail says when `area` is more than 5 % off the drawn section (`Jain_3L`, `Jain_7L`). |
+| Double Channel | two channels, webs back to back, `ANGLE_GAP` apart, the gusset in the gap. The flange is the thicker of `t_br` and `w_br`. `area` says if `b_br` is one channel or the pair. With no `w_br`, `t_br` is two flanges, `b_br` is the pair and the web comes from `area`. The rail says when a row doesn't read the usual way. |
+
+The stitches of a double channel (`stick_space`) are not drawn, like the ones of a double angle. The rail says when a row has them.
 
 A brace test of our own, as JSON:
 
@@ -343,7 +344,7 @@ A brace test of our own, as JSON:
   "angle": 40, "ends": "gusset", "frame": "SBF", "plates": { "top": 12, "bottom": 12 } }
 ```
 
-`brace.test.ts` covers the three hub files of `specimens/` (`Fell_et_al_HSS1-1` SB, `Takeuchi_Matsui_528` SBF, `Wakabayashi_DPC1-1` DBF), every frame with every end type, the section shapes and the errors.
+`brace.test.ts` covers the three hub files of `specimens/` (`Fell_et_al_HSS1-1` SB, `Takeuchi_Matsui_528` SBF, `Wakabayashi_DPC1-1` DBF), every frame with every end type, the section shapes and the errors. `angle-channel.test.ts` covers the single angles and the double channels.
 
 ### Column tests
 
@@ -441,6 +442,7 @@ The way it bends depends on the ends:
 | ends | direction | shape | Lb |
 |---|---|---|---|
 | gusset | out of plane | half sine, it folds at the end of the tube | length of the tube |
+| gusset, single angle | out of plane, toward the outstanding leg, never on its diagonal | half sine, it folds where the gussets end, because a gusset is one flat plate and an angle lies on its face | length between the gussets |
 | fixed | weak axis, out of plane for a round or square section | (1 - cos 2πξ) / 2, the ends stay square | length of the tube |
 | pin | weak axis, in plane for a round or square section | half sine | work point to work point |
 

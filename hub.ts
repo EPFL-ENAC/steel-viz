@@ -127,6 +127,32 @@ const BRACE_ENDS: Record<string, BraceSpecimen['ends']> = { 'Gusset plate': 'gus
 // a double angle name: L152x89x9.5 or 2 L89x64x6.4 (long x short x t), 49.7x3.88 (leg x t)
 const ANGLES = /^(?:2\s*)?L?\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)(?:\s*[x×]\s*(\d+(?:\.\d+)?))?$/i;
 
+// A double channel. The columns don't mean the same thing in every row. The
+// reading closest to `area` is not always right: on Lehman_Roeder_HSS29 it
+// swaps the flange and the web. So, in this order:
+// - no w_br: t_br is the two flanges, b_br the pair, the web comes from area
+// - else the flange is the thicker of t_br and w_br (always, for a channel),
+//   and area only says if b_br is one channel or the pair
+function doubleChannel(rec: HubRecord, id: string, notes: string[]): SectionRef {
+  const { text, value, num, unsupported } = fields(rec, id);
+  const [d, width, t, area] = [num('d_br'), num('b_br'), num('t_br'), num('area')];
+  const w = value('w_br');
+  let [b, tf, tw] = [width / 2, t / 2, 0];
+  if (!Number.isFinite(w)) {
+    tw = mm((area / 2 - 2 * b * tf) / (d - 2 * tf));
+    if (!(tw > 0)) throw unsupported('area');
+    notes.push(`no w_br: t_br ${t} read as two flanges, b_br ${width} as the pair, the web ${tw} mm from area`);
+  } else {
+    [tf, tw] = t >= w ? [t, mm(w)] : [mm(w), t];
+    if (t < w) notes.push(`t_br ${t} read as the web and w_br ${w} as the flange (a flange is the thicker one)`);
+    const areaOf = (x: number) => 2 * (2 * x * tf + (d - 2 * tf) * tw);
+    if (Math.abs(areaOf(width) - area) <= Math.abs(areaOf(b) - area)) b = width;
+    else notes.push(`b_br ${width} read as the width of the pair (from area)`);
+  }
+  if (value('stick_space') > 0) notes.push(`stick_space ${value('stick_space')} mm: the stitches are not drawn`);
+  return { id: text('cross_section_size') || `2C ${d}x${b}x${tf}x${tw}`, shape: '2C', d, b, tf, tw };
+}
+
 // one record of the hub `braces` table (steel_braces.csv): one brace, alone
 // (SB) or in a frame (SBF, DBF). The section comes from the numbers, except
 // for double angles (from the name, the numbers don't mean the same thing in
@@ -168,6 +194,14 @@ export function fromHubBrace(rec: HubRecord): BraceSpecimen {
     // b_br the width, t_br the thickness (d_br is the thickness again)
     const [b, t] = [num('b_br'), num('t_br')];
     section = { id: `FB ${name || `${b}x${t}`}`, shape: 'FB', b, t };
+  } else if (shape === 'Angle') {
+    const [d, b, t] = [num('d_br'), num('b_br'), num('t_br')];
+    if (d !== b) throw unsupported('cross_section_size');
+    const [area, drawn] = [value('area'), t * (2 * d - t)];
+    if (Math.abs(drawn - area) > 0.05 * area) notes.push(`area ${area} does not match the legs d_br and b_br (${Math.round(drawn)}), drawn from the legs`);
+    section = { id: name || `L ${d}x${b}x${t}`, shape: 'L', d, t };
+  } else if (shape === 'Double Channel') {
+    section = doubleChannel(rec, id, notes);
   } else throw unsupported('cross_section_shape');
 
   const length = num('l_b');

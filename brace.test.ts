@@ -210,7 +210,7 @@ test('fromHubBrace: the end types and the plate thickness', () => {
 test('fromHubBrace: an error names the field it cannot read', () => {
   const fails = (o: HubRecord, msg: RegExp) => assert.throws(() => read(o), msg);
   fails({ cross_section_shape: 'na' }, /^Error: row: cross_section_shape is missing$/);
-  fails({ cross_section_shape: 'Angle' }, /^Error: row: cross_section_shape "Angle" is not supported yet$/);
+  fails({ cross_section_shape: 'Zed' }, /^Error: row: cross_section_shape "Zed" is not supported yet$/);
   fails({ d_br: 'na' }, /^Error: row: d_br is missing$/);
   fails({ l_b: 'nr' }, /^Error: row: l_b is missing$/);
   fails({ brace_angle: 90 }, /^Error: row: brace_angle "90" is not supported yet$/);
