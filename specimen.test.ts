@@ -114,7 +114,6 @@ test('the hub connection types and the notes', () => {
   assert.deepEqual(conn('WUF-W').notes, []);
   assert.equal(conn('BFP').beams[0].connection, 'flange_plates');
   assert.equal(conn('BEEP').beams[0].connection, 'end_plate');
-  assert.match(conn('KBB').notes!.join(), /Kaiser/);
   assert.match(conn('XYZ').notes!.join(), /not known/);
   const s = fromHubConnection({ ...base, n_dp: 2, t_dp: 12.7, slab: true });
   assert.deepEqual(s.doubler, { n: 2, t: 12.7 });

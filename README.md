@@ -107,10 +107,14 @@ Each beam end has one kind of connection. The kinds are a small catalog, `CONNS`
 | tee | `tee` | column flange, column web, beam | pin | a WT: its flange bolted to the face, its stem bolted to the beam web. On a channel, the stem is on the side away from its flanges. |
 | stiffened end plate | `end_plate_stiffened` | column flange, column web | moment | the extended end plate, with a triangle stiffener above the top flange and below the bottom flange |
 | welded flanges, bolted web | `welded_tab` | column flange, column web | moment | the flanges welded like `welded`, and the shear tab on the web |
+| welded flange plates | `welded_plates` | column flange, column web | moment | the plates of `flange_plates`, thick as the test says, with no bolts. The web tab has no bolts too. Specimens only. |
+| welded, with a haunch | `welded_haunch` | column flange | moment | the flanges welded like `welded`, and a haunch under the bottom flange at the column face. Specimens only. |
 
 The fix loop and the sizing only use the first four kinds. The other five come after, from a draw of their own (`connKindsP`, 0.35 by default). Each beam end takes one draw, keyed by its id like the member shapes, so the result doesn't depend on the order of the draws. Under `connKindsP`, the end gets a kind that can take the place of the one it has, and that fits where it lands. Clip angles, the two seats and the tee take the place of a shear tab. The stiffened end plate takes the place of an end plate. Each one has the same pin or moment and the same setback as the kind it replaces. So the solver, the sections and the members don't change, only the plates at the end. A secondary beam on a beam can only get clip angles or a tee. A truss chord keeps its kind.
 
 `welded_tab` is for the WUF-B tests of the hub. No random draw picks it, only `--conn welded_tab` or a specimen. Its tab has the size of the shear tab: 10 mm thick, 115 mm from the face, one line of 2 to 8 bolts at 75 mm, as many as the clear web of the beam takes.
+
+`welded_plates` and `welded_haunch` need numbers from the test, so only a specimen can have them: they aren't in `--conn`, the playground list or any draw. The haunch is its own part (`beam1-from-haunch`), because it runs along the beam. It stands on the beam and the column (`supports`), in this order, so in the deformed view it bends with the beam. Its box only touches the beam and the column face. The column gets one more pair of continuity plates at the bottom of the haunch, and the doubler still stops at the plates of the beam flanges.
 
 The column splice keeps clear of the seats and the end plates. A new kind that would go through another part goes back to the old one. With `connKindsP` at 0, a seed gives the same parts as before these kinds (`params-conn-kinds-off.test.ts` checks it). With `--conn` set to one kind, there is no draw: every beam end that can take it gets it.
 
@@ -225,7 +229,8 @@ The pin of the link (or of the actuator) on the head is the top pin of the colum
 - `bearing`: 0 and 180 put the beam on a column flange, 90 and 270 on the web.
 - `length`: from the column axis to the beam tip, in mm.
 - `at`: the height of the beam centre line above the column foot. By default, half the column height.
-- `connection`: one of the kinds of "Beam end connections" above that fit a column (`shear_tab`, `end_plate`, `flange_plates`, `welded`, `clip_angles`, `seated`, `stiffened_seat`, `tee`, `end_plate_stiffened`, `welded_tab`). A beam alone on a pinned kind (a shear tab, clip angles, a seat, a tee) is a mechanism: the log says so, and the drawing still comes out.
+- `connection`: one of the kinds of "Beam end connections" above that fit a column (`shear_tab`, `end_plate`, `flange_plates`, `welded`, `clip_angles`, `seated`, `stiffened_seat`, `tee`, `end_plate_stiffened`, `welded_tab`, `welded_plates`, `welded_haunch`). A beam alone on a pinned kind (a shear tab, clip angles, a seat, a tee) is a mechanism: the log says so, and the drawing still comes out.
+- `tPlate`: the thickness of the plates of `welded_plates`, in mm. `haunch: { "depth", "length", "straight" }`: the haunch of `welded_haunch`, in mm, deep at the column face. `straight` gives a rectangle with a closing plate, not a triangle.
 - `continuity: false` leaves out the continuity plates. `beams: []` gives a column alone.
 - `doubler: { "n", "t", "w" }`: doubler plates on the column web, in the panel zone (I column only). `n` 1 puts one plate on the −x side of the web (the side the iso view looks at), `n` 2 one on each side. `t` is one plate, `w` its width (by default, and at most, the web between the flanges, centred). They stop at the continuity plates. With no continuity plates, they go 150 mm past the beam flanges, above and below (the usual 6 in).
 - `load`: `beam` (the default) or `column`, what the actuators push (see the rig above).
@@ -246,11 +251,11 @@ From a hub record:
 | WUF-B | welded flanges, bolted web (the tab has the shear tab size, `t_pl` is NA) | |
 | RBS | welded, with the cut in the beam flanges (`rbs.ts`) | where the cut is and how long: the data doesn't say, so we take a = 0.625 `b_bf` from the column face and b = 0.75 `d_b` (the middle of the AISC 358 ranges). The depth comes from `b_bf_rbs` |
 | BFP | flange plates | |
-| WFP | flange plates | the plates are welded, we draw them bolted |
+| WFP | welded flange plates, thick as `t_pl` | |
 | BEEP | end plate | |
-| KBB | flange plates | the Kaiser bracket |
+| KBB | welded, with a haunch (`haunch.ts`) | the data says haunch, not Kaiser bracket: `d_h` is only on these rows, and the comments say "hanch". It has no outline, so we take `d_h` deep at the column face, `s_h` long, web and flange thick and wide as the beam, triangular unless the comments say straight (PN500C-SH) |
 
-What we draw differently from the real test goes into the log as a note: the connection, the RBS cut, what we take for the slab. A test that is not a subassembly ("Exterior - Frame"), or a missing number, throws an error that names the field.
+What we draw differently from the real test goes into the log as a note: the connection, the RBS cut, the haunch, what we take for the slab. A test that is not a subassembly ("Exterior - Frame"), or a missing number, throws an error that names the field.
 
 ```sh
 node cli.ts --specimen specimens/Chi_and_Uang_2002_DC2.json --view iso   # writes steel-Chi_and_Uang_2002_DC2-iso.svg
@@ -419,7 +424,7 @@ A test doesn't always have all the files. The rail lists what we estimate instea
 
 The colors come from the data, and the rail shows each value next to its color:
 
-- Beam hinge, in orange: |M| / Mp at the column face, over one beam depth. Mp is `z_xb` times the beam yield stress. On an RBS test the hinge is at the center of the cut, s = a + b / 2 from the column face, over the length of the cut. M at the cut is M at the face times (l_o - s) / l_o: with the beam file l_o is `l_o` of the record, with Global it is the lever of the actuator force. Mp is `z_xb_rbs` times the same yield stress.
+- Beam hinge, in orange: |M| / Mp at the column face, over one beam depth. Mp is `z_xb` times the beam yield stress. On an RBS test the hinge is at the center of the cut, s = a + b / 2 from the column face, over the length of the cut. M at the cut is M at the face times (l_o - s) / l_o: with the beam file l_o is `l_o` of the record, with Global it is the lever of the actuator force. Mp is `z_xb_rbs` times the same yield stress. On a haunch test the hinge starts just past the haunch tip, over one beam depth, so it doesn't color the haunch. M is at `s_h` from the column face, the same way, and Mp is the one of the plain beam.
 - Panel zone, in blue: |V| / Rn, between the beam flanges. Rn is `r_n_pl_m_aisc`, else `r_n_pl_n_aisc`, else `r_n_el_n_aisc`.
 
 A test with a missing capacity has no zone for it, and the rail says why. A test with only a `Panel_zone` file has no force, so it has no beam hinge zone, and the rail says why too.

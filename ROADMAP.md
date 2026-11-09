@@ -61,7 +61,8 @@ The specimen input draws five tables of the hub, each test in its test rig. `nod
 - [x] Beam-to-column tests (`connections`), beam loaded or column loaded: 99 of 100.
 - [x] RBS: the cut in the beam flanges. Where it starts and how long it is come from the AISC 358 rule, the data doesn't give them.
 - [x] WUF-B: the bolted shear tab on the beam web, next to the welded flanges. Done: `welded_tab`, the tab has the size of the shear tab (`t_pl` is NA).
-- [ ] KBB: the Kaiser bracket, today drawn as bolted flange plates. WFP: welded flange plates, today drawn bolted.
+- [x] WFP: welded flange plates, thick as `t_pl`, no bolts. Done: `welded_plates`.
+- [x] KBB: the 7 rows are drawn as welded haunches, not as Kaiser brackets, because that's what the data says: only these rows have `d_h` ("shift of the beam effective depth due to presence of hanches"), and the comments say "hanch". Done: `welded_haunch`. The data has no outline, so we take it (`haunch.ts`), and the note in the rail says so. The hinge is at `s_h`.
 - [x] Doubler plates on the column web (`n_dp`).
 - [x] The concrete slab (`slab`): the concrete and the deck ribs, in light lines, on the 13 tests we draw. The data has no slab length and no rib spacing, so we take them. The shear studs are not drawn, they are inside the concrete.
 - [ ] The slab of the EBF tests (TF2c, TF3c, TF4c, 20 tests). Their rows give no size for it, so they keep their note.

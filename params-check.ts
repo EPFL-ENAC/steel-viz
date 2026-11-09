@@ -15,6 +15,7 @@ const SEEDS = 25;
 
 // the kinds of before the connKindsP stream, and the ones it draws (they
 // take the place of an old kind). welded_tab is in neither: no draw picks it.
+// welded_plates and welded_haunch are for specimens only (specimenOnly).
 export const OLD: ConnType[] = ['shear_tab', 'end_plate', 'flange_plates', 'welded', 'gusset', 'gusset_small', 'gusset_lap', 'clevis'];
 export const NEW: ConnType[] = BEAM_CONN_KINDS.filter((k) => CONNS[k].replaces);
 export const kinds = (r: ReturnType<typeof generate>) => r.parts.flatMap((q) => q.info?.conn ?? []) as ConnType[];

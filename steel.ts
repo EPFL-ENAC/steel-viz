@@ -325,7 +325,14 @@ export type Geo = {
   tw: number;
   copes: Cope[]; // set from the connections, before the faces are made
   rbs?: Rbs; // a reduced beam section near p0 (a beam-to-column test only)
+  tPlate?: number; // the thickness of welded flange plates (a beam-to-column test only)
+  haunch?: Haunch; // a welded haunch under the bottom flange at p0 (a beam-to-column test only)
 };
+
+// A haunch under a beam (haunch.ts). depth: at the column face, flange
+// included, mm. length: along the beam from the column face, mm. straight: a
+// rectangle in elevation, else a triangle.
+export type Haunch = { depth: number; length: number; straight: boolean };
 
 // A cope: the end of a beam cut back where it meets the flanges of the beam
 // it frames into. `top` and `bot` are the depths cut away (0 = none), over
@@ -629,7 +636,7 @@ export function boltLine(span: number, max: number): { n: number; pitch: number 
 // a plate in the web plane (shear tab), from the support face into the
 // member. One vertical line of bolts, as many as the clear web `clear`
 // allows. The plate is as tall as the bolt group plus the edge distances.
-function webPlate(g: Geo, r: Resolved, t: number, L0: number, max: number, hw: Hardware) {
+function webPlate(g: Geo, r: Resolved, t: number, L0: number, max: number, hw: Hardware, bolted = true) {
   const L = Math.max(L0, r.gap + 2 * EDGE);
   const lin = L - r.gap;
   hw.reach.push(lin);
@@ -640,8 +647,9 @@ function webPlate(g: Geo, r: Resolved, t: number, L0: number, max: number, hw: H
   const centre = add(add(r.p, mul(r.inward, L / 2 - r.gap)), mul(g.w, mid));
   const faces = box3(centre, g.w, r.inward, g.tw + 2 * t, h, L);
   hw.boxes.push(boxOf(centre, g.w, r.inward, g.tw + 2 * t, h, L));
-  for (const [dw] of grid(n, 1, pitch, 0))
-    hw.dots.push({ p: add(add(r.p, mul(r.inward, lin / 2)), mul(g.w, mid + dw)), axis: g.v, half: g.tw / 2 + t });
+  if (bolted)
+    for (const [dw] of grid(n, 1, pitch, 0))
+      hw.dots.push({ p: add(add(r.p, mul(r.inward, lin / 2)), mul(g.w, mid + dw)), axis: g.v, half: g.tw / 2 + t });
   hw.faces.push(...faces);
 }
 
@@ -763,12 +771,15 @@ export function splicePlates(lo: Geo, hi: Geo, kind: 'bearing' | 'flange'): { fa
 }
 
 export type BeamConn = 'shear_tab' | 'end_plate' | 'flange_plates' | 'welded' | 'clip_angles' | 'seated' | 'stiffened_seat' | 'tee' | 'end_plate_stiffened' | 'welded_tab';
-export type ConnType = BeamConn | 'gusset' | 'gusset_small' | 'gusset_lap' | 'gusset_cap' | 'clevis';
+// beam end kinds that need data from the test record (see specimenOnly)
+export type SpecimenConn = 'welded_plates' | 'welded_haunch';
+export type ConnType = BeamConn | SpecimenConn | 'gusset' | 'gusset_small' | 'gusset_lap' | 'gusset_cap' | 'clevis';
 // where a beam end lands: on a column flange, on a column web, on the web of a beam
 export type Fit = 'flange' | 'web' | 'beam';
 // the solid of one connection and its bolt dots. `reach`: how far the plates
-// go along the member, in mm from its end.
-export type Hardware = { faces: Face[]; dots: Dot[]; reach: number[]; boxes: Box[] };
+// go along the member, in mm from its end. `after`: plates that go on after
+// the member and stand on it (a haunch): they get their own part, after it.
+export type Hardware = { faces: Face[]; dots: Dot[]; reach: number[]; boxes: Box[]; after?: { faces: Face[]; boxes: Box[] } };
 // One kind of connection.
 // - pinned: the solver takes the end as a pin (else it holds the moment).
 // - setback: the gap the member leaves at its end. For a gusset it leaves
@@ -783,6 +794,8 @@ export type Hardware = { faces: Face[]; dots: Dot[]; reach: number[]; boxes: Box
 //   column splice keeps clear of it.
 // - replaces: the kind it can take the place of, with the same pin or
 //   moment and the same setback (moreKinds() in generate.ts).
+// - specimenOnly: it needs data from the test record, so only a specimen can
+//   have it. It isn't in BEAM_CONN_KINDS: not in the UI, not in --conn.
 export type ConnSpec = {
   label: string;
   pinned: boolean;
@@ -790,6 +803,7 @@ export type ConnSpec = {
   fits?: Fit[];
   past?: [number, number];
   replaces?: ConnType;
+  specimenOnly?: boolean;
   draw: (g: Geo, r: Resolved, hw: Hardware) => void;
 };
 
@@ -975,9 +989,8 @@ function endPlateStiffened(g: Geo, r: Resolved, hw: Hardware) {
   hw.reach.push(L);
 }
 
-function flangePlates(g: Geo, r: Resolved, hw: Hardware) {
+function flangePlates(g: Geo, r: Resolved, hw: Hardware, t = 16, bolted = true) {
   const { p, inward, gap } = r;
-  const t = 16;
   // bolts in pairs across the flange; a narrow flange gets a wider plate
   const gauge = Math.max(PITCH, g.sec.bf - 2 * EDGE);
   const wp = Math.max(g.sec.bf, gauge + 2 * EDGE);
@@ -987,6 +1000,7 @@ function flangePlates(g: Geo, r: Resolved, hw: Hardware) {
     plate(hw, add(add(p, mul(inward, L / 2 - gap)), mul(g.w, dw)), g.w, inward, wp, t, L);
     const lin = L - gap;
     if (top) hw.reach.push(lin);
+    if (!bolted) continue;
     const rows = Math.max(1, Math.floor((lin - 2 * EDGE) / PITCH) + 1);
     for (let rr = 0; rr < rows; rr++)
       for (const s of [-1, 1]) {
@@ -995,7 +1009,35 @@ function flangePlates(g: Geo, r: Resolved, hw: Hardware) {
         hw.dots.push({ p: pt, n: mul(g.w, top ? -1 : 1) });
       }
   }
-  webPlate(g, r, 10, 115, 3, hw);
+  webPlate(g, r, 10, 115, 3, hw, bolted);
+}
+
+// A haunch under the bottom flange, at the column face (haunch.ts). The beam
+// is welded, so it starts on the face, at r.p. Outlines in elevation: x along
+// the beam from the face, y down from the bottom of the beam. All its plates
+// have one box, so nothing else can go in the wedge.
+function weldedHaunch(g: Geo, r: Resolved, hw: Hardware) {
+  if (!g.haunch) return;
+  const { depth: D, length: L, straight } = g.haunch;
+  const { tf, bf } = g.sec;
+  const o = add(r.p, mul(g.w, wAt(g, g.d)));
+  const plates: [number, P2[]][] = [];
+  if (straight) {
+    plates.push([bf, [[0, D - tf], [L, D - tf], [L, D], [0, D]]]);
+    plates.push([bf, [[L - tf, 0], [L, 0], [L, D - tf], [L - tf, D - tf]]]); // closes the open end
+    plates.push([g.tw, [[0, 0], [L - tf, 0], [L - tf, D - tf], [0, D - tf]]]);
+  } else {
+    // the sloped flange: plumb on the column, flat on the beam flange
+    const tv = (tf * Math.hypot(L, D)) / L; // its thickness on a plumb line
+    const x = L - (tv * L) / D; // where its top side meets the beam
+    plates.push([bf, [[0, D], [L, 0], [x, 0], [0, D - tv]]]);
+    plates.push([g.tw, [[0, 0], [x, 0], [0, D - tv]]]);
+  }
+  hw.after = {
+    faces: plates.flatMap(([t, pts]) => flat(o, r.inward, g.w, t, pts).faces),
+    boxes: [flat(o, r.inward, g.w, bf, [[0, 0], [L, 0], [L, D], [0, D]]).box],
+  };
+  hw.reach.push(L); // the beam gets a vertex at the tip
 }
 
 function gusset(g: Geo, r: Resolved, hw: Hardware, small: boolean, cap = false) {
@@ -1131,6 +1173,10 @@ export const CONNS: Record<ConnType, ConnSpec> = {
   // WUF-B (hub tests): the flanges welded like `welded`, a shear tab bolted to the web.
   // No `replaces` and not in BEAM_CONN: no random draw ever picks it.
   welded_tab: { label: 'welded flanges, bolted web', pinned: false, setback: 0, fits: ['flange', 'web'], draw: shearTab },
+  // WFP (hub tests): the plates of flange_plates, as thick as the record says, welded.
+  welded_plates: { label: 'welded flange plates', pinned: false, setback: 13, fits: ['flange', 'web'], specimenOnly: true, draw: (g, r, hw) => flangePlates(g, r, hw, g.tPlate ?? 16, false) },
+  // KBB (hub tests, see haunch.ts): the flanges welded, a haunch under the beam.
+  welded_haunch: { label: 'welded, with a haunch', pinned: false, setback: 0, fits: ['flange'], specimenOnly: true, draw: weldedHaunch },
   gusset: { label: 'gusset', pinned: true, setback: 195, draw: (g, r, hw) => gusset(g, r, hw, false) },
   gusset_small: { label: 'small gusset', pinned: true, setback: 130, draw: (g, r, hw) => gusset(g, r, hw, true) },
   gusset_lap: { label: 'lapped gusset', pinned: true, setback: 40, draw: gussetLap },
@@ -1142,7 +1188,9 @@ const CONN_TYPES = Object.keys(CONNS) as ConnType[];
 export const PINNED: ConnType[] = CONN_TYPES.filter((c) => CONNS[c].pinned);
 export const SETBACK = Object.fromEntries(CONN_TYPES.map((c) => [c, CONNS[c].setback])) as Record<ConnType, number>;
 // the kinds for a beam end
-export const BEAM_CONN_KINDS = CONN_TYPES.filter((c) => CONNS[c].fits) as BeamConn[];
+export const BEAM_CONN_KINDS = CONN_TYPES.filter((c) => CONNS[c].fits && !CONNS[c].specimenOnly) as BeamConn[];
+// the kinds for a beam end of a specimen
+export const SPECIMEN_CONN_KINDS = CONN_TYPES.filter((c) => CONNS[c].fits);
 
 export function hardware(g: Geo, typ: ConnType, r: Resolved): Hardware {
   const hw: Hardware = { faces: [], dots: [], reach: [], boxes: [] };

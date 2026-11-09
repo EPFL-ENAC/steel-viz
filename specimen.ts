@@ -15,7 +15,7 @@
 //
 // No three.js here: this file only needs the section formulas.
 import { chsSection, doubleAngleOf, doubleChannelOf, flatBar, iSection, rhsSection, rodSection, singleAngle, teeSection, type Catalog, type Family, type Section } from './sections.ts';
-import { BEAM_CONN_KINDS, type ConnType } from './steel.ts';
+import { SPECIMEN_CONN_KINDS, type ConnType, type Haunch } from './steel.ts';
 
 // A name from the section tables ('W14X82', 'HE 300 B', also written
 // 'W14x82', 'HEB 300'), a built-up name ('H-700x300x13x24': d x bf x tw x tf),
@@ -43,10 +43,12 @@ export type SpecimenBeam = {
   bearing: 0 | 90 | 180 | 270; // 0 and 180 on the column flanges, 90 and 270 on its web
   length: number; // mm, from the column axis to the beam tip
   at?: number; // mm, beam centre line above the column foot (default: half the column height)
-  connection: ConnType; // one of BEAM_CONNS: shear_tab, end_plate, flange_plates, welded, ...
+  connection: ConnType; // one of BEAM_CONNS: shear_tab, end_plate, flange_plates, welded, ..., welded_plates, welded_haunch
   // a reduced beam section (an I beam only): the cut starts `a` mm from the
   // column face, is `b` mm long and `c` mm deep at its center (rbs.ts)
   rbs?: { a: number; b: number; c: number };
+  tPlate?: number; // welded_plates: the thickness of the flange plates, mm (default 16)
+  haunch?: Haunch; // welded_haunch needs it: under the bottom flange (an I beam only, haunch.ts)
 };
 
 export type ConnSpecimen = {
@@ -148,7 +150,7 @@ export type LinkSpecimen = {
 export type Specimen = ConnSpecimen | BraceSpecimen | ColumnSpecimen | LinkSpecimen;
 
 // the kinds a beam end of a specimen can have
-export const BEAM_CONNS: ConnType[] = BEAM_CONN_KINDS;
+export const BEAM_CONNS: ConnType[] = SPECIMEN_CONN_KINDS;
 export const LINK_CONFIGS: LinkSpecimen['config'][] = ['TF1', 'TF2', 'TF3', 'TF2c', 'TF3c', 'TF4', 'TF4c'];
 
 // ------------------------------------------------------------- sections
