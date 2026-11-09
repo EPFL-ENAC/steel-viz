@@ -276,6 +276,8 @@ const HINGE_OUTSIDE = [
   'Nip_50x50x3x2050-SS-CF', 'Nip_60x40x3x2050-SS-CF', 'Nip_50x50x3x1250-SS-CF', 'Nip_60x40x3x1250-SS-CF',
   // z_x and z_y are 1000 too big
   'Wakabayashi_RB4C',
+  // z_x and z_y are 2.3 times too small: 711, the L25.4x25.4x6.4 gives 1659
+  'Jain_2L',
   // z_x and z_y are wrong, and the file goes to 2.4 times p_t_theory
   'Wakabayashi_FTBC',
   // the middle moves before the peak, so the bow is too big at the peak

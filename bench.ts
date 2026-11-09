@@ -246,6 +246,17 @@ function pinnedFrame(R: Section, yA: number, yB: number, zb: number, zt: number,
 }
 
 // ------------------------------------------------------------- the test
+// How far along +v a brace moves from its axis. A flat bar and an angle are on
+// the +v side of their axis (sections.ts). A flat bar goes to the middle of its
+// plates. An angle has its back on the gusset face (t: the thicker gusset), its
+// connected leg flat on the plate. With end plates, it goes to their middle.
+function sideShift(sec: Section, ends: BraceSpecimen['ends'], t: number): number {
+  const g = ANGLE_GAP / 2;
+  if (sec.kind === 'FB') return -(g + sec.tw / 2);
+  if (sec.kind === 'L') return ends === 'gusset' ? t / 2 - g : -(g + sec.bf / 2);
+  return 0;
+}
+
 export function buildBrace(p: Params, spec: BraceSpecimen, cat: Catalog, detail: Detail): Result {
   const t0 = performance.now();
   const sec = findSection(spec.section, cat);
@@ -371,10 +382,11 @@ export function buildBrace(p: Params, spec: BraceSpecimen, cat: Catalog, detail:
     const [bot, tp] = b.ends;
     const on = bot.build(c, add, undefined, bottomRig[i]);
     let gm = geo(b.id, sec, at(b.x, plus(bot.W, bot.uin, bot.start)), at(b.x, plus(tp.W, tp.uin, tp.start)), false);
-    // a flat bar is on the +v side of its axis (sections.ts): move it to the middle of its end plates
-    const x = sec.kind === 'FB' ? b.x - (ANGLE_GAP / 2 + sec.tw / 2) * gm.v[0] : b.x;
+    const x = b.x + sideShift(sec, spec.ends, Math.max(...sz.t)) * gm.v[0];
     if (x !== b.x) gm = geo(b.id, sec, at(x, plus(bot.W, bot.uin, bot.start)), at(x, plus(tp.W, tp.uin, tp.start)), false);
-    add({ id: b.id, step: 0, supports: [on], kind: 'member', from: Z, faces: memberFaces(gm, p.seg), boxes: memberBoxes(gm), dots: [], info: { type: 'Brace', sec, L }, round: isRound(sec) });
+    // A short angle bows a lot for its length: with p.seg, its 3 pieces would show as kinks.
+    const seg = sec.kind === 'L' ? Math.min(p.seg, L / 12) : p.seg;
+    add({ id: b.id, step: 0, supports: [on], kind: 'member', from: Z, faces: memberFaces(gm, seg), boxes: memberBoxes(gm), dots: [], info: { type: 'Brace', sec, L }, round: isRound(sec) });
     tp.build(c, add, b.id, topRig);
   });
   after();
