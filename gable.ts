@@ -251,7 +251,9 @@ export function gableParts(a: GArm, c: GableCtx): { parts: Part[]; near: Geo } {
       const pl = flat(P(xm - T / 2, (zt + zb) / 2), across, Z, T, rect(wp, zt - zb));
       push({ id: rid, supports: [id], kind: 'plate', from: Z, faces: pl.faces, boxes: [pl.box], dots: [], info: { type: 'Ridge end plate', of: id, conn: ['end_plate'] } });
       const rows = [zr - sec.tf / cos - 45, zr - sec.d / cos + sec.tf / cos + 45, zr - sec.d / cos - 55];
-      ridge.push({ id: rid, dots: rows.flatMap((z) => [-1, 1].map((sg): Dot => ({ p: add(P(x1 - 1, z), mul(across, (sg * gauge) / 2)), n: mul(hs, -1) }))) });
+      // one bolt through both plates: p on the ridge, given on the first side only
+      const dots = side ? [] : rows.flatMap((z) => [-1, 1].map((sg): Dot => ({ p: add(P(xm, z), mul(across, (sg * gauge) / 2)), axis: mul(hs, -1), half: xm - x1 + 1 })));
+      ridge.push({ id: rid, dots });
     }
   });
   if (c.bolts && ridge.length === 2)

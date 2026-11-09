@@ -15,7 +15,7 @@ import { memberRatio } from './checks.ts';
 import type { Catalog, Section } from './sections.ts';
 import { ANGLE_GAP, rodSection } from './sections.ts';
 import {
-  box3, boxOf, flat, geo, hardware, isRound, memberBoxes, memberFaces, resolve, splicePlates, stiffener, supportFace, BEARING_T, BEAM_CONN_KINDS, CONNS, EDGE, PINNED, SETBACK, SPLICE_HALF,
+  box3, boxOf, flat, geo, grips, hardware, isRound, memberBoxes, memberFaces, resolve, splicePlates, stiffener, supportFace, BEARING_T, BEAM_CONN_KINDS, CONNS, EDGE, PINNED, SETBACK, SPLICE_HALF,
   type BeamConn, type ConnType, type Fit, type Geo, type Haunch, type P2, type Part, type PartInfo, type Plate, type Rbs,
 } from './steel.ts';
 import { overlap, own } from './clash.ts';
@@ -1548,7 +1548,7 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
       id: baseId(ci), step: step++, supports: [], kind: 'base', from: [0, 0, -1], info: { type: 'Base plate', of: lo.id },
       faces: box3(centre, [0, 1, 0], [0, 0, 1], st.col.bf + 150, st.col.d + 150, tb),
       boxes: [boxOf(centre, [0, 1, 0], [0, 0, 1], st.col.bf + 150, st.col.d + 150, tb)],
-      dots: bolts ? [-1, 1].flatMap((sx) => [-1, 1].map((sy) => ({ p: add(c.x, [sx * (st.col.bf / 2 + 40), sy * (st.col.d / 2 + 40), 1]), n: [0, 0, 1] as V }))) : [],
+      dots: bolts ? [-1, 1].flatMap((sx) => [-1, 1].map((sy) => ({ p: add(c.x, [sx * (st.col.bf / 2 + 40), sy * (st.col.d / 2 + 40), 1]), n: [0, 0, 1] as V, anchor: true }))) : [],
     });
     out.push({ id: lo.id, step: step++, supports: [baseId(ci)], kind: 'column', from: [0, 0, 1], faces: memberFaces(lo, seg), boxes: memberBoxes(lo), dots: [], info: col(lo, 'Column', 'column'), round: isRound(lo.sec) });
     if (!sp) return { lo, hi: lo };
@@ -1908,6 +1908,11 @@ export type Result = {
 };
 
 export function generate(p0: Partial<Params>, cat: Catalog, detail: Detail = 'bolts'): Result {
+  const r = build(p0, cat, detail);
+  grips(r.parts);
+  return r;
+}
+function build(p0: Partial<Params>, cat: Catalog, detail: Detail): Result {
   const p = { ...DEFAULTS, ...p0 };
   if (p.specimen?.test === 'brace') return buildBrace(p, p.specimen, cat, detail);
   if (p.specimen?.test === 'column') return buildColumn(p, p.specimen, cat, detail);

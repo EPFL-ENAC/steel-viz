@@ -472,17 +472,20 @@ export function buildColumn(p: Params, spec: ColumnSpecimen, cat: Catalog, detai
 }
 
 // The length of the actuator that pushes a column, between its mount faces: its
-// two pin joints, then room for the move, k L. b.reach is the minimum. The auto
-// scale (scaleFor) can bring the rotation to 0.25 rad, so a standing column takes
-// k = 0.25. A 3pb column moves half as much, and the real tests need only k = 0.1.
-// deform-rig.test.ts checks them all.
-const pushLength = (b: ColumnBench, k: number) => Math.max(b.reach, r5(2 * b.hz.reach + k * b.L));
+// two pin joints, then room for the move, k (L + up). up: how far the push is
+// above the column top (the head turns with the top). b.reach is the minimum.
+// The auto scale (scaleFor) can bring the rotation to 0.25 rad, so a standing
+// column takes k = 0.25. A 3pb column moves half as much, and the real tests
+// need only k = 0.1. deform-rig.test.ts checks them all.
+const pushLength = (b: ColumnBench, k: number, up = 0) => Math.max(b.reach, r5(2 * b.hz.reach + k * (b.L + up)));
 
 // The column standing. Its axis is on z, from z = 0 to its length (the end
 // plates are outside it). The column is turned by `angle` in plan, its web
 // `angle` away from y: the push is always along y, so the rig stays square
 // to the axes. Under the foot plate a floor block. On the top plate the
-// loading head, pushed by an actuator from a reaction wall at -y. Above the
+// loading head, pushed by an actuator from a reaction wall at -y. The head
+// has a base plate as big as the top plate, and the bolts go through the two
+// plates: the head block alone is narrower than the bolt line. Above the
 // head the vertical actuators, hung from a crosshead across x: one in the
 // middle, or for fixed-fixed two side by side along y (from a spreader beam
 // under the crosshead), so the head can't turn. With no axial load, no
@@ -491,31 +494,36 @@ function standing(b: ColumnBench) {
   const { p, spec, sec, L, detail, a, m, Da, hz, reach, R, add, ro, ground } = b;
   const [ex, ey] = [b.across, b.along];
 
-  // the end plates: square to the axes, past the section by m on each side
-  // (the bolts go there)
-  const [px, py] = [2 * ex + 2 * m, 2 * ey + 2 * m];
-  const [tt, tb] = [b.plateT(spec.plates?.top, 'top end plate'), b.plateT(spec.plates?.bottom, 'bottom end plate')];
-  const zh = L + tt; // the top of the top plate, where the head sits
-
-  // the head and the floor
   const two = spec.ends === 'fixed-fixed';
   const e = two ? r5(Math.max(hz.side / 2 + 30, ey)) : 0; // the vertical actuators, from the axis along y
-  const hh = Math.max(250, r5(2.6 * Da + 80)); // the head height
-  const hx = Math.max(ex + m / 2 - 25, hz.width / 2 + 20);
-  const hy = Math.max(ey + m / 2 - 25, two ? e + hz.side / 2 + 20 : hz.side / 2 + 20);
+  // the bolt line: past the section by m / 2, and 25 mm outside the head
+  // block, which is as wide as the mounts of the actuators need (the head of
+  // a bolt is 17 mm from its axis, R in webgl.ts)
+  const bx = Math.max(ex + m / 2, hz.width / 2 + 45);
+  const by = Math.max(ey + m / 2, (two ? e + hz.side / 2 : hz.side / 2) + 45);
+  const [hx, hy] = [bx - 25, by - 25]; // the head block, half sizes
+  // the end plates: square to the axes, past the bolt line by m / 2
+  const [px, py] = [2 * bx + m, 2 * by + m];
+  const [tt, tb] = [b.plateT(spec.plates?.top, 'top end plate'), b.plateT(spec.plates?.bottom, 'bottom end plate')];
+  // the head base plate: as thick as the top plate, from 25 to 50 mm, so a
+  // bolt through the two plates stays under 150 mm (see gripAt)
+  const th = clamp(tt, 25, 50);
+  const zh = L + tt + th; // the top of the head base plate, where the head block sits
+  const hh = Math.max(250, r5(2.6 * Da + 80)); // the head block height
   const zf = -tb - 400; // the floor
   const Wb = r5(Math.max(px, py) + 300); // the floor block
 
-  // an end plate centred at height z, its bolts on the face toward n
+  // the bolts of an end plate, on its face at height z, toward n
   const bolts = (z: number, n: number) => {
     if (detail !== 'bolts') return [];
-    const [bx, by] = [ex + m / 2, ey + m / 2];
     const at: [number, number][] = [[-1, -1], [0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0]];
     return at.map(([i, j]) => ({ p: [i * bx, j * by, z] as V, n: [0, 0, n] as V }));
   };
+  // an end plate centred at height z, its bolts on the face toward n (0: the
+  // bolts are on another part)
   const plate = (id: string, z: number, t: number, n: number, on: string) => {
     const f = flat([0, 0, z], X, Y, t, rect(px, py));
-    return add({ id, step: 0, supports: [on], kind: 'plate', from: [0, 0, -1], faces: f.faces, boxes: [f.box], dots: bolts(z + (n * t) / 2, n), info: { type: 'End plate', of: 'column' } });
+    return add({ id, step: 0, supports: [on], kind: 'plate', from: [0, 0, -1], faces: f.faces, boxes: [f.box], dots: n ? bolts(z + (n * t) / 2, n) : [], info: { type: 'End plate', of: 'column' } });
   };
 
   add(block('rig-floor', [0, 0, zf + 200], [Wb, Wb, 400], ground()));
@@ -526,12 +534,16 @@ function standing(b: ColumnBench) {
   add({ id: 'column', step: 0, supports: ['column-foot'], kind: 'column', from: Z, faces: memberFaces(g, p.seg), boxes: memberBoxes(g), dots: [], info: { type: 'Column', sec, L }, round: isRound(sec) });
   const struts: ColumnRig['struts'] = [];
   b.rig = { o: [0, 0, 0], u: Z, web: g.w, minor: g.v, push: Y, struts };
-  plate('column-cap', L + tt / 2, tt, 1, 'column');
-  add(block('rig-head', [0, 0, zh + hh / 2], [2 * hx, 2 * hy, hh], ro(['column-cap'], 'Loading head')));
+  plate('column-cap', L + tt / 2, tt, 0, 'column');
+  // the head: its base plate on the top plate, the block on it. The bolts go
+  // down through both plates, the nuts are under the top plate.
+  const base = flat([0, 0, L + tt + th / 2], X, Y, th, rect(px, py));
+  const head = block('rig-head', [0, 0, zh + hh / 2], [2 * hx, 2 * hy, hh], ro(['column-cap'], 'Loading head'));
+  add({ ...head, faces: [...base.faces, ...head.faces], boxes: [base.box, ...(head.boxes ?? [])], dots: bolts(zh, 1) });
 
   // the push: from the wall at -y to the head face, at mid head height
   const zc = zh + hh / 2;
-  const y0 = -hy - pushLength(b, 0.25);
+  const y0 = -hy - pushLength(b, 0.25, zc - L);
   add(block('rig-wall', [0, y0 - 200, (zf + zc + 400) / 2], [Math.max(600, 2 * hx + 200), 400, zc + 400 - zf], ground('Reaction wall')));
   actuator('rig-actuator', [0, y0, zc], [0, -hy, zc], X, Da, ro(['rig-wall', 'rig-head'])).forEach(add);
   struts.push({ id: 'rig-actuator', from: [0, y0, zc], to: [0, -hy, zc], D: Da, kind: 'actuator' });

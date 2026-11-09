@@ -86,3 +86,21 @@ test('no curves, no peak', () => {
   const record = loadRows('connections', undefined).find((r) => rowId(r) === 'Chi_and_Uang_2002_DC2')!;
   assert.throws(() => peakStep('connections', toSpecimen(record), record, {}), /no measured response/);
 });
+
+test('the zoom', () => {
+  const a = parseShotArgs([CR1, '--zoom', '8', '--at', '0.25,0.75', '--out', 'a.png']);
+  assert.deepEqual([a.zoom, a.at], [8, [0.25, 0.75]]);
+  const b = parseShotArgs(['--seed', '5', '--zoom', '2.5', '--out', 's.png']);
+  assert.deepEqual([b.zoom, b.at], [2.5, [0.5, 0.5]], 'toward the middle by default');
+  assert.equal(parseShotArgs([CR1, '--out', 'a.png']).zoom, undefined);
+  const refused: [string[], RegExp][] = [
+    [[CR1, '--at', '0.5,0.5', '--out', 'a.png'], /--at is for --zoom/],
+    [[CR1, '--zoom', '0', '--out', 'a.png'], /--zoom needs/],
+    [[CR1, '--zoom', 'x', '--out', 'a.png'], /--zoom needs/],
+    [[CR1, '--zoom', '2', '--at', '0.5', '--out', 'a.png'], /--at needs/],
+    [[CR1, '--zoom', '2', '--at', '0.5,', '--out', 'a.png'], /--at needs/],
+    [[CR1, '--zoom', '2', '--at', '1.5,0.5', '--out', 'a.png'], /--at needs/],
+    [[CR1, '--zoom', '2', '--at', '0.1,0.2,0.3', '--out', 'a.png'], /--at needs/],
+  ];
+  for (const [argv, message] of refused) assert.throws(() => parseShotArgs(argv), message, argv.join(' '));
+});

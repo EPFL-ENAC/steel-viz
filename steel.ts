@@ -14,8 +14,15 @@ export const EDGE = 38; // bolt edge distance
 
 export type P2 = [number, number];
 export type Face = { pts: V[]; edges: [number, number][] };
-// a bolt: on the side of `axis` that looks at the camera, or on a face with normal `n`
-export type Dot = { p: V; axis?: V; half?: number; n?: V };
+// A bolt, in one of two forms. Through two plates: p in the middle, `half`
+// from each end along `axis`. On a face: p on the face, n out of it, the head
+// there. grip: the steel under that head, in mm, set by grips(). No grip: we
+// don't know the far side. far: the far end of a bolt that another dot
+// draws (grips() says when). anchor: an anchor rod, its nut at p and its
+// end in the concrete.
+// The 3D view draws the head at +axis or at p, and the nut at the far end.
+// The SVG draws the end that looks at the camera, as a head.
+export type Dot = { p: V; axis?: V; half?: number; n?: V; grip?: number; far?: boolean; anchor?: boolean };
 // a solid box, for the clash check (clash.ts): centre, 3 unit axes, half sizes
 export type Box = { c: V; ax: [V, V, V]; h: [number, number, number] };
 // rig: a part of the test rig (rig.ts), not of the specimen. The renderers draw it lighter.
@@ -52,6 +59,68 @@ export function forSize(parts: Part[], size?: number): Part[] {
     .filter((p) => !(size <= DETAIL.plates && (p.kind === 'plate' || p.kind === 'slab')))
     .filter((p) => !(size <= DETAIL.secondaries && /^sec\d/.test(p.id)))
     .map((p) => (size <= DETAIL.bolts && p.dots.length ? { ...p, dots: [] } : p));
+}
+
+// The grip of each bolt on a face (Dot.grip): from p along -n, through the
+// boxes of all the parts but the slab, up to the first gap. The bolt only
+// knows its head: this finds where its nut goes, for every kind of
+// connection. No grip when there is no steel under the head, when the steel
+// is thicker than MAX_GRIP (a rig block), or when the bolt runs into a box
+// along its length (a stiffener in line with the bolt: no room for a nut).
+// Two end plates back to back on a web: the nut of one bolt lands on the
+// head of the other. It's one bolt, so the later part keeps it and the
+// earlier dot gets `far`.
+const MAX_GRIP = 150; // mm
+const GRIP_GAP = 2; // mm: two boxes closer than this along the bolt are one
+export function grips(parts: Part[]) {
+  const boxes = parts.filter((q) => q.kind !== 'slab').flatMap((q) => q.boxes ?? []);
+  // the dots on a face, in build order
+  const order = parts.map((q, i) => ({ q, i })).sort((x, y) => x.q.step - y.q.step || x.i - y.i);
+  const face = order.flatMap(({ q }) => q.dots.filter((d) => d.n && !d.axis && !d.anchor));
+  for (const d of face) {
+    delete d.far;
+    const g = gripAt(d.p, d.n!, boxes);
+    if (g === undefined) delete d.grip;
+    else d.grip = g;
+  }
+  face.forEach((d, i) => {
+    if (d.grip === undefined) return;
+    const nut = sub(d.p, mul(d.n!, d.grip));
+    const twin = face.find((e, j) => j < i && !e.far && dot(e.n!, d.n!) < -0.9 && len(sub(e.p, nut)) < 4);
+    if (!twin) return;
+    twin.far = true;
+    delete twin.grip;
+  });
+}
+// the end of the steel from p along -n, or undefined (see grips())
+export function gripAt(p: V, n: V, boxes: Box[]): number | undefined {
+  // where the line p - s n is in each box: s from lo to hi. along: the line
+  // crosses the box by more than its thickness (with some room for a slant)
+  const spans: { lo: number; hi: number; along: boolean }[] = [];
+  for (const b of boxes) {
+    const d = sub(p, b.c);
+    let [lo, hi] = [-Infinity, Infinity];
+    for (let i = 0; i < 3 && lo < hi; i++) {
+      const a = dot(d, b.ax[i]);
+      const k = -dot(n, b.ax[i]);
+      if (Math.abs(k) < 1e-9) {
+        if (Math.abs(a) > b.h[i]) hi = -Infinity;
+        continue;
+      }
+      const [s0, s1] = [(-b.h[i] - a) / k, (b.h[i] - a) / k];
+      lo = Math.max(lo, Math.min(s0, s1));
+      hi = Math.min(hi, Math.max(s0, s1));
+    }
+    if (lo < hi && hi > 0) spans.push({ lo, hi, along: hi - lo > 3 * Math.min(...b.h) + 1 });
+  }
+  spans.sort((x, y) => x.lo - y.lo);
+  let end = 0;
+  for (const sp of spans) {
+    if (sp.lo > end + GRIP_GAP) break;
+    if (sp.along) return undefined;
+    end = Math.max(end, sp.hi);
+  }
+  return end > 0 && end <= MAX_GRIP ? end : undefined;
 }
 
 // When each part starts to move and when it lands, in ms. A part waits for
