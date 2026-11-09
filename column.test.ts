@@ -122,6 +122,27 @@ test('a small and a large section both draw', () => {
   for (const section of ['W4X13', 'W36X925']) sound(generate({ specimen: column({ section, ends: 'fixed-fixed', length: 1000 }) }, cat));
 });
 
+// the head block is narrow (the mounts set its size), so the head has a base
+// plate as big as the top plate, and the bolts go through the two plates
+test('the head is bolted to the top plate: each bolt through both plates, beside the head block', () => {
+  for (const section of ['W4X13', 'W14X90', 'W36X925'])
+    for (const ends of ['fixed-free', 'fixed-fixed'] as const)
+      for (const top of [20, 40, 80]) {
+        const at = `${section} ${ends} top plate ${top}`;
+        const r = generate({ specimen: column({ section, ends, plates: { top, bottom: 50 } }) }, cat);
+        const head = part(r.parts, 'rig-head');
+        assert.equal(part(r.parts, 'column-cap').dots.length, 0, at);
+        assert.equal(head.dots.length, 8, at);
+        const [base, blk] = head.boxes!;
+        near(2 * base.h[2], Math.min(Math.max(top, 25), 50), `${at}: head base plate`, 0.5);
+        for (const d of head.dots) {
+          assert.ok(d.grip !== undefined, `${at}: a bolt with no nut`);
+          near(d.grip, top + 2 * base.h[2], `${at}: the grip`, 0.5);
+          assert.ok(Math.max(Math.abs(d.p[0]) - blk.h[0], Math.abs(d.p[1]) - blk.h[1]) > 24.5, `${at}: a bolt under the head block`);
+        }
+      }
+});
+
 test('no plate thickness: a default, and the log says so', () => {
   const r = generate({ specimen: column({ plates: undefined }) }, cat);
   sound(r);
