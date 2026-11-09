@@ -29,6 +29,7 @@ node shot.ts connections/Lee_et_al_2002_CR1 --out cr1.png            # a PNG of 
 node shot.ts connections/Lee_et_al_2002_CR1 --step 440 --out cr1.png # at one step
 node shot.ts connections/Lee_et_al_2002_CR1 --peak --out cr1.png     # at the step with the biggest move of one point
 node shot.ts --seed 5 --out s5.png                                   # a seed. Also --az and --el for the angle, --dpr for more pixels (default 2)
+node shot.ts --seed 5 --zoom 8 --at 0.6,0.4 --out z.png             # 8x closer, toward a point of the canvas (0,0 top left, default the middle)
 ```
 
 To look at what you change in the 3D view, you must use `shot.ts` and read the PNG (the Read tool shows images). `curl` can't reach the playground pane from the sandbox, and `shot.ts` doesn't need it: it starts its own Vite and its own headless Chrome and stops them at the end. It prints the notes of the rail and the page errors, and it exits 1 on a page error or when there is no canvas. It needs `google-chrome` on the PATH, or the env `CHROME`. A reaction wall can hide an actuator, so try another angle before you say a part is missing.

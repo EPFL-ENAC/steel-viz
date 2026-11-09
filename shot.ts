@@ -6,6 +6,8 @@
 //   node shot.ts connections/Lee_et_al_2002_CR1 --peak --out cr1.png     # at the step with the biggest move
 //   node shot.ts --seed 5 --out s5.png                                   # a seed
 //   also --az and --el for the angle, --dpr for more pixels (default 2)
+//   node shot.ts connections/Sato_et_al_2007_BFP-1 --zoom 8 --at 0.5,0.4 --out b.png # 8x closer, toward a point
+//     (--at: x,y as parts of the canvas, 0,0 top left, default the middle)
 //
 // It starts its own Vite on a free port and its own headless Chrome with a temp
 // profile, and stops both at the end. It doesn't use the playground pane: from
@@ -35,7 +37,7 @@ const DRAW_MS = 50_000; // the page must draw in this time
 const DEADLINE_MS = 60_000; // the whole run, with the cleanup after it
 const AFTER_ERROR_MS = 5_000; // a page error and no drawing yet: don't wait for long
 
-const USAGE = 'usage: node shot.ts <table>/<id> [--step N | --peak] [--az N] [--el N] [--dpr N] --out file.png\n       node shot.ts --seed N [--az N] [--el N] [--dpr N] --out file.png';
+const USAGE = 'usage: node shot.ts <table>/<id> [--step N | --peak] [--az N] [--el N] [--dpr N] [--zoom N [--at x,y]] --out file.png\n       node shot.ts --seed N [--az N] [--el N] [--dpr N] [--zoom N [--at x,y]] --out file.png';
 
 const sleep = (ms: number) => new Promise((ok) => setTimeout(ok, ms));
 
@@ -48,6 +50,8 @@ export type ShotArgs = {
   az?: number;
   el?: number;
   dpr: number;
+  zoom?: number; // this many times closer, toward at
+  at: [number, number]; // a point of the canvas, as parts of its width and height
   out: string;
 };
 
@@ -71,6 +75,7 @@ export function parseShotArgs(argv: string[]): ShotArgs {
     options: {
       seed: { type: 'string' }, step: { type: 'string' }, peak: { type: 'boolean' },
       az: { type: 'string' }, el: { type: 'string' }, dpr: { type: 'string' }, out: { type: 'string' },
+      zoom: { type: 'string' }, at: { type: 'string' },
     },
   });
   if (positionals.length > 1) throw new Error(`give one test, not ${positionals.length}`);
@@ -80,6 +85,9 @@ export function parseShotArgs(argv: string[]): ShotArgs {
   if (v.step !== undefined && v.peak) throw new Error('give --step or --peak, not both');
   if (name === undefined && (v.step !== undefined || v.peak)) throw new Error('--step and --peak are for a test, a seed has no steps');
   if (!v.out) throw new Error('give the image with --out');
+  if (v.at !== undefined && v.zoom === undefined) throw new Error('--at is for --zoom');
+  const at = (v.at ?? '0.5,0.5').split(',').map((x) => (x.trim() === '' ? NaN : Number(x)));
+  if (at.length !== 2 || at.some((x) => !(x >= 0 && x <= 1))) throw new Error(`--at needs x,y with two numbers from 0 to 1, not "${v.at}"`);
   const a: ShotArgs = {
     seed: number('--seed', v.seed, isCount, 'a whole number from 0'),
     step: number('--step', v.step, isCount, 'a whole number from 0'),
@@ -87,6 +95,8 @@ export function parseShotArgs(argv: string[]): ShotArgs {
     az: number('--az', v.az, () => true, 'a number'),
     el: number('--el', v.el, () => true, 'a number'),
     dpr: number('--dpr', v.dpr, (n) => n > 0, 'a number above 0') ?? 2,
+    zoom: number('--zoom', v.zoom, (n) => n > 0, 'a number above 0'),
+    at: at as [number, number],
     out: v.out,
   };
   if (name !== undefined) {
@@ -358,6 +368,13 @@ const setStep = (step: number) => {
   s.value = String(step);
   s.dispatchEvent(new Event('input', { bubbles: true }));
 };
+// the wheel of webgl.ts: exp(-deltaY * 0.0015) times closer, toward the mouse
+const zoomAt = (k: number, fx: number, fy: number) => {
+  const c = document.querySelector<HTMLCanvasElement>('.gl canvas')!;
+  const b = c.getBoundingClientRect();
+  const at = { clientX: b.left + fx * b.width, clientY: b.top + fy * b.height };
+  c.dispatchEvent(new WheelEvent('wheel', { ...at, deltaY: -Math.log(k) / 0.0015, bubbles: true, cancelable: true }));
+};
 // the only thing over the canvas: the capture must show the canvas alone
 const hideHint = () => document.querySelector<HTMLElement>('.hint')?.style.setProperty('visibility', 'hidden');
 const nextFrames = () => new Promise<void>((ok) => requestAnimationFrame(() => requestAnimationFrame(() => ok())));
@@ -442,6 +459,7 @@ async function shoot(a: ShotArgs, job: Job, out: string, chromeBin: string, vite
   let box = await waitDrawn(page, errors);
   if (a.dpr > 2) box = await growCanvas(page, box, a.dpr);
   if (job.step !== undefined) await goToStep(page, job);
+  if (a.zoom !== undefined) await page.call(zoomAt, a.zoom, ...a.at);
   await page.call(hideHint);
   await page.call(nextFrames); // the frame with the shape, then one more
 
