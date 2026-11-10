@@ -11,7 +11,7 @@
 // and beams are given, the solver only checks it.
 import { add, cross, dot, len, mul, norm, sub, type V } from './vec.ts';
 import { buckling, solve, type Elem, type FNode, type Solved } from './solver.ts';
-import { memberRatio } from './checks.ts';
+import { memberRatio, tooThin } from './checks.ts';
 import type { Catalog, Section } from './sections.ts';
 import { ANGLE_GAP, rodSection } from './sections.ts';
 import {
@@ -1130,11 +1130,13 @@ function size(st: Structure, m: Model, res: Forces[], cat: Catalog, p: Params, c
   // the lightest section that works; in check mode, the current one is kept
   const choose = (list: Section[], who: string, cur: Section, rule: (s: Section) => boolean = () => true) => {
     const f = worst.get(who)!;
-    const ok = (s: Section) => rule(s) && s.A >= (st.minA?.[who] ?? 0);
+    // never a round tube past the D / t limit of F8 (checks.ts), even when none works
+    const fits = (s: Section) => rule(s) && !tooThin(s, p.fy);
+    const ok = (s: Section) => fits(s) && s.A >= (st.minA?.[who] ?? 0);
     const L = m.len.get(who)!;
     const ratio = (s: Section) => ratioOf(s, f, p.fy, L);
     // none works: the heaviest one that keeps the rule (the minimum area can't break it)
-    const s = check ? cur : (list.find((s) => ok(s) && ratio(s) < LIMIT) ?? list.findLast(ok) ?? list.findLast(rule) ?? list[list.length - 1]);
+    const s = check ? cur : (list.find((s) => ok(s) && ratio(s) < LIMIT) ?? list.findLast(ok) ?? list.findLast(fits) ?? list[list.length - 1]);
     maxRatio = Math.max(maxRatio, ratio(s));
     return s;
   };
