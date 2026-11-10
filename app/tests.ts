@@ -265,7 +265,8 @@ export function keyFields(spec: Specimen): [string, string][] {
     ['Beams', beams.length ? (new Set(beams).size === 1 ? `${beams.length} × ${beams[0]}` : beams.join(' + ')) : 'none, a column alone'],
     ...(conns.length ? [['Connection', conns.join(', ')] as [string, string]] : []),
     ['Loaded at', spec.load === 'column' ? 'the column top' : 'the beam tips'],
-    ['Continuity plates', spec.continuity === false ? 'no' : 'yes'],
+    // a plate is thin: one decimal (9.5 mm, not 10)
+    ['Continuity plates', spec.continuity === false ? 'no' : spec.tContinuity ? `${Math.round(spec.tContinuity * 10) / 10} mm` : 'yes'],
     tables,
   ];
 }
