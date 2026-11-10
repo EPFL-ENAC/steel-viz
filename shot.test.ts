@@ -46,6 +46,11 @@ test('what it refuses', () => {
     [[CR1, '--dpr', '0', '--out', 'a.png'], /--dpr needs/],
     [['--seed', 'x', '--out', 'a.png'], /--seed needs/],
     [[CR1, '--nope', '--out', 'a.png'], /--nope/],
+    [[CR1, '--compare', '3', '--out', 'a.png'], /--compare needs/],
+    [[CR1, '--base', 'main', '--out', 'a.png'], /--base is for --compare/],
+    [[CR1, '--compare', '2', '--base=-x', '--out', 'a.png'], /--base needs/],
+    [[CR1, '--compare', '1', '--dpr', '4', '--out', 'a.png'], /--compare 1/],
+    [[CR1, '--theme', 'blue', '--out', 'a.png'], /--theme needs/],
   ];
   for (const [argv, message] of refused) assert.throws(() => parseShotArgs(argv), message, argv.join(' '));
 });
@@ -57,6 +62,19 @@ test('the hash of the page', () => {
   assert.equal(h.get('view'), '');
   assert.equal(h.get('az'), '-30');
   assert.equal(h.has('el'), false);
+  assert.equal(h.has('compare'), false);
+  const c = new URLSearchParams(shotHash({ seed: 5, compare: 2, base: '564ac4d~1', theme: 'dark' }));
+  assert.equal(c.get('compare'), '2');
+  assert.equal(c.get('base'), '564ac4d~1');
+  assert.equal(c.get('theme'), 'dark');
+});
+
+test('compare, base and theme', () => {
+  const a = parseShotArgs(['--seed', '5', '--compare', '2', '--base', '564ac4d~1', '--theme', 'dark', '--out', 'a.png']);
+  assert.equal(a.compare, 2);
+  assert.equal(a.base, '564ac4d~1');
+  assert.equal(a.theme, 'dark');
+  assert.equal(parseShotArgs([CR1, '--out', 'a.png']).compare, undefined);
 });
 
 test('CHROME comes first, a missing one gives nothing', () => {

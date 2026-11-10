@@ -15,6 +15,13 @@
 // rods, round tubes, the round bars of the test rig) get it, as thin lines:
 // their faces have no long edges, so without it only their ends show.
 //
+// Compare with main, in one view: show() takes a mark per part id. A 'new'
+// part draws its lines in Colors.added, a 'gone' part (the base parts, under
+// another id) in Colors.gone, and the parts with no mark go lighter, their
+// outlines too. Where a gone part and a new one are on top of each other (the
+// two shapes of a changed part), the faces of the gone one sit further back
+// and its lines draw first, so the new one wins.
+//
 // deform() moves the vertices in the vertex shader (the MOVE chunk, one Move
 // per part from deform.ts), so a new step of a test uploads no geometry. The
 // fill pass also colors the working zones. The boxes of the zones are in the
@@ -37,16 +44,24 @@ const THIN = 1; // px
 const THICK = 2.25; // px
 const ONE = 1.6; // px, the lines with one weight
 const VEIL = 0.3; // how far the slab goes toward the rig color
+const FADE = 0.55; // with marks: how far the parts with no mark go toward bg
+const MARKED = 1.5; // with marks: the lines of a marked part are this much wider
 
 // rig: the lines of the test rig (default: half way between fg and bg).
 // zones: the color of the working zones, by Zone.slot (default: accent)
-export type Colors = { bg: string; fg: string; accent: string; rig?: string; zones?: string[] };
+// added, gone: the lines of the parts marked 'new' and 'gone' (see show())
+export type Colors = { bg: string; fg: string; accent: string; rig?: string; zones?: string[]; added?: string; gone?: string };
+// a part of this branch that main doesn't have (or not with this shape), or
+// a part of main that this branch doesn't have (or not with this shape)
+export type Mark = 'new' | 'gone';
 // what the view shows, in world mm: the point in the middle, and half the
 // height it shows. Two viewers with the same frame line up, even when their
 // structures are a bit different (vs main).
 export type Frame = { target: V; half: number };
 export type Viewer = {
-  show(parts: Part[]): void; // a new structure
+  // a new structure. marks: compare with main in one view, a mark per part
+  // id. Given (even empty), the parts with no mark draw lighter.
+  show(parts: Part[], marks?: Record<string, Mark>): void;
   view(az: number, el: number): void;
   // play the build animation. speed: how fast one part comes in (2: twice as
   // fast). duration: the whole build lasts this long, ms (see timeline)
@@ -366,6 +381,9 @@ export function createViewer(
   const rigOf = (c: Colors): RGB => (c.rig ? rgb(c.rig) : [0, 1, 2].map((i) => (rgb(c.fg)[i] + rgb(c.bg)[i]) / 2) as RGB);
   let rig = rigOf(colors);
   let zoneColors = (colors.zones ?? []).map(rgb);
+  const mix = (a: RGB, b: RGB, k: number) => a.map((x, i) => x + (b[i] - x) * k) as RGB;
+  let [added, gone] = [rgb('#5a9e1e'), rgb('#d00000')];
+  let marks: Record<string, Mark> | null = null;
   let deformed: DeformState | null = null;
   let two = true;
   let pieces: Piece[] = [];
@@ -595,8 +613,18 @@ export function createViewer(
     gl.useProgram(P.p);
     gl.uniformMatrix4fv(P.u.M, false, M);
     const nz = ids ? 0 : zonesIn(P);
+    // the gone parts come first (see show()): further back than the rest
+    const offset = gl.isEnabled(gl.POLYGON_OFFSET_FILL);
+    let back = false;
+    const setBack = (b: boolean) => {
+      if (b === back) return;
+      back = b;
+      gl.polygonOffset(b ? 4 : 0.5, b ? 16 : 2);
+      if (!offset) gl[b ? 'enable' : 'disable'](gl.POLYGON_OFFSET_FILL);
+    };
     for (const p of pieces) {
       if (!p.visible || !p.fill.draw || (p.part.kind === 'slab') !== slab) continue;
+      setBack(marks?.[p.part.id] === 'gone');
       gl.uniform3fv(P.u.off, p.off);
       gl.uniform4f(P.u.color, ...(ids ? p.id : bg), 1);
       if (!ids) gl.uniform1i(P.u.nz, p.part.kind === 'rig' || p.part.kind === 'bolts' ? 0 : nz);
@@ -604,6 +632,7 @@ export function createViewer(
       gl.bindVertexArray(p.fill.vao);
       gl.drawArrays(gl.TRIANGLES, 0, p.fill.draw);
     }
+    setBack(false);
   };
   const lines = (M: Float32Array, slab = false) => {
     gl.useProgram(lineP.p);
@@ -706,7 +735,7 @@ export function createViewer(
       gl.useProgram(downP.p);
       tex(0, lt.color, downP.u.tLine);
       gl.uniform2f(downP.u.px, ...px);
-      gl.uniform3f(downP.u.color, ...fg);
+      gl.uniform3f(downP.u.color, ...(marks ? mix(fg, bg, FADE) : fg));
       gl.bindVertexArray(null);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       gl.disable(gl.BLEND);
@@ -783,11 +812,12 @@ export function createViewer(
     const m = deformed?.moves[part.id];
     return m ? pack(m) : STILL;
   };
-  const show = (parts: Part[]) => {
+  const show = (parts: Part[], m?: Record<string, Mark>) => {
     stopAnim();
     setHover(null);
     if (parts !== shown) deformed = null; // its moves are for the old parts
     shown = parts;
+    marks = m ?? null;
     for (const p of pieces) {
       free(p.fill);
       free(p.lines);
@@ -834,6 +864,8 @@ export function createViewer(
       lineStyle(p);
       pieces.push(p);
     });
+    // the gone parts first: their lines draw under the lines of the new ones
+    if (marks) pieces.sort((a, b) => +(marks![b.part.id] === 'gone') - +(marks![a.part.id] === 'gone'));
     centre = [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2];
     radius = Math.max(500, 0.5 * Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]));
     box = [lo as V, hi as V];
@@ -971,8 +1003,11 @@ export function createViewer(
   let hovered: Part | null = null;
   function lineStyle(p: Piece) {
     const on = p.part === hovered || (!!hovered && p.part.joint?.of === hovered.id);
-    p.color = on || p.part.accent ? accent : p.part.kind === 'rig' || p.part.kind === 'slab' ? rig : fg;
-    p.width = (two ? THIN : ONE) * (on ? 2 : 1);
+    const mk = marks?.[p.part.id];
+    const plain = p.part.kind === 'rig' || p.part.kind === 'slab' ? rig : fg;
+    if (!marks) p.color = on || p.part.accent ? accent : plain;
+    else p.color = on ? accent : mk === 'new' ? added : mk === 'gone' ? gone : mix(plain, bg, FADE);
+    p.width = (two ? THIN : ONE) * (on ? 2 : mk ? MARKED : 1);
   }
   const setHover = (part: Part | null, x = 0, y = 0) => {
     if (part !== hovered) {
@@ -1012,7 +1047,7 @@ export function createViewer(
     pieces = []; // their buffers died with the old context
     init();
     resize();
-    if (shown.length) show(shown);
+    if (shown.length) show(shown, marks ?? undefined);
     setFrame(f);
   });
 
@@ -1069,6 +1104,8 @@ export function createViewer(
       [bg, fg, accent] = [rgb(c.bg), rgb(c.fg), rgb(c.accent)];
       rig = rigOf(c);
       zoneColors = (c.zones ?? []).map(rgb);
+      if (c.added) added = rgb(c.added);
+      if (c.gone) gone = rgb(c.gone);
       for (const p of pieces) lineStyle(p);
       redraw();
     },

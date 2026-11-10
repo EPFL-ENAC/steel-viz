@@ -9,6 +9,7 @@
     --primary: #ff3030; --primary-hover: #ff6a6a; --primary-active: #ff8f8f;
     --success-fg: #8fc35a; --warning-fg: #f0a640; --danger-fg: #ff8f8f;
     --zone-moment: #cf7400; --zone-shear: #3f86ea;
+    --diff-new: var(--success-fg);
     --thumb: invert(0.9);
     color-scheme: dark;
   }
@@ -21,6 +22,7 @@
   --primary: #ff3030; --primary-hover: #ff6a6a; --primary-active: #ff8f8f;
   --success-fg: #8fc35a; --warning-fg: #f0a640; --danger-fg: #ff8f8f;
   --zone-moment: #cf7400; --zone-shear: #3f86ea;
+  --diff-new: var(--success-fg);
   --thumb: invert(0.9);
   color-scheme: dark;
 }

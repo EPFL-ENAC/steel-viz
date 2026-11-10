@@ -582,7 +582,7 @@ Files:
 - `webgl.ts`: the 3D view of the playground, in plain WebGL2.
 - `triangles.ts`: the triangles of a flat face, for `webgl.ts` and `hlr.ts`.
 - `cli.ts`: the command line.
-- `shot.ts`: a PNG of the 3D view, at any step of a test, for agents (`node shot.ts <table>/<id> --peak --out a.png`). It starts its own Vite and headless Chrome. It isn't in the package.
+- `shot.ts`: a PNG of the 3D view, at any step of a test, for agents (`node shot.ts <table>/<id> --peak --out a.png`). `--compare 1|2` and `--base <ref>` shoot "Compare with main", `--theme dark` the dark theme. It starts its own Vite and headless Chrome. It isn't in the package.
 - `app/`, `vite.config.ts`: the playground, a Vue app served by Vite.
 - `index.ts`, `3d.ts`: the two entries of the package (see below).
 - `package.test.ts`: checks that the light entry and the 3D entry load no package and no Node API.
@@ -601,7 +601,7 @@ The repo is also the package `@epfl-enac/steel-viz`. It is not on npm. The hub t
 It has two entries:
 
 - `@epfl-enac/steel-viz`: the light entry. `generate`, `loadCatalog`, the exact drawing `renderHLR`, the painter `render`, `timeline`, `camera`, `VIEWS`, and the specimen input (`toSpecimen`, `fromHubConnection`, `fromHubBrace`, `fromHubColumn`, `fromHubHssColumn`, `fromHubEbf`). It loads no package. `package.test.ts` checks it. Use it for the loading animation and the SVG drawings. For the deformed shape: `DEFORMS`, `readResponse`, `protocol`, `deformParts`, `movePoint`, `follow`.
-- `@epfl-enac/steel-viz/3d`: `createViewer` (the WebGL view). It loads no package either, but it is bigger. Import it with a dynamic `import()`, only on the page that needs it, so it stays out of the main bundle. `viewer.deform(state)` draws a `DeformState`, and `viewer.deform(null)` gives back the undeformed drawing.
+- `@epfl-enac/steel-viz/3d`: `createViewer` (the WebGL view). It loads no package either, but it is bigger. Import it with a dynamic `import()`, only on the page that needs it, so it stays out of the main bundle. `viewer.deform(state)` draws a `DeformState`, and `viewer.deform(null)` gives back the undeformed drawing. `viewer.show(parts, marks?)` takes an optional `Record<id, Mark>` (`Mark` is `'new' | 'gone'`): the marked parts get the colors `added` and `gone` of `setColors()`, and the others go lighter. Without marks, the drawing is the same as before.
 
 The package has no section table. The hub has the same CSV files (ours are copies of them), so it passes their text to `loadCatalog()`:
 
@@ -646,7 +646,9 @@ To make a release (a human does it):
 - It reloads on each save. A change in `app/` is a hot reload. A change in the generator, a renderer or a table reloads the page.
 - The settings (seed, form, shapes, view, viewer...) live in the URL hash. A reload keeps them, and you can send the link.
 - Above the controls: the branch, its commit, and if it has changes not committed.
-- "Compare with main" (in View, dev server only) draws the same structure twice, side by side, in the viewer you picked (3D, SVG or both): this checkout on the left, the code of `main` on the right (the merge base, so only what the branch changed). Turn one and the other turns too, and in 3D the zoom and pan follow. When the base viewer has no `setFrame()` (main before this), the dev server leaves it out of the base bundle, and the page draws the base structure with the viewer of this checkout. The label of the view says "viewer of this branch" then. The title block says "same parts" or what differs (new, gone and changed parts, the column, the status), with the list of part ids. `PLAYGROUND_BASE` picks another base branch. That code comes from `git archive`, in `node_modules/.cache/steel-viz-base/`. An old link with `viewer=diff` opens in SVG with compare on.
+- "Compare with main" (in View, dev server only) has two modes. "Side by side" (`compare=1` in the hash) draws the same structure twice, side by side, in the viewer you picked (3D, SVG or both): this checkout on the left, the code of `main` on the right (the merge base, so only what the branch changed). Turn one and the other turns too, and in 3D the zoom and pan follow. When the base viewer has no `setFrame()` (main before this), the dev server leaves it out of the base bundle, and the page draws the base structure with the viewer of this checkout. The label of the view says "viewer of this branch" then. The title block says "same parts" or what differs (new, gone and changed parts, the column, the status), with the list of part ids. `PLAYGROUND_BASE` picks another base branch. That code comes from `git archive`, in `node_modules/.cache/steel-viz-base/`. An old link with `viewer=diff` opens in SVG with compare on.
+- "One view" (`compare=2`) draws both structures in one 3D view, on top of each other. The new parts are green, the gone parts red, and the parts that didn't change are lighter. A changed part is there twice: its old shape in red, its new shape in green. It uses the same match as the title block (`diffParts()` in `app/diff.ts`), and `overlayParts()` makes the list for the viewer: the base copies get the id `was:<id>`. The hover is blue in this mode, and the tooltip of a red part shows the base part, with its real id. It is 3D only (`hlr.ts` has no colors).
+- `base=<git ref>` in the hash picks the base for one link, for example `base=564ac4d~1` (any commit, tag or branch git knows). Without it, `PLAYGROUND_BASE` or `main`. Reload the page after you change it. `node shot.ts --seed 5 --compare 2 --base 564ac4d~1 --theme dark --out c.png` shoots it (`--compare 1` gives both panes in one image).
 
 At the top of the rail, "Seed / Hub test" picks what to draw. "Hub test" draws a real test of the RESSLab Hub in its rig:
 

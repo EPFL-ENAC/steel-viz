@@ -100,7 +100,7 @@ Play the measured response of a hub test in the 3D view. `deform.ts` is the base
 - [x] One line weight in 3D by default (two in the SVG and the export).
 - [x] More look settings: storeys, span, bracing, arm bands, connections, detail chances (`Params`, the CLI flags, the Layout and Details sections).
 - [x] A rail of sections you can fold, on the EPFL design tokens.
-- [ ] Compare in one 3D view: both structures on top of each other, the new parts in one color and the gone parts in another.
+- [x] Compare in one 3D view: both structures on top of each other, the new parts in one color and the gone parts in another.
 - [ ] The animation knobs in the CLI (`--speed`, `--duration`).
 
 ## Repo

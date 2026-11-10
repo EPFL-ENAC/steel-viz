@@ -12,7 +12,7 @@ import { toSpecimen } from '../hub.ts';
 import type { Catalog, Family } from '../sections.ts';
 import * as steel from '../steel.ts';
 import { createViewer } from '../webgl.ts';
-import { catalog, s } from './state.ts';
+import { baseQuery, catalog, s } from './state.ts';
 
 export type Engine = {
   generate: (p: any, cat: Catalog, detail?: any) => Result;
@@ -32,7 +32,7 @@ export const loadBase = () =>
   (baseLoad ??= new Promise<any>((ok, ko) => {
     const g = globalThis as any;
     if (g.BASE) return ok(g.BASE);
-    const el = Object.assign(document.createElement('script'), { src: '/__dev/base.js' });
+    const el = Object.assign(document.createElement('script'), { src: `/__dev/base.js${baseQuery()}` });
     el.onload = () => (g.BASE_ERROR ? ko(new Error(g.BASE_ERROR)) : ok(g.BASE));
     el.onerror = () => ko(new Error('the dev server did not answer'));
     document.head.append(el);

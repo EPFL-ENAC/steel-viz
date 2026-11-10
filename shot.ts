@@ -8,6 +8,9 @@
 //   also --az and --el for the angle, --dpr for more pixels (default 2)
 //   node shot.ts connections/Sato_et_al_2007_BFP-1 --zoom 8 --at 0.5,0.4 --out b.png # 8x closer, toward a point
 //     (--at: x,y as parts of the canvas, 0,0 top left, default the middle)
+//   node shot.ts --seed 5 --compare 2 --base 564ac4d~1 --out c.png      # compare with a base, in one view
+//     (--compare 1: side by side, the image has both views. --base: a git ref,
+//     default PLAYGROUND_BASE or main. --theme light|dark: default light)
 //
 // It starts its own Vite on a free port and its own headless Chrome with a temp
 // profile, and stops both at the end. It doesn't use the playground pane: from
@@ -37,7 +40,7 @@ const DRAW_MS = 50_000; // the page must draw in this time
 const DEADLINE_MS = 60_000; // the whole run, with the cleanup after it
 const AFTER_ERROR_MS = 5_000; // a page error and no drawing yet: don't wait for long
 
-const USAGE = 'usage: node shot.ts <table>/<id> [--step N | --peak] [--az N] [--el N] [--dpr N] [--zoom N [--at x,y]] --out file.png\n       node shot.ts --seed N [--az N] [--el N] [--dpr N] [--zoom N [--at x,y]] --out file.png';
+const USAGE = 'usage: node shot.ts <table>/<id> [--step N | --peak] [--az N] [--el N] [--dpr N] [--zoom N [--at x,y]] [--compare 1|2 [--base ref]] [--theme light|dark] --out file.png\n       node shot.ts --seed N [--az N] [--el N] [--dpr N] [--zoom N [--at x,y]] [--compare 1|2 [--base ref]] [--theme light|dark] --out file.png';
 
 const sleep = (ms: number) => new Promise((ok) => setTimeout(ok, ms));
 
@@ -52,6 +55,9 @@ export type ShotArgs = {
   dpr: number;
   zoom?: number; // this many times closer, toward at
   at: [number, number]; // a point of the canvas, as parts of its width and height
+  compare?: 1 | 2; // compare with the base: 1 side by side, 2 one view
+  base?: string; // the base, a git ref
+  theme?: 'light' | 'dark';
   out: string;
 };
 
@@ -76,6 +82,7 @@ export function parseShotArgs(argv: string[]): ShotArgs {
       seed: { type: 'string' }, step: { type: 'string' }, peak: { type: 'boolean' },
       az: { type: 'string' }, el: { type: 'string' }, dpr: { type: 'string' }, out: { type: 'string' },
       zoom: { type: 'string' }, at: { type: 'string' },
+      compare: { type: 'string' }, base: { type: 'string' }, theme: { type: 'string' },
     },
   });
   if (positionals.length > 1) throw new Error(`give one test, not ${positionals.length}`);
@@ -88,6 +95,10 @@ export function parseShotArgs(argv: string[]): ShotArgs {
   if (v.at !== undefined && v.zoom === undefined) throw new Error('--at is for --zoom');
   const at = (v.at ?? '0.5,0.5').split(',').map((x) => (x.trim() === '' ? NaN : Number(x)));
   if (at.length !== 2 || at.some((x) => !(x >= 0 && x <= 1))) throw new Error(`--at needs x,y with two numbers from 0 to 1, not "${v.at}"`);
+  if (v.compare !== undefined && v.compare !== '1' && v.compare !== '2') throw new Error(`--compare needs 1 (side by side) or 2 (one view), not "${v.compare}"`);
+  if (v.base !== undefined && v.compare === undefined) throw new Error('--base is for --compare');
+  if (v.base !== undefined && (!v.base.trim() || v.base.startsWith('-'))) throw new Error(`--base needs a git ref, not "${v.base}"`);
+  if (v.theme !== undefined && v.theme !== 'light' && v.theme !== 'dark') throw new Error(`--theme needs light or dark, not "${v.theme}"`);
   const a: ShotArgs = {
     seed: number('--seed', v.seed, isCount, 'a whole number from 0'),
     step: number('--step', v.step, isCount, 'a whole number from 0'),
@@ -97,8 +108,12 @@ export function parseShotArgs(argv: string[]): ShotArgs {
     dpr: number('--dpr', v.dpr, (n) => n > 0, 'a number above 0') ?? 2,
     zoom: number('--zoom', v.zoom, (n) => n > 0, 'a number above 0'),
     at: at as [number, number],
+    compare: v.compare === undefined ? undefined : (Number(v.compare) as 1 | 2),
+    base: v.base,
+    theme: v.theme as ShotArgs['theme'],
     out: v.out,
   };
+  if (a.compare === 1 && a.dpr > 2) throw new Error('--dpr above 2 is for one canvas, not for --compare 1');
   if (name !== undefined) {
     const at = name.indexOf('/');
     if (at <= 0 || at === name.length - 1) throw new Error(`give the test as <table>/<id>, not "${name}"`);
@@ -108,13 +123,16 @@ export function parseShotArgs(argv: string[]): ShotArgs {
 }
 
 // the settings of the page, as app/state.ts reads them
-export function shotHash(a: Pick<ShotArgs, 'test' | 'seed' | 'az' | 'el'>): string {
+export function shotHash(a: Pick<ShotArgs, 'test' | 'seed' | 'az' | 'el' | 'compare' | 'base' | 'theme'>): string {
   const h = new URLSearchParams();
   if (a.test) h.set('specimen', `${a.test.table}/${a.test.id}`);
   else h.set('seed', String(a.seed));
   if (a.az !== undefined || a.el !== undefined) h.set('view', ''); // '' when the angle is free
   if (a.az !== undefined) h.set('az', String(a.az));
   if (a.el !== undefined) h.set('el', String(a.el));
+  if (a.compare) h.set('compare', String(a.compare));
+  if (a.base) h.set('base', a.base);
+  if (a.theme) h.set('theme', a.theme);
   return h.toString();
 }
 
@@ -342,11 +360,15 @@ async function openPage(port: number, errors: string[], bail: (e: Error) => void
 }
 
 // ---- what runs in the page (the source text of these functions goes to Chrome)
-const pageState = () => {
+// whole: the box of the whole drawing (compare side by side), not of the canvas
+const pageState = (whole = false) => {
   const text = (s: string) => document.querySelector(s)?.textContent?.trim() ?? '';
   const c = document.querySelector<HTMLCanvasElement>('.gl canvas');
-  const b = c?.getBoundingClientRect();
+  const b = (whole ? document.querySelector('.drawing') : c)?.getBoundingClientRect();
+  // the "vs <base>" row of the title block: null with no compare
+  const vs = [...document.querySelectorAll('.titleblock > div')].find((d) => d.querySelector('dt')?.textContent?.startsWith('vs '));
   return {
+    vs: vs ? `${vs.querySelector('dt')?.textContent?.trim()}: ${vs.querySelector('dd')?.textContent?.trim() ?? ''}` : null,
     error: text('.test-error') || text('pre.error'),
     svgOnly: !!document.querySelector('.pane.v-svg'), // no WebGL2
     note: text('.pane-note'), // the canvas stays in the DOM under a note
@@ -380,18 +402,23 @@ const hideHint = () => document.querySelector<HTMLElement>('.hint')?.style.setPr
 const nextFrames = () => new Promise<void>((ok) => requestAnimationFrame(() => requestAnimationFrame(() => ok())));
 const railNotes = () => [...new Set([...document.querySelectorAll('.source-note, .response .note, .test-notes li')].map((e) => e.textContent?.trim() ?? ''))].filter(Boolean);
 
-async function waitDrawn(page: Page, errors: string[]) {
+// the base is still on its way: no diff yet, or the note of Drawing.vue
+const baseWaits = (vs: string | null) => vs === null || /: (Bundling .*|Loading the test…)?$/.test(vs);
+
+async function waitDrawn(page: Page, errors: string[], compare: boolean) {
   const end = Date.now() + DRAW_MS;
   let state: Awaited<ReturnType<typeof pageState>> | null = null;
   let errorAt = 0;
   for (;;) {
     // Vite can reload the page once it has optimized its packages: try again
-    state = await page.call(pageState).catch(() => state);
+    state = await page.call(pageState, compare).catch(() => state);
     if (state?.error) throw new Error(state.error);
     if (state?.svgOnly) throw new Error('no canvas: WebGL2 did not start, the page shows the SVG');
-    if (state?.drawn && state.box && !state.note) return state.box;
+    if (state?.drawn && state.box && !state.note && !(compare && baseWaits(state.vs))) return state.box;
     if (errors.length) errorAt ||= Date.now();
-    if (Date.now() > end || (errorAt && Date.now() - errorAt > AFTER_ERROR_MS)) throw new Error(state?.note ? `no drawing, the page says: ${state.note}` : 'no canvas');
+    if (Date.now() > end || (errorAt && Date.now() - errorAt > AFTER_ERROR_MS)) {
+      throw new Error(state?.note ? `no drawing, the page says: ${state.note}` : compare && state?.drawn ? `no base, the page says: ${state.vs ?? 'nothing'}` : 'no canvas');
+    }
     await sleep(100);
   }
 }
@@ -456,7 +483,7 @@ async function shoot(a: ShotArgs, job: Job, out: string, chromeBin: string, vite
   await page.send('Emulation.setDeviceMetricsOverride', { width: WIDTH, height: HEIGHT, deviceScaleFactor: 0, mobile: false });
   await page.send('Page.navigate', { url: `${base}#${shotHash(a)}` });
 
-  let box = await waitDrawn(page, errors);
+  let box = await waitDrawn(page, errors, a.compare !== undefined);
   if (a.dpr > 2) box = await growCanvas(page, box, a.dpr);
   if (job.step !== undefined) await goToStep(page, job);
   if (a.zoom !== undefined) await page.call(zoomAt, a.zoom, ...a.at);
@@ -475,6 +502,7 @@ async function shoot(a: ShotArgs, job: Job, out: string, chromeBin: string, vite
     const at = Number(s.shown.split(' / ')[0]) - 1;
     console.log(`${job.step === undefined ? 'at rest, ' : ''}step ${at} of ${s.max}, the page shows ${at + 1} / ${n}`);
   } else if (a.test) console.log('at rest, no steps');
+  if (a.compare) console.log((await page.call(pageState)).vs);
   if (job.peak) console.log(`biggest move: ${Math.round(job.peak.move)} mm in the image, with the shape scale x${job.peak.scale}`);
   const notes = await page.call(railNotes);
   if (notes.length) console.log(`notes:\n${notes.map((n) => `  ${n}`).join('\n')}`);
