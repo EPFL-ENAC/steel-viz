@@ -4,7 +4,7 @@
 // change here.
 import { computed, reactive, shallowRef, watch } from 'vue';
 import { protocol, type DeformState, type DeformTable, type Protocol } from '../deform.ts';
-import { DEFORMS } from '../deforms.ts';
+import { DEFORMS, shapeAt } from '../deforms.ts';
 import type { Result } from '../generate.ts';
 import type { HubRecord } from '../hub.ts';
 import { current, type Current } from './tests.ts';
@@ -40,7 +40,7 @@ const frame = computed<{ r: Result; state: DeformState } | { error: string } | n
   const [T, p, t] = [table.value, steps.value, shownTest.value];
   if (!T || !p || !t || t.c !== current.value || !t.c.spec) return null;
   try {
-    return { r: t.r, state: T.shape(t.r, t.c.spec, t.c.record as HubRecord, p.at(Math.min(resp.step, p.n - 1)), scale.value) };
+    return { r: t.r, state: shapeAt(t.c.table, t.r, t.c.spec, t.c.record as HubRecord, p, resp.step, scale.value) };
   } catch (e) {
     return { error: (e as Error).message };
   }

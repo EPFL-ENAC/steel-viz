@@ -3,7 +3,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { toSpecimen } from './hub.ts';
-import { findChrome, loadCurves, loadRows, parseShotArgs, peakStep, rowId, shotHash } from './shot.ts';
+import { findChrome, parseShotArgs, peakStep, shotHash } from './shot.ts';
+import { loadCurves, loadRows, rowId } from './tables.ts';
 
 const CR1 = 'connections/Lee_et_al_2002_CR1';
 

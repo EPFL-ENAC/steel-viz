@@ -6,8 +6,8 @@
 -->
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
-import { SCALES, biggest, deformParts } from '../deform.ts';
-import { renderHLR } from '../hlr.ts';
+import { SCALES, biggest } from '../deform.ts';
+import { shapeSvg } from '../deforms.ts';
 import Seg from './Seg.vue';
 import { ZONE_COLORS, deformed, resp, scale, shapeError, shownTest, steps, table, togglePlay } from './response.ts';
 import { s } from './state.ts';
@@ -72,7 +72,7 @@ async function copyFrame() {
   const [t, d] = [shownTest.value, deformed.value];
   if (!t || !d) return;
   try {
-    const { svg } = renderHLR(deformParts(t.r.parts, d.state), { az: s.az, el: s.el, weights: s.weights ? s.weights === 'two' : true });
+    const { svg } = shapeSvg(t.r.parts, d.state, { az: s.az, el: s.el, weights: s.weights ? s.weights === 'two' : true });
     await navigator.clipboard.writeText(svg);
     copyNote.value = `SVG of step ${resp.step + 1} copied.`;
   } catch {

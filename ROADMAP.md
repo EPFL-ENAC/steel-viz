@@ -91,7 +91,7 @@ Play the measured response of a hub test in the 3D view. `deform.ts` is the base
 - [x] The actuator that pushes a column follows its length: its foot stays on its support at the auto scale, on all the real tests.
 - [x] RBS: the hinge at the cut, with Z of the cut section.
 - [x] Doubler plates in the panel zone: the elastic estimate of the distortion uses the web and the doublers.
-- [ ] `--step` in the CLI, for one deformed frame. The playground has "Copy SVG at this step".
+- [x] `--step` in the CLI, for one deformed frame. Done: `--specimen <table>/<id> --step <n>`, the same file as "Copy SVG at this step" with `--view 225,35`.
 
 ## Playground
 
@@ -101,7 +101,7 @@ Play the measured response of a hub test in the 3D view. `deform.ts` is the base
 - [x] More look settings: storeys, span, bracing, arm bands, connections, detail chances (`Params`, the CLI flags, the Layout and Details sections).
 - [x] A rail of sections you can fold, on the EPFL design tokens.
 - [x] Compare in one 3D view: both structures on top of each other, the new parts in one color and the gone parts in another.
-- [ ] The animation knobs in the CLI (`--speed`, `--duration`).
+- [x] The animation knobs in the CLI (`--speed`, `--duration`). Done: with `--animate`, duration in s like the playground.
 
 ## Repo
 

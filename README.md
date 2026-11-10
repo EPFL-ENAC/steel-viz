@@ -271,9 +271,10 @@ What we draw differently from the real test goes into the log as a note: the con
 
 ```sh
 node cli.ts --specimen specimens/Chi_and_Uang_2002_DC2.json --view iso   # writes steel-Chi_and_Uang_2002_DC2-iso.svg
+node cli.ts --specimen connections/Chi_and_Uang_2002_DC2 --view iso      # the same test, as <table>/<id>
 ```
 
-`--specimen` takes the same drawing options as a seed (`--view`, `--detail`, `--animate`, `--frames`, `--painter`, `--size`). The family comes from `--family`, else from the file, else aisc. `--seed`, `--form`, `--arms` and `--height` don't apply. `specimen.test.ts` covers the two hub files, the format and the errors. `doubler.test.ts` covers the doubler plates: the hub fields, where they sit next to the continuity plates, and the panel zone.
+`--specimen` takes a JSON file or `<table>/<id>`. With `<table>/<id>`, it reads the row from resslab-hub-data next to the repo, as the dev server does. Without the hub data, it reads the examples of `specimens/`. `--specimen` takes the same drawing options as a seed (`--view`, `--detail`, `--animate`, `--frames`, `--painter`, `--size`). The family comes from `--family`, else from the file, else aisc. `--seed`, `--form`, `--arms` and `--height` don't apply. `specimen.test.ts` covers the two hub files, the format and the errors. `doubler.test.ts` covers the doubler plates: the hub fields, where they sit next to the continuity plates, and the panel zone.
 
 ### The concrete slab
 
@@ -441,7 +442,13 @@ The colors come from the data, and the rail shows each value next to its color:
 
 A test with a missing capacity has no zone for it, and the rail says why. A test with only a `Panel_zone` file has no force, so it has no beam hinge zone, and the rail says why too.
 
-The SVG export stays the undeformed drawing. "Copy SVG at this step" gives one deformed frame, drawn by `renderHLR` from `deformParts()`.
+The SVG export stays the undeformed drawing. "Copy SVG at this step" gives one deformed frame, drawn by `shapeSvg()` (`renderHLR` on `deformParts()`). The command line gives the same frame with `--step`:
+
+```sh
+node cli.ts --specimen connections/Lee_et_al_2002_CR1 --step 440 --view 225,35 --out cr1-440.svg
+```
+
+The step counts from 0, like the slider, so step 440 is "441 / 637" on the page. The CLI reads the test and its response files from the same place as the page: resslab-hub-data, or with none, `specimens/` and `specimens/responses/`. The scale is the auto scale. The log gives the step, the scale, the zones and the notes. A test with no response file, or a step past the last one, stops with an error and exit code 1. `--step` doesn't go with `--animate`, `--frames` or `--painter`. The playground rounds the angles of the view, so iso is 225, 35 there and 225, 35.264 in the CLI. To get the same file as the page, give `--view 225,35`.
 
 The files in `specimens/responses/` are copies from resslab-hub-data, which is public domain. They are the examples of the tests and of the static build. The dev server reads all the others from the hub data.
 
@@ -533,7 +540,7 @@ The exact renderer draws like a technical drawing:
 
 The test rig (parts of kind `rig`) is drawn lighter than the specimen. In the SVG, its parts have the class `g` and the color `var(--rig, #9e9e9e)`, so a page can set `--rig`. Its lines are thinner: 0.7 times the width in the painter renderer, and in `hlr.ts` its outline is no heavier than its inner lines. In the 3D view, `setColors({ bg, fg, accent, rig })` sets the rig color. Without `rig`, it is half way between `fg` and `bg`. The playground uses `--fg-muted`, and its tooltip adds "(test rig)" to the name of a rig part.
 
-The build animation (`--animate`) shows the parts put in place, like on a site. The columns come down from above. An arm slides in from outside the frame, along its own axis, after its plates. A bay beam is lowered between its two columns. Then the bolts pop in one by one. A part waits only for the parts it stands on, and up to three beams can fly in at the same time (`CRANES` in `steel.ts`), so a big structure builds in about 4 s. The animation has two knobs. `speed` says how fast one part comes in (2 is twice as fast). `duration` (ms, optional) says how long the whole build lasts: `timeline(parts, { speed, duration })` keeps the order and the time of each part, and moves their start times so the last part lands at the end. So a short build with slow parts has many parts in the air at once, and a long build with fast parts has pauses. If one part is slower than the whole build, all parts come at once (`shortestBuild()` gives the shortest build that keeps the order). `RenderOpts` and `Viewer.build()` take the same two. Each part has a `kind` and a `from` direction for this (set in `generate.ts`), and `timeline()` in `steel.ts` says when each part moves and lands. A line that a later part hides stays visible until that part lands. While a beam moves, its lines are already cut where other parts will hide it at the end, so a small hole can move with it.
+The build animation (`--animate`) shows the parts put in place, like on a site. The columns come down from above. An arm slides in from outside the frame, along its own axis, after its plates. A bay beam is lowered between its two columns. Then the bolts pop in one by one. A part waits only for the parts it stands on, and up to three beams can fly in at the same time (`CRANES` in `steel.ts`), so a big structure builds in about 4 s. The animation has two knobs. `speed` says how fast one part comes in (2 is twice as fast). `duration` (ms, optional) says how long the whole build lasts: `timeline(parts, { speed, duration })` keeps the order and the time of each part, and moves their start times so the last part lands at the end. So a short build with slow parts has many parts in the air at once, and a long build with fast parts has pauses. If one part is slower than the whole build, all parts come at once (`shortestBuild()` gives the shortest build that keeps the order). `RenderOpts` and `Viewer.build()` take the same two. The CLI takes them with `--animate`: `--speed 2` and `--duration 8` (in s, like the playground). Without `--duration`, the build keeps its own length. The painter (`--painter`) has no knobs. Each part has a `kind` and a `from` direction for this (set in `generate.ts`), and `timeline()` in `steel.ts` says when each part moves and lands. A line that a later part hides stays visible until that part lands. While a beam moves, its lines are already cut where other parts will hide it at the end, so a small hole can move with it.
 
 To find a structure that works as a logo, `score.ts` gives each one a score from 0 to 1. It looks at the big shapes from the chosen view: do they fill a square, does the weight sit on the columns, how many members, how many members cross each other. `pick.ts` scans many seeds and lists the best ones (450 structures take about 2 s). In the playground, "Find good seeds" does the same for 200 seeds and shows the best 8.
 
@@ -561,7 +568,7 @@ Files:
 
 - `vec.ts`: vector helpers.
 - `sections.ts`: section properties (I, tube, rod, round tube, channel, double angle, tee) from the CSV tables. The rods and the tees are made in code. The round tubes (CHS and pipes) are in `Catalog.pipes`, not in `all`, so a specimen finds its section by name as before.
-- `sections/`, `tables.ts`: the CSV tables (see `sections/README.md`), and how Node reads them.
+- `sections/`, `tables.ts`: the CSV tables (see `sections/README.md`), and how Node reads them. `tables.ts` also reads a hub test and its response files for `cli.ts` and `shot.ts`.
 - `solver.ts`: 3D frame solver (6 DOF per node, pinned ends, finds mechanisms), and the buckling analysis (`alphaCr`).
 - `checks.ts`: the member checks (AISC 360-22 E3, E7 and F8 for round tubes, F2, F6, H1-1). `tubes.test.ts` checks the round tubes.
 - `generate.ts`: topology, the fix loop, trusses and rods, posts and beam splices, and the sizing. Also the specimen path (`buildSpecimen`), and it sends a brace test, a column test (also HSS) or a link test to `bench.ts`.
@@ -581,7 +588,7 @@ Files:
 - `hlr.ts`: the exact hidden-line renderer, with bolt heads as real hex solids. No package. `hlr.test.ts` checks it on small cases.
 - `webgl.ts`: the 3D view of the playground, in plain WebGL2.
 - `triangles.ts`: the triangles of a flat face, for `webgl.ts` and `hlr.ts`.
-- `cli.ts`: the command line.
+- `cli.ts`, `cli.test.ts`: the command line, and the tests of its flags and of `--step`.
 - `shot.ts`: a PNG of the 3D view, at any step of a test, for agents (`node shot.ts <table>/<id> --peak --out a.png`). `--compare 1|2` and `--base <ref>` shoot "Compare with main", `--theme dark` the dark theme. It starts its own Vite and headless Chrome. It isn't in the package.
 - `app/`, `vite.config.ts`: the playground, a Vue app served by Vite.
 - `index.ts`, `3d.ts`: the two entries of the package (see below).
