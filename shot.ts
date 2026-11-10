@@ -17,19 +17,19 @@
 // It prints the notes of the rail and the page errors. It exits 1 on any failure:
 // a page error, no canvas, a test that doesn't exist.
 import { spawn, type ChildProcess } from 'node:child_process';
-import { accessSync, constants, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { accessSync, constants, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { movePoint, protocol, readResponse, responseFile, type Curve, type Protocol } from './deform.ts';
-import { DEFORMS } from './deforms.ts';
+import { movePoint, type Curve } from './deform.ts';
+import { DEFORMS, shapeAt } from './deforms.ts';
 import { generate } from './generate.ts';
-import { hubTable, toSpecimen, type HubRecord } from './hub.ts';
-import { loadCatalog, parseCsv } from './sections.ts';
+import { toSpecimen, type HubRecord } from './hub.ts';
+import { loadCatalog } from './sections.ts';
 import type { Specimen } from './specimen.ts';
-import { HUB_TABLES, findHubData, readTables } from './tables.ts';
+import { findHubData, findRecord, loadCurves, readTables, stepsOf } from './tables.ts';
 
 const ROOT = import.meta.dirname;
 const [WIDTH, HEIGHT] = [1500, 950]; // the page, in CSS px
@@ -134,43 +134,7 @@ export function findChrome(env: NodeJS.ProcessEnv = process.env): string | undef
   return undefined;
 }
 
-// ---- the test, read from the same source as the page
-// The page gives the first row for an unknown id (fetchRecord in app/tests.ts),
-// so we look at the id here, before anything starts.
-export const rowId = (r: HubRecord) => String(r.id || r.test_id || '?');
-
-export function loadRows(table: string, hubData: string | undefined): HubRecord[] {
-  if (hubData) {
-    const file = join(hubData, HUB_TABLES[table]);
-    if (!existsSync(file)) throw new Error(`no table ${table} in ${hubData}`);
-    return parseCsv(readFileSync(file, 'utf8')) as HubRecord[];
-  }
-  const dir = join(ROOT, 'specimens');
-  return readdirSync(dir)
-    .filter((f) => f.endsWith('.json'))
-    .map((f) => JSON.parse(readFileSync(join(dir, f), 'utf8')) as HubRecord)
-    .filter((r) => hubTable(r) === table);
-}
-
-// the response files of a test: { folder: curve }, only the ones it has
-export function loadCurves(table: string, id: string, hubData: string | undefined): Record<string, Curve> {
-  const out: Record<string, Curve> = {};
-  for (const s of DEFORMS[table].responses) {
-    const dir = hubData ? join(hubData, dirname(HUB_TABLES[table]), s.folder) : join(ROOT, 'specimens', 'responses', table, s.folder);
-    const file = join(dir, responseFile(s, id));
-    if (existsSync(file)) out[s.folder] = readResponse(readFileSync(file, 'utf8'), s.cols);
-  }
-  return out;
-}
-
-function stepsOf(curves: Record<string, Curve>): Protocol {
-  try {
-    return protocol(curves);
-  } catch {
-    throw new Error('no measured response for this test, so it has no steps');
-  }
-}
-
+// ---- the test: the loader is in tables.ts, shared with cli.ts
 // The step with the biggest move of any face point, at the scale of the page.
 export function peakStep(table: string, spec: Specimen, record: HubRecord, curves: Record<string, Curve>): { step: number; move: number; scale: number } {
   const T = DEFORMS[table];
@@ -183,7 +147,7 @@ export function peakStep(table: string, spec: Specimen, record: HubRecord, curve
   for (let step = 0; step < p.n; step++) {
     let moves;
     try {
-      moves = T.shape(r, spec, record, p.at(step), scale).moves;
+      moves = shapeAt(table, r, spec, record, p, step, scale).moves;
     } catch (e) {
       throw new Error(`no deformed shape at step ${step}: ${(e as Error).message}`);
     }
@@ -205,10 +169,8 @@ type Job = { label: string; step?: number; n?: number; peak?: { move: number; sc
 function readJob(a: ShotArgs): Job {
   if (!a.test) return { label: `seed ${a.seed}` };
   const { table, id } = a.test;
-  if (!Object.hasOwn(HUB_TABLES, table)) throw new Error(`no table "${table}": ${Object.keys(HUB_TABLES).join(', ')}`);
   const hubData = findHubData();
-  const record = loadRows(table, hubData).find((r) => rowId(r) === id);
-  if (!record) throw new Error(`no test "${id}" in the table ${table} (read from ${hubData ?? 'the examples of specimens/'})`);
+  const record = findRecord(table, id, hubData);
   const spec = toSpecimen(record); // it says which field it can't read
   const job: Job = { label: `${table}/${id}` };
   if (a.step === undefined && !a.peak) return job;

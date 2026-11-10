@@ -9,5 +9,5 @@ export { BOLT_MS, CRANES, DETAIL, VIEWS, buildEnd, camera, forSize, render, shor
 export { renderHLR } from './hlr.ts';
 export { findSection, type BraceSpecimen, type ColumnSpecimen, type ConnSpecimen, type LinkSpecimen, type SectionRef, type Specimen, type SpecimenBeam } from './specimen.ts';
 export { deformParts, follow, movePoint, protocol, readResponse, thin, type Curve, type DeformState, type DeformTable, type Knot, type Move, type Protocol, type ResponseSpec, type Samples, type Zone } from './deform.ts';
-export { DEFORMS } from './deforms.ts';
+export { DEFORMS, shapeAt, shapeSvg } from './deforms.ts';
 export { fromHubBrace, fromHubColumn, fromHubConnection, fromHubEbf, fromHubHssColumn, toSpecimen, type HubRecord } from './hub.ts';
