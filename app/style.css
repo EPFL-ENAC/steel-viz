@@ -3,6 +3,12 @@
 /* The working zones of a test, in the 3D view and in its chart. Not the red:
    it is the hovered part. The dark values are in app/epfl/dark.css. */
 :root { --zone-moment: #d97706; --zone-shear: #2563eb; }
+/* Compare in one view: the new parts and the gone parts (git diff colors).
+   The hover is blue there. The dark values are in app/epfl/dark.css. */
+:root { --diff-new: var(--epfl-green-text); --diff-gone: var(--primary); }
+.diff-new { color: var(--diff-new); }
+.diff-gone { color: var(--diff-gone); }
+.titleblock .legend { margin: var(--space-1) 0 0; font-size: var(--fs-xs); font-weight: var(--w-bold); }
 html, body, #app { height: 100%; }
 body {
   margin: 0;
@@ -133,7 +139,7 @@ input[type="range"]:hover::-moz-range-thumb { background: var(--primary); }
 .pane { position: relative; }
 .pane.noted > :is(.gl, .svg) { visibility: hidden; }
 .pane-note { position: absolute; inset: 0; display: grid; place-items: center; padding: var(--space-4); text-align: center; overflow-wrap: anywhere; }
-.drawing.compare .pane > :is(.gl, .svg)::before, .drawing.v-both .pane > :is(.gl, .svg)::before {
+.drawing.compare .pane > :is(.gl, .svg)::before, .drawing.v-both .pane > :is(.gl, .svg)::before, .drawing.one .pane > .gl::before {
   content: attr(data-label); position: absolute; top: var(--space-2); left: var(--space-3); z-index: 1;
   font-size: var(--fs-xs); color: var(--fg-muted); pointer-events: none;
 }

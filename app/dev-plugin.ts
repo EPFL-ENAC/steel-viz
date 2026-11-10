@@ -1,7 +1,8 @@
 // Dev server only (Vite plugin):
 // - /__dev/info: the branch, the commit, and the base commit for "vs main".
 // - /__dev/base.js: the generator and the renderers of the base branch, bundled
-//   from `git archive` of the merge base with PLAYGROUND_BASE (default main).
+//   from `git archive` of the merge base with the base: ?base=<ref> (the
+//   `base` of the hash of the page), else PLAYGROUND_BASE, else main.
 //   It sets globalThis.BASE (see app/engine.ts). Kept per commit in
 //   node_modules/.cache. With its WebGL viewer (and three.js) only when that
 //   viewer has setFrame(): an older one can't zoom with ours, so the page
@@ -39,14 +40,26 @@ const git = (...args: string[]) => {
   }
 };
 
-const info = () => ({
-  branch: git('rev-parse', '--abbrev-ref', 'HEAD') || '?',
-  sha: git('rev-parse', '--short', 'HEAD'),
-  dirty: git('status', '--porcelain', '--untracked-files=no') !== '',
-  base: { ref: BASE_REF, sha: git('merge-base', 'HEAD', BASE_REF).slice(0, 7) },
-});
+// the base of a request: ?base=<ref> (from the hash of the page), else
+// PLAYGROUND_BASE, else main. Only a ref git knows as a commit: no option,
+// and git gets it as one argument (no shell).
+function baseRef(url: string | undefined) {
+  const ref = new URLSearchParams((url ?? '').split('?')[1] ?? '').get('base') || BASE_REF;
+  const ok = !ref.startsWith('-') && git('rev-parse', '--verify', '--quiet', `${ref}^{commit}`) !== '';
+  return { ref, ok };
+}
 
-async function bundleBase(sha: string) {
+const info = (url: string | undefined) => {
+  const { ref, ok } = baseRef(url);
+  return {
+    branch: git('rev-parse', '--abbrev-ref', 'HEAD') || '?',
+    sha: git('rev-parse', '--short', 'HEAD'),
+    dirty: git('status', '--porcelain', '--untracked-files=no') !== '',
+    base: { ref, sha: ok ? git('merge-base', 'HEAD', ref).slice(0, 7) : '' },
+  };
+};
+
+async function bundleBase(sha: string, ref: string) {
   const dir = join(root, 'node_modules', '.cache', 'steel-viz-base', sha);
   if (!existsSync(join(dir, 'generate.ts'))) {
     mkdirSync(dir, { recursive: true });
@@ -80,16 +93,19 @@ globalThis.BASE = { loadCatalog, generate, steel, renderHLR, createViewer, toSpe
     write: false,
     logLevel: 'silent',
   });
-  console.log(`  vs ${BASE_REF}: bundled ${sha.slice(0, 7)}`);
+  console.log(`  vs ${ref}: bundled ${sha.slice(0, 7)}`);
   return r.outputFiles[0].text;
 }
 
 const bases = new Map<string, Promise<string>>();
-function baseScript() {
-  const sha = git('merge-base', 'HEAD', BASE_REF);
-  if (!sha) return Promise.resolve(`globalThis.BASE_ERROR = ${JSON.stringify(`no merge base with ${BASE_REF}`)};`);
+function baseScript(url?: string) {
+  const { ref, ok } = baseRef(url);
+  const fail = (msg: string) => Promise.resolve(`globalThis.BASE_ERROR = ${JSON.stringify(msg)};`);
+  if (!ok) return fail(`git knows no commit "${ref}"`);
+  const sha = git('merge-base', 'HEAD', ref);
+  if (!sha) return fail(`no merge base with ${ref}`);
   if (!bases.has(sha)) {
-    const p = bundleBase(sha).catch((e) => {
+    const p = bundleBase(sha, ref).catch((e) => {
       bases.delete(sha); // try again on the next load
       const msg = e.errors?.length ? e.errors.map((x: any) => x.text).join('\n') : String(e.message ?? e);
       return `globalThis.BASE_ERROR = ${JSON.stringify(msg)};`;
@@ -141,13 +157,14 @@ export const devTools = (): Plugin => ({
         res.end(readFileSync(file, 'utf8'));
       }
     });
-    server.middlewares.use('/__dev/info', (_, res) => {
+    // the use() path is cut from req.url: what is left is ?base=…
+    server.middlewares.use('/__dev/info', (req, res) => {
       res.setHeader('content-type', 'application/json');
-      res.end(JSON.stringify(info()));
+      res.end(JSON.stringify(info(req.url)));
     });
-    server.middlewares.use('/__dev/base.js', async (_, res) => {
+    server.middlewares.use('/__dev/base.js', async (req, res) => {
       res.setHeader('content-type', 'text/javascript');
-      res.end(await baseScript());
+      res.end(await baseScript(req.url));
     });
   },
   handleHotUpdate({ file, server }) {
