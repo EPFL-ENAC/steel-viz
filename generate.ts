@@ -704,7 +704,9 @@ function dropSplicesOnGussets(st: Structure, p: Params, log: string[]) {
   const byId = new Map(parts(st, 'plates', p.seg).map((q) => [q.id, q]));
   for (const a of arms) {
     const sp = byId.get(`${a.id}-splice`)?.boxes ?? [];
-    const hit = a.braces.some((_, k) => (byId.get(`${braceId(a, k)}-to-conn`)?.boxes ?? []).some((g) => sp.some((b) => overlap(b, g))));
+    // a rod of an X is in two pieces: its gusset on the beam is the one of the upper piece
+    const gusset = (k: number) => [...(byId.get(`${braceId(a, k)}-to-conn`)?.boxes ?? []), ...(byId.get(`${braceId(a, k)}-hi-to-conn`)?.boxes ?? [])];
+    const hit = a.braces.some((_, k) => gusset(k).some((g) => sp.some((b) => overlap(b, g))));
     if (!hit) continue;
     a.splice = undefined;
     log.push(`${a.id}: no beam splice, it would go through a brace gusset`);
