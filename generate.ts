@@ -49,8 +49,8 @@ export type Params = {
   // degrees, from a stream of its own (skewArms). 0: every arm square, as
   // before skewed arms.
   skewP: number;
-  // the chance that a one storey portal gets a pitched roof (gable.ts),
-  // from a stream of its own. 0: flat beams only, as before.
+  // the chance that a portal gets a pitched roof on its top bay beam
+  // (gable.ts), from a stream of its own. 0: flat beams only, as before.
   gableP: number;
   // the chance that the braces of an arm are round tubes (when they don't get
   // double angles from shapeP), from a stream of its own. 0: no round tube,
@@ -533,13 +533,14 @@ function rodFor(st: Structure, a: Arm, cat: Catalog, rng: () => number): Rod | u
 }
 
 // ------------------------------------------------------------- gable
-// A pitched roof on a one storey portal (gable.ts), from a stream of its
-// own. On the bay beam: no brace (it would go through the haunch or the
-// ridge), no secondary beam on it, moment end plates at both eaves.
+// A pitched roof on a portal (gable.ts), from a stream of its own. With two
+// storeys, on the top bay beam only: the floor beam stays flat and keeps its
+// bracing. On the gable beam: no brace (it would go through the haunch or
+// the ridge), no secondary beam on it, moment end plates at both eaves.
 function addGable(st: Structure, p: Params, log: string[]) {
   const bays = st.arms.filter((a) => a.to !== undefined);
-  if (st.form !== 'portal' || p.gableP <= 0 || bays.length !== 1) return;
-  const a = bays[0];
+  if (st.form !== 'portal' || p.gableP <= 0 || !bays.length || bays.length > 2) return;
+  const a = bays.reduce((x, y) => (y.z > x.z ? y : x));
   const g = drawGable(mulberry32(p.seed * 179424673 + 29), a.L, p.gableP);
   if (!g) return;
   const i = st.arms.indexOf(a);
@@ -1120,6 +1121,8 @@ function stiffen(st: Structure, m: Model, stab: Stability, cat: Catalog, p: Para
 }
 const alphaLog = (a: number, amp: number) =>
   a === Infinity ? 'alphaCr: nothing in compression' : `alphaCr ${a.toFixed(1)}, moments × ${amp.toFixed(2)}${a < ALPHA_MIN ? ` (below ${ALPHA_MIN})` : ''}`;
+// the most room between the flanges of a column of the catalog (size() keeps d >= 250)
+const webRoom = (cat: Catalog) => Math.max(...cat.columns.filter((c) => c.d >= 250).map((c) => c.d - 2 * c.tf));
 // beams that frame into the column web (above `z`) must fit between its flanges
 const webClear = (arms: Arm[], z = -Infinity) => Math.max(0, ...arms.filter((a) => faceOf(a) % 180 === 90).flatMap((a) => [
   ...(a.z - a.sec.d > z ? [a.sec.bf + 40] : []),
@@ -1142,7 +1145,11 @@ function size(st: Structure, m: Model, res: Forces[], cat: Catalog, p: Params, c
   };
   for (const a of st.arms) {
     // a top chord keeps the clear height of its truss
-    a.sec = choose(cat.beams, a.id, a.sec, (s) => s.d >= 200 && (!a.truss || a.truss.D - s.d >= a.truss.hMin) && (!hasShortBrace(a) || s.d <= SHORT.depth));
+    // a gable rafter on a column web: its eave plate must fit between the
+    // flanges of at least one column (a heavy rafter after alphaCr can get
+    // wider than any of them)
+    const onWeb = a.gable && faceOf(a) % 180 === 90;
+    a.sec = choose(cat.beams, a.id, a.sec, (s) => s.d >= 200 && (!a.truss || a.truss.D - s.d >= a.truss.hMin) && (!hasShortBrace(a) || s.d <= SHORT.depth) && (!onWeb || s.bf + 40 <= webRoom(cat)));
     const tr = a.truss;
     if (tr) {
       const chords = shaped(p, chordId(a)) ? orOld(cat.tees, cat.beams) : cat.beams;
@@ -1419,8 +1426,10 @@ function kindOf(st: Structure, w: Swap): ConnType {
 }
 // A new kind that goes through another part (a brace gusset, a rod, the
 // plates of a beam on the other face) goes back to the old one.
-function keepFits(st: Structure, p: Params, swaps: Swap[], log: string[]) {
+// Returns true if it left out the column splice.
+function keepFits(st: Structure, p: Params, swaps: Swap[], log: string[]): boolean {
   const ps = parts(st, 'plates', p.seg);
+  const back: string[] = [];
   for (const w of swaps) {
     const id = w.part();
     const mine = ps.find((q) => q.id === id);
@@ -1429,7 +1438,18 @@ function keepFits(st: Structure, p: Params, swaps: Swap[], log: string[]) {
     if (!hit) continue;
     log.push(`${w.key}: ${CONNS[kindOf(st, w)].label} goes through another part, back to ${CONNS[w.old].label}`);
     w.set(w.old);
+    back.push(id);
   }
+  // pickSplice() kept clear of the new kind, the old one can reach further
+  // (an end plate goes 90 mm past the flange): then no column splice
+  if (!back.length || !st.splice) return false;
+  const now = parts(st, 'plates', p.seg);
+  const plates = now.filter((q) => /^column\d*-splice$/.test(q.id)).flatMap((q) => q.boxes ?? []);
+  const hit = back.find((id) => now.find((q) => q.id === id)?.boxes?.some((a) => plates.some((b) => overlap(a, b))));
+  if (!hit) return false;
+  log.push(`splice: in the way of ${hit}, left out`);
+  st.splice = undefined;
+  return true;
 }
 
 // how far the plates of the two ends of a beam go past it, below and above
@@ -1469,11 +1489,13 @@ function pickSplice(st: Structure, p: Params, rng: () => number): { sp: Splice; 
 // The shafts are the ones parts() builds: the lower one up to the splice,
 // the upper one above it.
 // A gable rafter can get deeper after pickSplice() (alphaCr), so its eave
-// plate and haunch can reach down to the splice.
+// plate and haunch can reach down to the splice. It can also get wider than
+// the room sizeTop() left on the web of the upper shaft.
 function eaveHits(st: Structure, sp: Splice): boolean {
   const [below, above] = sp.kind === 'bearing' ? [0, BEARING_T] : [SPLICE_HALF, SPLICE_HALF];
   const eave = (a: Arm) => a.z - depth(a) - past(a.conn, a.conn2)[0] - SPLICE_GAP;
-  return st.arms.some((a) => a.gable && sp.z + above > eave(a) && sp.z - below < a.z);
+  const narrow = (a: Arm) => faceOf(a) % 180 === 90 && sp.z < a.z && sp.sec.d - 2 * sp.sec.tf < a.sec.bf + 40;
+  return st.arms.some((a) => a.gable && ((sp.z + above > eave(a) && sp.z - below < a.z) || narrow(a)));
 }
 
 function spliceHits(st: Structure, sp: Splice): boolean {
@@ -2050,8 +2072,11 @@ function build(p0: Partial<Params>, cat: Catalog, detail: Detail): Result {
         ratio = size(st, m, f, cat, p, true);
         log.push(`splice at ${st.splice.z} mm (${st.splice.kind}), ${st.col.id} below, ${st.splice.sec.id} above`);
         if (eaveHits(st, st.splice)) {
-          log.push('splice: in the way of the deeper gable eave, left out');
+          log.push('splice: in the way of the gable eave (a deeper or wider rafter), left out');
           st.splice = undefined;
+          // the sections changed since `before`: the forces and the ratio with no cut
+          const g = again();
+          if (g) Object.assign(before, { ratio: size(st, m, g, cat, p, true), alpha, amp });
         }
       } else st.splice = undefined;
     }
@@ -2068,7 +2093,11 @@ function build(p0: Partial<Params>, cat: Catalog, detail: Detail): Result {
   skewEnds(st, log);
   // flange plates reach the arm gusset of a short brace
   for (const a of st.arms) if (a.conn === 'flange_plates' && hasShortBrace(a)) a.conn = 'end_plate';
-  if (swaps.length) keepFits(st, p, swaps, log);
+  if (swaps.length && keepFits(st, p, swaps, log)) {
+    // no splice any more: the forces and the ratio with no cut
+    const f = again();
+    if (f) ratio = size(st, m, f, cat, p, true);
+  }
   if (ok) logGable(st, p, log);
   log.push(alphaLog(alpha, amp));
   log.push(`${sized} sizing passes, final max ratio ${ratio.toFixed(2)} (limit ${LIMIT})`);

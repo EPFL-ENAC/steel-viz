@@ -1,5 +1,6 @@
-// A gable portal: the bay beam of a one storey portal goes up to a ridge in
-// the middle of the span, like the frame of a shed.
+// A gable portal: the top bay beam of a portal goes up to a ridge in the
+// middle of the span, like the frame of a shed. On two storeys, the floor
+// beam stays flat.
 //
 // - Two rafters, each from an eave (on its column) up to the ridge. Both
 //   ends are cut plumb: a square cut on a sloped beam leaves a wedge gap at a
