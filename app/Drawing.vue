@@ -1,16 +1,18 @@
 <!--
   The drawing sheet. One pane (WebGL, SVG or both), or with "compare" (dev
-  server only) this branch and the base branch side by side, in the same
-  viewer. Both panes read the same angle. Zoom and pan go from one WebGL view
-  to the other when the base viewer can take them.
+  server only) this branch and the base branch. compare=1: side by side, in
+  the same viewer. Both panes read the same angle. Zoom and pan go from one
+  WebGL view to the other when the base viewer can take them. compare=2: one
+  3D view with both structures, the new parts and the gone parts in color
+  (overlayParts() in diff.ts).
   With a hub test, the base reads the same record with its own reader, so a
   change of hub.ts shows too. The arrow keys ← → then go to the previous and
   next test (HubTest.vue), Shift turns the drawing.
 -->
 <script setup lang="ts">
 import { computed, ref, shallowRef, watch } from 'vue';
-import type { Part } from '../steel.ts';
 import type { Frame } from '../webgl.ts';
+import { diffParts, overlayParts } from './diff.ts';
 import { here, loadBase, type Engine } from './engine.ts';
 import Pane from './Pane.vue';
 import { dev, params, s, stats, turnTo, type Built } from './state.ts';
@@ -20,6 +22,8 @@ import { current } from './tests.ts';
 const props = defineProps<{ built: Built | null; replay: number; note?: string }>();
 
 const compare = computed(() => !!(s.compare && dev.value));
+const side = computed(() => compare.value && s.compare !== 2); // side by side
+const one = computed(() => compare.value && s.compare === 2); // one 3D view
 const turning = ref(false);
 const mine = ref<InstanceType<typeof Pane>>();
 const theirs = ref<InstanceType<typeof Pane>>();
@@ -29,6 +33,7 @@ const hint = computed(() => {
   // an older base viewer has no setFrame(): only the angle follows
   const follows = theirs.value?.canFrame() ? ', both follow' : `, ${baseName.value} does not follow`;
   const keys = s.specimen ? '. ← →: the next test, Shift ← →: turn' : '';
+  if (one.value) return 'One 3D view: green is new, red is gone, a changed part shows both. Drag to turn, right drag to move, wheel to zoom' + keys;
   if (compare.value) return (gl ? `Drag to turn both. In 3D: right drag to move, wheel to zoom${follows}` : 'Drag to turn both') + keys;
   return { '3d': 'Drag to turn, right drag to move, wheel to zoom, double click to see it all', svg: 'Drag to turn', both: 'Drag either one to turn. In 3D: right drag to move, wheel to zoom' }[gl ? s.viewer : 'svg'] + keys;
 });
@@ -95,20 +100,14 @@ function buildTest(E: Engine, b: Built | null) {
   }
 }
 
-// ---- what differs: the parts by id, then their faces and bolts
-const shape = (p: Part) => JSON.stringify([p.faces, p.dots]);
+// ---- what differs (diffParts in diff.ts), and both in one list for one view
 const diff = computed(() => {
   const [a, b] = [baseBuilt.value?.r, props.built?.r];
-  if (!a || !b) return null;
-  const was = new Map(a.parts.map((p) => [p.id, p]));
-  const now = new Map(b.parts.map((p) => [p.id, p]));
-  const added = b.parts.filter((p) => !was.has(p.id)).map((p) => p.id);
-  const gone = a.parts.filter((p) => !now.has(p.id)).map((p) => p.id);
-  const changed = b.parts.filter((p) => was.has(p.id) && shape(was.get(p.id)!) !== shape(p)).map((p) => p.id);
-  const notes = [];
-  if (a.st.col.id !== b.st.col.id) notes.push(`column ${a.st.col.id} → ${b.st.col.id}`);
-  if (a.ok !== b.ok) notes.push(b.ok ? 'now stable' : 'now a mechanism');
-  return { added, gone, changed, notes };
+  return a && b ? diffParts(a, b) : null;
+});
+const overlay = computed(() => {
+  const [a, b, d] = [baseBuilt.value?.r, props.built?.r, diff.value];
+  return one.value && a && b && d ? overlayParts(a, b, d) : null;
 });
 watch([diff, baseNote], () => {
   const d = diff.value;
@@ -158,7 +157,7 @@ defineExpose({ svg: () => mine.value?.svg() ?? '', diff });
 <template>
   <div
     class="drawing"
-    :class="[`v-${s.viewer}`, { px: s.size && s.viewer !== '3d', turning, compare }]"
+    :class="[`v-${one ? '3d' : s.viewer}`, { px: s.size && s.viewer !== '3d' && !one, turning, compare: side, one }]"
     :style="{ '--px': `${s.size}px` }"
     tabindex="0"
     role="img"
@@ -176,11 +175,13 @@ defineExpose({ svg: () => mine.value?.svg() ?? '', diff });
       :built="built"
       :replay="replay"
       :turning="turning"
-      :label="compare ? dev?.branch : undefined"
+      :label="side ? dev?.branch : one ? `${dev?.branch} + ${baseName}` : undefined"
       :note="note"
+      :one="one"
+      :overlay="overlay"
       @frame="toTheirs"
     />
-    <template v-if="compare">
+    <template v-if="side">
       <Pane
         v-if="base"
         v-show="!baseNote"

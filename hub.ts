@@ -99,12 +99,15 @@ export function fromHubConnection(rec: HubRecord): ConnSpecimen {
   if (ndp > 0 && ndp !== 1 && ndp !== 2) throw unsupported('n_dp');
   const doubler = ndp > 0 ? { n: ndp as 1 | 2, t: num('t_dp'), ...(Number.isFinite(value('wd')) ? { w: num('wd') } : {}) } : undefined;
   const slab = hubSlab(rec, id, notes);
+  // t_cp 0: no continuity plates. NA: plates as thick as the column flange (generate.ts)
   const tcp = value('t_cp');
+  if (!Number.isFinite(tcp)) notes.push('t_cp is not reported, the continuity plates are as thick as the column flange');
+  const continuity = tcp > 0 ? { continuity: true, tContinuity: mm(tcp) } : { continuity: !(tcp <= 0) };
 
   const beams: SpecimenBeam[] = (interior ? [0, 180] as const : [0] as const).map((bearing) => ({
     section: beam, bearing, length: interior ? lb / 2 : exterior, connection, ...(cut?.rbs ? { rbs: cut.rbs } : {}), ...plates, ...haunch,
   }));
-  return { id, column: { section: column, height }, beams, continuity: tcp > 0, load, notes, ...(doubler ? { doubler } : {}), ...(slab ? { slab } : {}) };
+  return { id, column: { section: column, height }, beams, ...continuity, load, notes, ...(doubler ? { doubler } : {}), ...(slab ? { slab } : {}) };
 }
 
 // The concrete slab of a connection record. The data writes "perpenticular".

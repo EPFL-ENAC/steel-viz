@@ -38,7 +38,7 @@ const DEFAULTS = {
   armZmin: GEN.armZ[0],
   armZmax: GEN.armZ[1],
   conn: 'auto',
-  gable: GEN.gableP, // the chance of a pitched roof on a one storey portal
+  gable: GEN.gableP, // the chance of a pitched roof on the top bay beam of a portal
   // details: the chance of each one
   braces: GEN.braceP,
   secondaries: GEN.secondaryP,
@@ -54,7 +54,12 @@ const DEFAULTS = {
   shortBraces: GEN.shortBraceP, // short braces on tree arms
   // view
   viewer: '3d', // 3d, svg or both
-  compare: 0, // 1: this branch and the base branch side by side (dev server only)
+  // compare with the base branch (dev server only). 1: side by side, in the
+  // viewer you picked. 2: one 3D view, the new parts and the gone parts in color
+  compare: 0,
+  // the base branch: a git ref (a branch, a sha, 564ac4d~1). '': PLAYGROUND_BASE
+  // or main. The page reads it once, a change needs a reload. Not in the rail.
+  base: '',
   view: 'iso', // '' when the angle is free
   az: VIEWS.iso[0],
   el: Math.round(VIEWS.iso[1]),
@@ -150,7 +155,9 @@ export const stats = reactive({ draw: '', ms: '', base: '' });
 // the dev server: branch, commit, base for "vs main". null in a static build.
 export type DevInfo = { branch: string; sha: string; dirty: boolean; base: { ref: string; sha: string } };
 export const dev = ref<DevInfo | null>(null);
-fetch('/__dev/info')
+// the base of the hash, for the dev server
+export const baseQuery = () => (s.base ? `?base=${encodeURIComponent(s.base)}` : '');
+fetch(`/__dev/info${baseQuery()}`)
   .then((r) => (r.ok && r.headers.get('content-type')?.includes('json') ? r.json() : null))
   .catch(() => null)
   .then((d) => {

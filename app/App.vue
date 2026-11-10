@@ -84,7 +84,6 @@ watch(() => [s.duration, s.speed], () => {
   clearTimeout(again);
   if (plays.value) again = window.setTimeout(() => replay.value++, 300);
 });
-const compare = computed({ get: () => !!s.compare, set: (v) => (s.compare = v ? 1 : 0) });
 
 // ---- seed
 const nextSeed = (d: number) => (s.seed = Math.max(1, (s.seed || 1) + d));
@@ -203,7 +202,7 @@ async function copy(what: 'svg' | 'link') {
         </Section>
 
         <Section v-if="!hub" id="layout" title="Layout" :keys="GROUPS.layout">
-          <p class="note">Storeys, span and bracing change a portal or a box. Arm length is for a tree (the side arms of a portal take 3/4 of the band). Gable roof is for a one storey portal.</p>
+          <p class="note">Storeys, span and bracing change a portal or a box. Arm length is for a tree (the side arms of a portal take 3/4 of the band). Gable roof is for a portal, on its top bay beam.</p>
           <Seg v-model="s.storeys" label="Storeys" :options="[[0, 'Auto'], [1, 'One'], [2, 'Two']]" />
           <Slider id="span" v-model="s.span" label="Span" :min="0.6" :max="1.6" :step="0.05" :out="`× ${s.span.toFixed(2)}`" />
           <Seg v-model="s.bracing" label="Bracing" :options="[['auto', 'Auto'], ...BRACING_KINDS.map((b) => [b, b[0].toUpperCase() + b.slice(1)] as [string, string])]" />
@@ -238,7 +237,7 @@ async function copy(what: 'svg' | 'link') {
 
         <Section id="view" title="View" :keys="GROUPS.view" open>
           <Seg v-model="s.viewer" label="Viewer" :options="[['3d', '3D'], ['svg', 'SVG'], ['both', 'Both']]" />
-          <label v-if="dev" class="epfl-check"><input v-model="compare" type="checkbox"> Compare with {{ dev.base.ref }}</label>
+          <Seg v-if="dev" v-model="s.compare" :label="`Compare with ${dev.base.ref}`" :options="[[0, 'Off'], [1, 'Side by side'], [2, 'One view']]" />
           <Seg v-model="viewName" label="View" :options="[['iso', 'Iso'], ['south', 'S'], ['west', 'W'], ['north', 'N'], ['east', 'E'], ['plan', 'Plan']]" />
           <Slider id="az" v-model="az" label="Azimuth" :min="0" :max="359" :step="1" :out="`${s.az}°`" />
           <Slider id="el" v-model="el" label="Elevation" :min="0" :max="90" :step="1" :out="`${s.el}°`" />
@@ -295,10 +294,11 @@ async function copy(what: 'svg' | 'link') {
         <div v-if="s.compare && dev">
           <dt>vs {{ dev.base.ref }}</dt>
           <dd>{{ stats.base }}</dd>
+          <p v-if="s.compare === 2" class="legend"><span class="diff-new">■ new</span> <span class="diff-gone">■ gone</span></p>
           <details v-if="diff && diff.added.length + diff.gone.length + diff.changed.length" class="ids">
             <summary>Part ids</summary>
-            <p v-if="diff.added.length"><b>New</b> {{ diff.added.join(', ') }}</p>
-            <p v-if="diff.gone.length"><b>Gone</b> {{ diff.gone.join(', ') }}</p>
+            <p v-if="diff.added.length"><b :class="{ 'diff-new': s.compare === 2 }">New</b> {{ diff.added.join(', ') }}</p>
+            <p v-if="diff.gone.length"><b :class="{ 'diff-gone': s.compare === 2 }">Gone</b> {{ diff.gone.join(', ') }}</p>
             <p v-if="diff.changed.length"><b>Changed</b> {{ diff.changed.join(', ') }}</p>
           </details>
         </div>

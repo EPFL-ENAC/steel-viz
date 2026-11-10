@@ -12,7 +12,7 @@ What comes next is in [ROADMAP.md](ROADMAP.md).
 It builds a steel structure from a seed, in one of three forms:
 
 - Tree: one column on a base plate, with arms, braces and secondary beams.
-- Portal: two columns with beams between them, on one or two storeys, and a few arms out of the columns. A one storey portal can get a pitched roof (see "Gable portal").
+- Portal: two columns with beams between them, on one or two storeys, and a few arms out of the columns. A portal can get a pitched roof on its top bay beam (see "Gable portal").
 - Box: four columns in a rectangle. Beams and braces stay in its four walls, nothing sticks out of them.
 
 Each bay storey gets its own bracing: none (moment connections), knee braces at both ends, a chevron (two braces up to the middle of the beam), one diagonal, or an X (two diagonals that cross, see "X bracing"). `--form` picks the form (`mix` lets the seed pick it, a tree seed gives the same tree in both).
@@ -49,9 +49,21 @@ On seeds 1 to 40, 13 trees get a short brace with the default values, 30 with `b
 The sizing works in two steps, with public formulas from EC3 (Eurocode 3) and AISC 360-22:
 
 1. The whole structure: the solver finds the elastic critical load factor `alphaCr`. It is how many times the load the structure takes before it buckles as a whole (a buckling analysis with the geometric stiffness, in `solver.ts`). The moments are then multiplied by `1 / (1 - 1/alphaCr)`, for the sway effects (EC3 5.2.2). This rule needs `alphaCr >= 3`. If it is lower, the member with the most strain energy in the buckling mode gets a heavier section, and the solver runs again.
-2. Each member, in `checks.ts`: flexural buckling (AISC E3), lateral torsional buckling of I sections (F2), weak axis bending (F6), and the two together with the axial force (H1-1). The buckling length is the member length, because step 1 already has the sway. The ratio must stay under 0.6. There are no AISC phi factors, the 0.6 is the margin.
+2. Each member, in `checks.ts`: flexural buckling (AISC E3), lateral torsional buckling of I sections (F2), weak axis bending (F6), local buckling of the wall of a round tube (F8, E7), and the two together with the axial force (H1-1). The buckling length is the member length, because step 1 already has the sway. The ratio must stay under 0.6. There are no AISC phi factors, the 0.6 is the margin.
 
-Not checked: shear, local buckling of thin plates (E7, F3), torsional buckling (E4), and notional loads (the small side loads for the frame imperfections). The channels, double angles and tees take their full plastic moment: no lateral torsional buckling for them (F2 for a channel, F9 for a tee), and E4 is the check that matters most for a double angle or a tee. A round tube takes Fy Z too (F8, no lateral torsional buckling), but D / t is not checked: F8 takes Fy Z only for a compact tube, D / t up to 0.07 E / Fy (about 40), and 15 AISC and 5 EU tubes of the tables are thinner. Cb is 1, which is on the safe side for cantilevers. The same AISC formulas size the EU sections too. A few trees with a cantilever truss stay under `alphaCr` 3 (eu tree 19 of the 240 structures of the tests, and also eu tree 7 with `shapeP` 0): the bottom chord sways out of the truss plane, and nothing braces it sideways. The log says it.
+Not checked: shear, local buckling of thin plates (E7, F3) except for round tubes, torsional buckling (E4), and notional loads (the small side loads for the frame imperfections). The channels, double angles and tees take their full plastic moment: no lateral torsional buckling for them (F2 for a channel, F9 for a tee), and E4 is the check that matters most for a double angle or a tee. Cb is 1, which is on the safe side for cantilevers. The same AISC formulas size the EU sections too. A few trees with a cantilever truss stay under `alphaCr` 3 (eu tree 19 of the 240 structures of the tests, and also eu tree 7 with `shapeP` 0): the bottom chord sways out of the truss plane, and nothing braces it sideways. The log says it.
+
+A round tube has no lateral torsional buckling, but its wall can buckle locally when it is thin. The checks use D / t (outside diameter over wall) with AISC F8 for bending and E7 for compression:
+
+| D / t | bending (F8) | compression (E7) |
+|---|---|---|
+| up to 0.07 E / Fy | Fy Z, compact | Fcr A |
+| up to 0.11 E / Fy | (0.021 E / (D / t) + Fy) S, noncompact | Fcr A |
+| up to 0.31 E / Fy | the same | Fcr Ae, Ae = (0.038 E / (Fy D / t) + 2/3) A |
+| up to 0.45 E / Fy | 0.33 E / (D / t) S, slender | the same |
+| 0.45 E / Fy or more | refused | refused |
+
+S is the elastic modulus, Z the plastic one. In bending, Mn is never above Fy Z. The same Mn is used about both axes. A refused tube gets the ratio Infinity, and `size()` never picks it. At Fy 345 (AISC) the limits are 42.6, 67, 189 and 274. The thinnest tube of the tables has D / t 62 (`HSS10.750X0.188`), so only the noncompact case happens with the real tables, and it changes no seed: the round tubes are braces, pinned at both ends, so they only take the small moment of their own weight. `tubes.test.ts` checks each case with numbers worked by hand.
 
 Then come the small details, from a random draw of their own, so a seed keeps the same structure:
 
@@ -142,20 +154,20 @@ The solver keeps the arm on a line through the column axis. The drawn arm goes t
 
 ### Gable portal
 
-A one storey portal can get a pitched roof (`gableP`, 0.35 by default, `--gable`). The bay beam becomes two rafters that go up to a ridge in the middle of the span. Only a portal with one storey and one bay beam takes it.
+A portal can get a pitched roof (`gableP`, 0.35 by default, `--gable`). The bay beam becomes two rafters that go up to a ridge in the middle of the span. On a two storey portal, only the top bay beam takes it: the floor beam stays flat and keeps its bracing, its truss, its rods and its splice.
 
 - The slope is 10 to 20 degrees. It is steeper than most real sheds, because our spans are only 2 to 3 m and a flatter roof doesn't show.
 - A haunch at each eave: a deeper part under the rafter, near the column. It is 10 to 15 % of the span long (at least 300 mm, at most 40 % of a rafter), and 0.6 to 1.0 times the rafter depth. It is cut from an I, or made of welded plates. It is a web triangle and a bottom flange.
 - The rafter ends are cut plumb (vertical), so they sit flat on the end plates.
 - At each eave, an extended end plate on the column flange, from 90 mm over the rafter to 90 mm under the haunch, with bolts over and under each flange.
 - At the ridge, two end plates bolted face to face. It is a full strength splice.
-- The gable beam gets no braces, no secondary beam, no truss, no rod, no post and no beam splice. The column splice keeps clear of the eave plate.
+- The gable beam gets no braces, no secondary beam, no truss, no rod, no post and no beam splice. The column splice keeps clear of the eave plate. On a column web, the rafter stays narrow enough to fit between the flanges of a column. If the upper shaft of a column splice is too narrow for it, there is no column splice.
 
 The solver takes the sloped rafters as they are. The load stays vertical. The haunch is a stiffer element (more inertia and area) with no check of its own: the rafter at the end of the haunch governs, as in a real design. The buckling length of the rafter is one rafter, from the eave to the ridge. Under the vertical load, the rafters push the column tops out. The log gives this horizontal thrust at the eaves, and the columns are sized for it. With cantilever arms on the columns, it can be negative (the rafters then pull the column tops in).
 
 The gable has its own random stream, and it always takes all its draws, in the same order. With `gableP` at 0, a seed gives the same parts as main (checked once against main, part by part, on 640 structures). The code is in `gable.ts`. `generate.ts` only calls it.
 
-Later, the same code can take a two storey portal (the gable on the top bay beam only) and a box (the gable on the two bays of one side, with a ridge beam between them).
+Later, the same code can take a box (the gable on the two bays of one side, with a ridge beam between them).
 
 ### The look settings
 
@@ -170,7 +182,7 @@ Arms, height and load are not the only knobs. These `Params` in `generate.ts` ch
 | `armL` | 0.3, 0.7 | `--arm-length 0.3,0.7` | Layout, arm length | the band of arm lengths, as a part of the height. Portal side arms take 3/4 of the band. |
 | `armZ` | 0.35, 0.95 | `--arm-height 0.35,0.95` | Layout, arm height | the band of heights where arms leave the column |
 | `conn` | auto | `--conn shear_tab\|end_plate\|...` (see "Beam end connections") | Layout, connections | the beam connection. A secondary beam keeps its own when it can't take this one. |
-| `gableP` | 0.35 | `--gable` | Layout, gable roof | the chance of a pitched roof on a one storey portal (see "Gable portal"). At 0, the same parts as before it. At its default, some portal seeds change. |
+| `gableP` | 0.35 | `--gable` | Layout, gable roof | the chance of a pitched roof on the top bay beam of a portal (see "Gable portal"). At 0, the same parts as before it. At its default, some portal seeds change. |
 | `braceP` | 0.3 | `--braces` | Details | the chance of braces on an arm |
 | `secondaryP` | 0.35 | `--secondaries` | Details | the chance of secondary beams |
 | `postP` | 0.3 | `--posts` | Details | the chance of posts |
@@ -231,7 +243,7 @@ The pin of the link (or of the actuator) on the head is the top pin of the colum
 - `at`: the height of the beam centre line above the column foot. By default, half the column height.
 - `connection`: one of the kinds of "Beam end connections" above that fit a column (`shear_tab`, `end_plate`, `flange_plates`, `welded`, `clip_angles`, `seated`, `stiffened_seat`, `tee`, `end_plate_stiffened`, `welded_tab`, `welded_plates`, `welded_haunch`). A beam alone on a pinned kind (a shear tab, clip angles, a seat, a tee) is a mechanism: the log says so, and the drawing still comes out.
 - `tPlate`: the thickness of the plates of `welded_plates`, in mm. `haunch: { "depth", "length", "straight" }`: the haunch of `welded_haunch`, in mm, deep at the column face. `straight` gives a rectangle with a closing plate, not a triangle.
-- `continuity: false` leaves out the continuity plates. `beams: []` gives a column alone.
+- `continuity: false` leaves out the continuity plates. `tContinuity` is the thickness of each plate, in mm (by default, the column flange, at least 10). `beams: []` gives a column alone.
 - `doubler: { "n", "t", "w" }`: doubler plates on the column web, in the panel zone (I column only). `n` 1 puts one plate on the −x side of the web (the side the iso view looks at), `n` 2 one on each side. `t` is one plate, `w` its width (by default, and at most, the web between the flanges, centred). They stop at the continuity plates. With no continuity plates, they go 150 mm past the beam flanges, above and below (the usual 6 in).
 - `load`: `beam` (the default) or `column`, what the actuators push (see the rig above).
 - `slab: { "left", "right", "concrete", "rib", "ribWidth", "ribs" }`: the concrete slab on the top flange, in mm (see "The concrete slab"). `ribs` is `parallel` or `perpendicular`.
@@ -240,7 +252,7 @@ From a hub record:
 
 - The sections come from the numbers (`d_c b_cf t_cf t_cw`, `d_b b_bf t_bf t_bw`), not from the names. The names are free text (`build up H section`) and don't link to the section tables.
 - An exterior test has one beam of length `l_b`. Some exterior tests give the whole span in `l_b`: if `l_o` is under 0.7 `l_fc`, the beam ends at `l_o` from the column face. An interior test has two, one on each flange, `l_b / 2` each (there `l_b` is the whole span). The beams are at half the column height `h_c`.
-- `t_cp` 0 means no continuity plates.
+- `t_cp` 0 means no continuity plates. Else it is their thickness (`tContinuity`). When `t_cp` is NA or missing, the plates are as thick as the column flange, and a note says so.
 - `n_dp` 1 or 2 gives the doubler plates: `t_dp` is one plate, `wd` its width. The data has no height (`dz` is the clear depth between the beam flanges): we take the rule of `doubler` above. For `n_dp` 1 the data doesn't say which side, we draw it on −x.
 - `specimen_type` gives the load: "Interior - Column Loaded - Subassembly" is column loaded.
 - The connection is the closest one we can draw:
@@ -558,7 +570,7 @@ Files:
 - `sections.ts`: section properties (I, tube, rod, round tube, channel, double angle, tee) from the CSV tables. The rods and the tees are made in code. The round tubes (CHS and pipes) are in `Catalog.pipes`, not in `all`, so a specimen finds its section by name as before.
 - `sections/`, `tables.ts`: the CSV tables (see `sections/README.md`), and how Node reads them. `tables.ts` also reads a hub test and its response files for `cli.ts` and `shot.ts`.
 - `solver.ts`: 3D frame solver (6 DOF per node, pinned ends, finds mechanisms), and the buckling analysis (`alphaCr`).
-- `checks.ts`: the member checks (AISC 360-22 E3, F2, F6, H1-1).
+- `checks.ts`: the member checks (AISC 360-22 E3, E7 and F8 for round tubes, F2, F6, H1-1). `tubes.test.ts` checks the round tubes.
 - `generate.ts`: topology, the fix loop, trusses and rods, posts and beam splices, and the sizing. Also the specimen path (`buildSpecimen`), and it sends a brace test, a column test (also HSS) or a link test to `bench.ts`.
 - `skew.ts`: the end of a skewed arm: the cut end, its clash boxes, the skewed end plate.
 - `slab.ts`: the concrete slab of a beam-to-column test. See "The concrete slab". `slab.test.ts` checks it.
@@ -577,7 +589,7 @@ Files:
 - `webgl.ts`: the 3D view of the playground, in plain WebGL2.
 - `triangles.ts`: the triangles of a flat face, for `webgl.ts` and `hlr.ts`.
 - `cli.ts`, `cli.test.ts`: the command line, and the tests of its flags and of `--step`.
-- `shot.ts`: a PNG of the 3D view, at any step of a test, for agents (`node shot.ts <table>/<id> --peak --out a.png`). It starts its own Vite and headless Chrome. It isn't in the package.
+- `shot.ts`: a PNG of the 3D view, at any step of a test, for agents (`node shot.ts <table>/<id> --peak --out a.png`). `--compare 1|2` and `--base <ref>` shoot "Compare with main", `--theme dark` the dark theme. It starts its own Vite and headless Chrome. It isn't in the package.
 - `app/`, `vite.config.ts`: the playground, a Vue app served by Vite.
 - `index.ts`, `3d.ts`: the two entries of the package (see below).
 - `package.test.ts`: checks that the light entry and the 3D entry load no package and no Node API.
@@ -596,7 +608,7 @@ The repo is also the package `@epfl-enac/steel-viz`. It is not on npm. The hub t
 It has two entries:
 
 - `@epfl-enac/steel-viz`: the light entry. `generate`, `loadCatalog`, the exact drawing `renderHLR`, the painter `render`, `timeline`, `camera`, `VIEWS`, and the specimen input (`toSpecimen`, `fromHubConnection`, `fromHubBrace`, `fromHubColumn`, `fromHubHssColumn`, `fromHubEbf`). It loads no package. `package.test.ts` checks it. Use it for the loading animation and the SVG drawings. For the deformed shape: `DEFORMS`, `readResponse`, `protocol`, `deformParts`, `movePoint`, `follow`.
-- `@epfl-enac/steel-viz/3d`: `createViewer` (the WebGL view). It loads no package either, but it is bigger. Import it with a dynamic `import()`, only on the page that needs it, so it stays out of the main bundle. `viewer.deform(state)` draws a `DeformState`, and `viewer.deform(null)` gives back the undeformed drawing.
+- `@epfl-enac/steel-viz/3d`: `createViewer` (the WebGL view). It loads no package either, but it is bigger. Import it with a dynamic `import()`, only on the page that needs it, so it stays out of the main bundle. `viewer.deform(state)` draws a `DeformState`, and `viewer.deform(null)` gives back the undeformed drawing. `viewer.show(parts, marks?)` takes an optional `Record<id, Mark>` (`Mark` is `'new' | 'gone'`): the marked parts get the colors `added` and `gone` of `setColors()`, and the others go lighter. Without marks, the drawing is the same as before.
 
 The package has no section table. The hub has the same CSV files (ours are copies of them), so it passes their text to `loadCatalog()`:
 
@@ -641,7 +653,9 @@ To make a release (a human does it):
 - It reloads on each save. A change in `app/` is a hot reload. A change in the generator, a renderer or a table reloads the page.
 - The settings (seed, form, shapes, view, viewer...) live in the URL hash. A reload keeps them, and you can send the link.
 - Above the controls: the branch, its commit, and if it has changes not committed.
-- "Compare with main" (in View, dev server only) draws the same structure twice, side by side, in the viewer you picked (3D, SVG or both): this checkout on the left, the code of `main` on the right (the merge base, so only what the branch changed). Turn one and the other turns too, and in 3D the zoom and pan follow. When the base viewer has no `setFrame()` (main before this), the dev server leaves it out of the base bundle, and the page draws the base structure with the viewer of this checkout. The label of the view says "viewer of this branch" then. The title block says "same parts" or what differs (new, gone and changed parts, the column, the status), with the list of part ids. `PLAYGROUND_BASE` picks another base branch. That code comes from `git archive`, in `node_modules/.cache/steel-viz-base/`. An old link with `viewer=diff` opens in SVG with compare on.
+- "Compare with main" (in View, dev server only) has two modes. "Side by side" (`compare=1` in the hash) draws the same structure twice, side by side, in the viewer you picked (3D, SVG or both): this checkout on the left, the code of `main` on the right (the merge base, so only what the branch changed). Turn one and the other turns too, and in 3D the zoom and pan follow. When the base viewer has no `setFrame()` (main before this), the dev server leaves it out of the base bundle, and the page draws the base structure with the viewer of this checkout. The label of the view says "viewer of this branch" then. The title block says "same parts" or what differs (new, gone and changed parts, the column, the status), with the list of part ids. `PLAYGROUND_BASE` picks another base branch. That code comes from `git archive`, in `node_modules/.cache/steel-viz-base/`. An old link with `viewer=diff` opens in SVG with compare on.
+- "One view" (`compare=2`) draws both structures in one 3D view, on top of each other. The new parts are green, the gone parts red, and the parts that didn't change are lighter. A changed part is there twice: its old shape in red, its new shape in green. It uses the same match as the title block (`diffParts()` in `app/diff.ts`), and `overlayParts()` makes the list for the viewer: the base copies get the id `was:<id>`. The hover is blue in this mode, and the tooltip of a red part shows the base part, with its real id. It is 3D only (`hlr.ts` has no colors).
+- `base=<git ref>` in the hash picks the base for one link, for example `base=564ac4d~1` (any commit, tag or branch git knows). Without it, `PLAYGROUND_BASE` or `main`. Reload the page after you change it. `node shot.ts --seed 5 --compare 2 --base 564ac4d~1 --theme dark --out c.png` shoots it (`--compare 1` gives both panes in one image).
 
 At the top of the rail, "Seed / Hub test" picks what to draw. "Hub test" draws a real test of the RESSLab Hub in its rig:
 

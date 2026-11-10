@@ -58,6 +58,7 @@ export type ConnSpecimen = {
   column: { section: SectionRef; height: number };
   beams: SpecimenBeam[]; // [] gives a column alone
   continuity?: boolean; // plates across the column at the beam flanges (default true)
+  tContinuity?: number; // mm, the thickness of each continuity plate (default: the column flange, at least 10)
   // doubler plates on the column web, in the panel zone (I column only). n 1:
   // one plate, on the -x side of the web. n 2: one on each side. t: mm, one
   // plate. w: mm, its width (default and at most: the web between the flanges).

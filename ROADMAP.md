@@ -25,7 +25,7 @@ What we plan to do next. A checked item is done.
 - [ ] Trusses on portal arms. They never get one either. The low truss of trees would fit on a few, but it changes portal 143, #2 of the top 12.
 - [ ] A rod clevis goes through an arm connection on aisc tree 140 (today's code, outside the seeds the tests run).
 - [x] Gable portal: a one storey portal with a pitched roof, haunches at the eaves and a bolted ridge splice (`gable.ts`, `gableP`, `--gable`).
-- [ ] Gable on a two storey portal: on the top bay beam only, the floor beam stays flat. Mostly the condition in `addGable()`.
+- [x] Gable on a two storey portal: on the top bay beam only, the floor beam stays flat. Mostly the condition in `addGable()`.
 - [ ] Gable on a box: the two bays of one side get the gable, with a ridge beam between the two ridges (a new member type).
 - [ ] Purlins on the rafters of a gable portal.
 - [ ] A `variety` param in `generate()`, so that the details prefer a kind not used yet. Tried in `moreKinds()`: it gains only 0.06 kind on 200 seeds (9 seeds go up), because only the newer beam end kinds can change there. To be useful, it must also act on the other details.
@@ -35,7 +35,7 @@ What we plan to do next. A checked item is done.
 - [x] Buckling: `alphaCr` of the whole structure, and member checks with buckling (AISC 360-22 E3, F2, H1-1).
 - [ ] Notional loads (small side loads for the frame imperfections, EC3 5.3).
 - [ ] A shear check.
-- [ ] D / t of a round tube (local buckling). Today F8 takes Fy Z for every tube, also the thin ones.
+- [x] D / t of a round tube (local buckling): F8 in bending, E7 in compression, a tube past 0.45 E / Fy is refused.
 - [ ] Checks for the channels, double angles and tees: lateral torsional buckling (F2 for a channel, F9 for a tee) and flexural-torsional buckling (E4). Today they take their full plastic moment.
 - [ ] EC3 member checks for the `eu` family. Today the AISC formulas size both.
 - [ ] A lateral brace for the bottom chord of a cantilever truss. Without it, eu tree 19 stays under `alphaCr` 3 (and eu tree 7 with `--shapes 0`).
@@ -66,7 +66,7 @@ The specimen input draws five tables of the hub, each test in its test rig. `nod
 - [x] Doubler plates on the column web (`n_dp`).
 - [x] The concrete slab (`slab`): the concrete and the deck ribs, in light lines, on the 13 tests we draw. The data has no slab length and no rib spacing, so we take them. The shear studs are not drawn, they are inside the concrete.
 - [ ] The slab of the EBF tests (TF2c, TF3c, TF4c, 20 tests). Their rows give no size for it, so they keep their note.
-- [ ] Continuity plates as thick as in the test (`t_cp`). Today they take the thickness of the column flange.
+- [x] Continuity plates as thick as in the test (`t_cp`). When `t_cp` is NA, they take the thickness of the column flange, with a note.
 - [ ] "Exterior - Frame" (one test in the hub, Del_Caprio_et_al_2014_RBS-A).
 - [x] Brace tests (`braces`), SB, SBF and DBF: 294 of 294 (the 2 flat bars too).
 - [x] Double Channel braces (5 tests): `2C` in `sections.ts`, `doubleChannel()` in `hub.ts`.
@@ -100,7 +100,7 @@ Play the measured response of a hub test in the 3D view. `deform.ts` is the base
 - [x] One line weight in 3D by default (two in the SVG and the export).
 - [x] More look settings: storeys, span, bracing, arm bands, connections, detail chances (`Params`, the CLI flags, the Layout and Details sections).
 - [x] A rail of sections you can fold, on the EPFL design tokens.
-- [ ] Compare in one 3D view: both structures on top of each other, the new parts in one color and the gone parts in another.
+- [x] Compare in one 3D view: both structures on top of each other, the new parts in one color and the gone parts in another.
 - [x] The animation knobs in the CLI (`--speed`, `--duration`). Done: with `--animate`, duration in s like the playground.
 
 ## Repo
