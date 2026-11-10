@@ -60,12 +60,14 @@ test('two plates between the continuity plates, on the web faces', () => {
     const z = span(p, 2);
     near(z[0], lo[1], `${p.id} bottom`);
     near(z[1], hi[0], `${p.id} top`);
-    // the continuity plates are the same as with no doubler (thickness of the column flange)
-    near(lo[1] - lo[0], Math.max(10, Math.round(tf)), 'continuity plate');
+    // the continuity plates are t_cp thick, not the column flange
+    near(lo[1] - lo[0], 12.7, 'continuity plate');
+    assert.notEqual(Math.max(10, Math.round(tf)), 12.7);
   }
-  // the panel zone is between the plates (the clear depth dz, less the continuity plates)
+  // the doubler is between the plates, and they are on the beam flange axes:
+  // d - tf between the axes, less half a plate at each end
   const a = r.st.arms[0];
-  assert.ok(span(w, 2)[1] - span(w, 2)[0] < a.sec.d - 2 * a.sec.tf);
+  near(span(w, 2)[1] - span(w, 2)[0], a.sec.d - a.sec.tf - 12.7, 'doubler height');
 });
 
 test('one plate on the -x side, and the width is at most the clear web', () => {

@@ -82,6 +82,50 @@ test('t_cp 0: no continuity plates', () => {
   assert.deepEqual(plates(r.parts.map((p) => p.id)), []);
 });
 
+// the thickness of each continuity plate, along the column (z)
+const plateT = (r: ReturnType<typeof generate>) => r.parts.filter((p) => /^column-stiffener/.test(p.id)).map((p) => {
+  const z = p.faces.flatMap((f) => f.pts.map((q) => q[2]));
+  return Math.max(...z) - Math.min(...z);
+});
+
+test('t_cp gives the thickness of the continuity plates', () => {
+  const rec = record('Chi_and_Uang_2002_DC2');
+  const s = toSpecimen(rec) as ConnSpecimen;
+  assert.equal(rec.t_cp, 25.4);
+  assert.equal(s.continuity, true);
+  assert.equal(s.tContinuity, 25.4);
+  assert.ok(!s.notes!.some((n) => /t_cp/.test(n)));
+  const r = generate({ specimen: s }, cats.aisc);
+  assert.ok(r.ok, r.log.join('\n'));
+  assert.equal(r.st.tContinuity, 25.4);
+  const ts = plateT(r);
+  assert.equal(ts.length, 4);
+  for (const t of ts) near(t, 25.4, 'continuity plate');
+  assert.deepEqual(clashes(r.parts), []);
+});
+
+test('t_cp NA or missing: the plates are as thick as the column flange, with a note', () => {
+  const rec = record('Chi_and_Uang_2002_DC2');
+  const { t_cp: _, ...without } = rec;
+  for (const row of [{ ...rec, t_cp: 'NA' }, { ...rec, t_cp: null }, without]) {
+    const s = toSpecimen(row) as ConnSpecimen;
+    assert.equal(s.continuity, true);
+    assert.equal(s.tContinuity, undefined);
+    assert.ok(s.notes!.includes('t_cp is not reported, the continuity plates are as thick as the column flange'), s.notes!.join('\n'));
+    const r = generate({ specimen: s }, cats.aisc);
+    assert.ok(r.ok, r.log.join('\n'));
+    const ts = plateT(r);
+    assert.equal(ts.length, 4);
+    // t_cf 34.036
+    for (const t of ts) near(t, Math.max(10, Math.round(rec.t_cf)), 'continuity plate');
+  }
+});
+
+test('a specimen with tContinuity 0 is refused', () => {
+  const spec = { ...toSpecimen(record('Chi_and_Uang_2002_DC2')), tContinuity: 0 } as ConnSpecimen;
+  assert.throws(() => generate({ specimen: spec }, cats.aisc), /tContinuity must be a number above 0, not 0/);
+});
+
 test('a CSV row (strings, NA) gives the same specimen as the API record', () => {
   const rec = record('Ciutina_and_Dubina_2008_CP-R-M');
   const row = Object.fromEntries(Object.entries(rec).map(([k, v]) => [k, v === null ? 'NA' : v === false ? 'NO' : String(v)]));

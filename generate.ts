@@ -177,6 +177,7 @@ type Splice = { z: number; sec: Section; kind: 'bearing' | 'flange' };
 // base: the gussets on the base plates, none, on the flange faces, or on all four faces
 type Base = 'none' | 'flange' | 'all';
 // id: the specimen id. continuity: false leaves out the continuity plates.
+// tContinuity: their thickness in a specimen (else the column flange, at least 10).
 // load: what the actuators of a specimen push (see specimenRig).
 // minA: the lightest area sizing may pick for a member (raised when alphaCr is too low).
 // A rig part between two mount faces. from: the fixed one. to: the one on the specimen.
@@ -209,7 +210,7 @@ export type LinkRig = {
   frame?: { feet: [V, V]; side: 0 | 1; braces: { id: string; from: V; to: V; side: 0 | 1 }[] };
 };
 export type Structure = {
-  form: Form | 'specimen'; id?: string; H: number; col: Section; cols: Col[]; arms: Arm[]; secs: Secondary[]; splice?: Splice; base?: Base; continuity?: boolean;
+  form: Form | 'specimen'; id?: string; H: number; col: Section; cols: Col[]; arms: Arm[]; secs: Secondary[]; splice?: Splice; base?: Base; continuity?: boolean; tContinuity?: number;
   load?: 'beam' | 'column'; minA?: Record<string, number>;
   // a beam-to-column test: the doubler plates on the column web (w: the drawn width)
   doubler?: { n: 1 | 2; t: number; w: number };
@@ -748,6 +749,8 @@ function specimen(spec: ConnSpecimen, cat: Catalog): Structure {
   for (const a of arms)
     for (const o of arms)
       if (a !== o && a.bearing === o.bearing && a.z - a.sec.d < o.z && o.z - o.sec.d < a.z) throw bad(`${a.id} and ${o.id} are on the same face at the same height`);
+  const tcp = spec.tContinuity;
+  if (tcp !== undefined && !(tcp > 0)) throw bad(`tContinuity must be a number above 0, not ${JSON.stringify(tcp)}`);
   const dp = spec.doubler;
   let doubler: Structure['doubler'];
   if (dp) {
@@ -771,7 +774,7 @@ function specimen(spec: ConnSpecimen, cat: Catalog): Structure {
     const edge = col.bf / 2 + SLAB_GAP;
     if (Math.min(sl.left, sl.right) <= edge) throw bad(`slab: left ${sl.left} and right ${sl.right} mm must be more than the column opening (${edge} mm)`);
   }
-  return { form: 'specimen', id: spec.id, H, col, cols: [{ x: [0, 0, 0] }], arms, secs: [], base: 'none', continuity: spec.continuity, load, ...(doubler ? { doubler } : {}), ...(sl && arms.length ? { slab: sl } : {}) };
+  return { form: 'specimen', id: spec.id, H, col, cols: [{ x: [0, 0, 0] }], arms, secs: [], base: 'none', continuity: spec.continuity, ...(spec.tContinuity !== undefined ? { tContinuity: spec.tContinuity } : {}), load, ...(doubler ? { doubler } : {}), ...(sl && arms.length ? { slab: sl } : {}) };
 }
 
 // ------------------------------------------------------------- test rig
@@ -1794,7 +1797,7 @@ function details(
       for (const z of sec.kind === 'T' ? [zt - sec.tf / 2] : [zt - sec.tf / 2, zt - sec.d + sec.tf / 2])
         if (levels.every((l) => Math.abs(l - z) > 30)) levels.push(z);
     }
-    const cpT = (sec: Section) => Math.max(10, Math.round(sec.tf));
+    const cpT = (sec: Section) => st.tContinuity ?? Math.max(10, Math.round(sec.tf));
     levels.sort((p, q) => p - q);
     // a haunch pushes on the column flange at its bottom too. Not in `levels`:
     // the doubler below stops at the plates of the beam flanges.

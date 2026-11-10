@@ -231,7 +231,7 @@ The pin of the link (or of the actuator) on the head is the top pin of the colum
 - `at`: the height of the beam centre line above the column foot. By default, half the column height.
 - `connection`: one of the kinds of "Beam end connections" above that fit a column (`shear_tab`, `end_plate`, `flange_plates`, `welded`, `clip_angles`, `seated`, `stiffened_seat`, `tee`, `end_plate_stiffened`, `welded_tab`, `welded_plates`, `welded_haunch`). A beam alone on a pinned kind (a shear tab, clip angles, a seat, a tee) is a mechanism: the log says so, and the drawing still comes out.
 - `tPlate`: the thickness of the plates of `welded_plates`, in mm. `haunch: { "depth", "length", "straight" }`: the haunch of `welded_haunch`, in mm, deep at the column face. `straight` gives a rectangle with a closing plate, not a triangle.
-- `continuity: false` leaves out the continuity plates. `beams: []` gives a column alone.
+- `continuity: false` leaves out the continuity plates. `tContinuity` is the thickness of each plate, in mm (by default, the column flange, at least 10). `beams: []` gives a column alone.
 - `doubler: { "n", "t", "w" }`: doubler plates on the column web, in the panel zone (I column only). `n` 1 puts one plate on the −x side of the web (the side the iso view looks at), `n` 2 one on each side. `t` is one plate, `w` its width (by default, and at most, the web between the flanges, centred). They stop at the continuity plates. With no continuity plates, they go 150 mm past the beam flanges, above and below (the usual 6 in).
 - `load`: `beam` (the default) or `column`, what the actuators push (see the rig above).
 - `slab: { "left", "right", "concrete", "rib", "ribWidth", "ribs" }`: the concrete slab on the top flange, in mm (see "The concrete slab"). `ribs` is `parallel` or `perpendicular`.
@@ -240,7 +240,7 @@ From a hub record:
 
 - The sections come from the numbers (`d_c b_cf t_cf t_cw`, `d_b b_bf t_bf t_bw`), not from the names. The names are free text (`build up H section`) and don't link to the section tables.
 - An exterior test has one beam of length `l_b`. Some exterior tests give the whole span in `l_b`: if `l_o` is under 0.7 `l_fc`, the beam ends at `l_o` from the column face. An interior test has two, one on each flange, `l_b / 2` each (there `l_b` is the whole span). The beams are at half the column height `h_c`.
-- `t_cp` 0 means no continuity plates.
+- `t_cp` 0 means no continuity plates. Else it is their thickness (`tContinuity`). When `t_cp` is NA or missing, the plates are as thick as the column flange, and a note says so.
 - `n_dp` 1 or 2 gives the doubler plates: `t_dp` is one plate, `wd` its width. The data has no height (`dz` is the clear depth between the beam flanges): we take the rule of `doubler` above. For `n_dp` 1 the data doesn't say which side, we draw it on −x.
 - `specimen_type` gives the load: "Interior - Column Loaded - Subassembly" is column loaded.
 - The connection is the closest one we can draw:
