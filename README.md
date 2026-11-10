@@ -12,7 +12,7 @@ What comes next is in [ROADMAP.md](ROADMAP.md).
 It builds a steel structure from a seed, in one of three forms:
 
 - Tree: one column on a base plate, with arms, braces and secondary beams.
-- Portal: two columns with beams between them, on one or two storeys, and a few arms out of the columns. A one storey portal can get a pitched roof (see "Gable portal").
+- Portal: two columns with beams between them, on one or two storeys, and a few arms out of the columns. A portal can get a pitched roof on its top bay beam (see "Gable portal").
 - Box: four columns in a rectangle. Beams and braces stay in its four walls, nothing sticks out of them.
 
 Each bay storey gets its own bracing: none (moment connections), knee braces at both ends, a chevron (two braces up to the middle of the beam), one diagonal, or an X (two diagonals that cross, see "X bracing"). `--form` picks the form (`mix` lets the seed pick it, a tree seed gives the same tree in both).
@@ -154,20 +154,20 @@ The solver keeps the arm on a line through the column axis. The drawn arm goes t
 
 ### Gable portal
 
-A one storey portal can get a pitched roof (`gableP`, 0.35 by default, `--gable`). The bay beam becomes two rafters that go up to a ridge in the middle of the span. Only a portal with one storey and one bay beam takes it.
+A portal can get a pitched roof (`gableP`, 0.35 by default, `--gable`). The bay beam becomes two rafters that go up to a ridge in the middle of the span. On a two storey portal, only the top bay beam takes it: the floor beam stays flat and keeps its bracing, its truss, its rods and its splice.
 
 - The slope is 10 to 20 degrees. It is steeper than most real sheds, because our spans are only 2 to 3 m and a flatter roof doesn't show.
 - A haunch at each eave: a deeper part under the rafter, near the column. It is 10 to 15 % of the span long (at least 300 mm, at most 40 % of a rafter), and 0.6 to 1.0 times the rafter depth. It is cut from an I, or made of welded plates. It is a web triangle and a bottom flange.
 - The rafter ends are cut plumb (vertical), so they sit flat on the end plates.
 - At each eave, an extended end plate on the column flange, from 90 mm over the rafter to 90 mm under the haunch, with bolts over and under each flange.
 - At the ridge, two end plates bolted face to face. It is a full strength splice.
-- The gable beam gets no braces, no secondary beam, no truss, no rod, no post and no beam splice. The column splice keeps clear of the eave plate.
+- The gable beam gets no braces, no secondary beam, no truss, no rod, no post and no beam splice. The column splice keeps clear of the eave plate. On a column web, the rafter stays narrow enough to fit between the flanges of a column. If the upper shaft of a column splice is too narrow for it, there is no column splice.
 
 The solver takes the sloped rafters as they are. The load stays vertical. The haunch is a stiffer element (more inertia and area) with no check of its own: the rafter at the end of the haunch governs, as in a real design. The buckling length of the rafter is one rafter, from the eave to the ridge. Under the vertical load, the rafters push the column tops out. The log gives this horizontal thrust at the eaves, and the columns are sized for it. With cantilever arms on the columns, it can be negative (the rafters then pull the column tops in).
 
 The gable has its own random stream, and it always takes all its draws, in the same order. With `gableP` at 0, a seed gives the same parts as main (checked once against main, part by part, on 640 structures). The code is in `gable.ts`. `generate.ts` only calls it.
 
-Later, the same code can take a two storey portal (the gable on the top bay beam only) and a box (the gable on the two bays of one side, with a ridge beam between them).
+Later, the same code can take a box (the gable on the two bays of one side, with a ridge beam between them).
 
 ### The look settings
 
@@ -182,7 +182,7 @@ Arms, height and load are not the only knobs. These `Params` in `generate.ts` ch
 | `armL` | 0.3, 0.7 | `--arm-length 0.3,0.7` | Layout, arm length | the band of arm lengths, as a part of the height. Portal side arms take 3/4 of the band. |
 | `armZ` | 0.35, 0.95 | `--arm-height 0.35,0.95` | Layout, arm height | the band of heights where arms leave the column |
 | `conn` | auto | `--conn shear_tab\|end_plate\|...` (see "Beam end connections") | Layout, connections | the beam connection. A secondary beam keeps its own when it can't take this one. |
-| `gableP` | 0.35 | `--gable` | Layout, gable roof | the chance of a pitched roof on a one storey portal (see "Gable portal"). At 0, the same parts as before it. At its default, some portal seeds change. |
+| `gableP` | 0.35 | `--gable` | Layout, gable roof | the chance of a pitched roof on the top bay beam of a portal (see "Gable portal"). At 0, the same parts as before it. At its default, some portal seeds change. |
 | `braceP` | 0.3 | `--braces` | Details | the chance of braces on an arm |
 | `secondaryP` | 0.35 | `--secondaries` | Details | the chance of secondary beams |
 | `postP` | 0.3 | `--posts` | Details | the chance of posts |

@@ -38,7 +38,7 @@ const DEFAULTS = {
   armZmin: GEN.armZ[0],
   armZmax: GEN.armZ[1],
   conn: 'auto',
-  gable: GEN.gableP, // the chance of a pitched roof on a one storey portal
+  gable: GEN.gableP, // the chance of a pitched roof on the top bay beam of a portal
   // details: the chance of each one
   braces: GEN.braceP,
   secondaries: GEN.secondaryP,

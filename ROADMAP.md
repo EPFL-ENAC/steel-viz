@@ -25,7 +25,7 @@ What we plan to do next. A checked item is done.
 - [ ] Trusses on portal arms. They never get one either. The low truss of trees would fit on a few, but it changes portal 143, #2 of the top 12.
 - [ ] A rod clevis goes through an arm connection on aisc tree 140 (today's code, outside the seeds the tests run).
 - [x] Gable portal: a one storey portal with a pitched roof, haunches at the eaves and a bolted ridge splice (`gable.ts`, `gableP`, `--gable`).
-- [ ] Gable on a two storey portal: on the top bay beam only, the floor beam stays flat. Mostly the condition in `addGable()`.
+- [x] Gable on a two storey portal: on the top bay beam only, the floor beam stays flat. Mostly the condition in `addGable()`.
 - [ ] Gable on a box: the two bays of one side get the gable, with a ridge beam between the two ridges (a new member type).
 - [ ] Purlins on the rafters of a gable portal.
 - [ ] A `variety` param in `generate()`, so that the details prefer a kind not used yet. Tried in `moreKinds()`: it gains only 0.06 kind on 200 seeds (9 seeds go up), because only the newer beam end kinds can change there. To be useful, it must also act on the other details.

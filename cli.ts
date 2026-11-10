@@ -9,7 +9,7 @@
 //   [--conn auto|shear_tab|end_plate|flange_plates|welded|clip_angles|seated|stiffened_seat|tee|end_plate_stiffened|welded_tab]
 //   [--arm-length 0.3,0.7] [--arm-height 0.35,0.95]
 //   [--braces 0.3] [--secondaries 0.35] [--posts 0.3] [--beam-splices 0.3] [--trusses 1] [--rods 0.4] [--col-splice 0.6] [--conn-kinds 0.35] [--skew 0.3]
-//   [--gable 0.35] (the chance of a pitched roof on a one storey portal, 0 for none)
+//   [--gable 0.35] (the chance of a pitched roof on the top bay beam of a portal, 0 for none)
 // node cli.ts --specimen specimens/Chi_and_Uang_2002_DC2.json --view iso
 //   a real test from a JSON file (specimen.ts), with the same view and drawing options
 import { readFileSync, writeFileSync } from 'node:fs';
