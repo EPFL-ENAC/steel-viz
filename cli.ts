@@ -12,6 +12,7 @@
 //   [--arm-length 0.3,0.7] [--arm-height 0.35,0.95]
 //   [--braces 0.3] [--secondaries 0.35] [--posts 0.3] [--beam-splices 0.3] [--trusses 1] [--rods 0.4] [--col-splice 0.6] [--conn-kinds 0.35] [--skew 0.3]
 //   [--gable 0.35] (the chance of a pitched roof on the top bay beam of a portal, 0 for none)
+//   [--purlins 0.5] (the chance of purlins on the rafters of a gable, 0 for none)
 // node cli.ts --specimen specimens/Chi_and_Uang_2002_DC2.json --view iso
 // node cli.ts --specimen connections/Lee_et_al_2002_CR1 --view iso
 //   a real test, from a JSON file (specimen.ts) or as <table>/<id> (read like the
@@ -128,7 +129,7 @@ export function main(argv: string[]) {
       braceP: num('braces', DEFAULTS.braceP), secondaryP: num('secondaries', DEFAULTS.secondaryP), postP: num('posts', DEFAULTS.postP),
       beamSpliceP: num('beam-splices', DEFAULTS.beamSpliceP), trussK: num('trusses', DEFAULTS.trussK), rodP: num('rods', DEFAULTS.rodP),
       colSpliceP: num('col-splice', DEFAULTS.colSpliceP), connKindsP: num('conn-kinds', DEFAULTS.connKindsP), skewP: num('skew', DEFAULTS.skewP),
-      gableP: num('gable', DEFAULTS.gableP),
+      gableP: num('gable', DEFAULTS.gableP), purlinP: num('purlins', DEFAULTS.purlinP),
       roundP: num('round-tubes', DEFAULTS.roundP),
       shortBraceP: num('short-braces', DEFAULTS.shortBraceP),
     },

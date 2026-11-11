@@ -165,6 +165,10 @@ A portal can get a pitched roof (`gableP`, 0.35 by default, `--gable`). The bay 
 
 The solver takes the sloped rafters as they are. The load stays vertical. The haunch is a stiffer element (more inertia and area) with no check of its own: the rafter at the end of the haunch governs, as in a real design. The buckling length of the rafter is one rafter, from the eave to the ridge. Under the vertical load, the rafters push the column tops out. The log gives this horizontal thrust at the eaves, and the columns are sized for it. With cantilever arms on the columns, it can be negative (the rafters then pull the column tops in).
 
+Purlins (`purlinP`, 0.5 by default, `--purlins`): half of the gables get short channels across the two rafters. Each purlin is a channel turned to the pitch of the roof, its toes up the slope. It stands on a cleat (a small plate on the rafter top flange) with one or two bolts through its web. They are 800 to 1400 mm apart, from the eave plate to the ridge plate, and 600 to 1200 mm long. The channel is the deepest one with a depth of at most 0.6 times the rafter depth. A catalog with no channel table gives no purlins. They have their own random stream: they change no other part of a seed, and with `purlinP` at 0 a seed gives the same parts as before them.
+
+The purlins are not in the solver model. The load on the rafter already stands for the roof that the purlins carry, so adding them would count it twice. Their own weight is about 0.1 % of the rafter load. So with or without purlins, a gable gets the same sections.
+
 The gable has its own random stream, and it always takes all its draws, in the same order. With `gableP` at 0, a seed gives the same parts as main (checked once against main, part by part, on 640 structures). The code is in `gable.ts`. `generate.ts` only calls it.
 
 Later, the same code can take a box (the gable on the two bays of one side, with a ridge beam between them).
@@ -183,6 +187,7 @@ Arms, height and load are not the only knobs. These `Params` in `generate.ts` ch
 | `armZ` | 0.35, 0.95 | `--arm-height 0.35,0.95` | Layout, arm height | the band of heights where arms leave the column |
 | `conn` | auto | `--conn shear_tab\|end_plate\|...` (see "Beam end connections") | Layout, connections | the beam connection. A secondary beam keeps its own when it can't take this one. |
 | `gableP` | 0.35 | `--gable` | Layout, gable roof | the chance of a pitched roof on the top bay beam of a portal (see "Gable portal"). At 0, the same parts as before it. At its default, some portal seeds change. |
+| `purlinP` | 0.5 | `--purlins` | Layout, purlins | the chance that a gable gets purlins on its rafters (see "Gable portal"). At 0, the same parts as before them. Only gable seeds change, and only by new parts. |
 | `braceP` | 0.3 | `--braces` | Details | the chance of braces on an arm |
 | `secondaryP` | 0.35 | `--secondaries` | Details | the chance of secondary beams |
 | `postP` | 0.3 | `--posts` | Details | the chance of posts |
