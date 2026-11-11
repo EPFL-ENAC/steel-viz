@@ -207,7 +207,7 @@ Parts must not go through each other. A secondary beam is coped (its flanges cut
 
 It can also draw a real test of RESSLab Hub instead of a seed: a specimen. For now it draws four kinds of test, each one in its test rig:
 
-- A beam-to-column subassembly (the test of one connection): one column with one or two beams. That's the `connection` table of the hub, 99 of its 100 tests.
+- A beam-to-column subassembly (the test of one connection): one column with one or two beams. That's the `connection` table of the hub, 99 of its 100 tests. The last one is a frame test, see "The frame test" below.
 - A brace test: one brace, alone or in a test frame. That's the `braces` table, all its 294 tests. See "Brace tests" below.
 - A column test: one column, pushed sideways at its top under an axial load. That's the `columns` table, all its 153 tests. See "Column tests" below.
 - An HSS column test: one square or rectangular tube, standing like a column test, or lying on two rollers and pushed at mid span. That's the `hss_columns` table, all its 284 tests. See "HSS column tests" below.
@@ -267,7 +267,7 @@ From a hub record:
 | BEEP | end plate | |
 | KBB | welded, with a haunch (`haunch.ts`) | the data says haunch, not Kaiser bracket: `d_h` is only on these rows, and the comments say "hanch". It has no outline, so we take `d_h` deep at the column face, `s_h` long, web and flange thick and wide as the beam, triangular unless the comments say straight (PN500C-SH) |
 
-What we draw differently from the real test goes into the log as a note: the connection, the RBS cut, the haunch, what we take for the slab. A test that is not a subassembly ("Exterior - Frame"), or a missing number, throws an error that names the field.
+What we draw differently from the real test goes into the log as a note: the connection, the RBS cut, the haunch, what we take for the slab. A missing number throws an error that names the field.
 
 ```sh
 node cli.ts --specimen specimens/Chi_and_Uang_2002_DC2.json --view iso   # writes steel-Chi_and_Uang_2002_DC2-iso.svg
@@ -276,9 +276,24 @@ node cli.ts --specimen connections/Chi_and_Uang_2002_DC2 --view iso      # the s
 
 `--specimen` takes a JSON file or `<table>/<id>`. With `<table>/<id>`, it reads the row from resslab-hub-data next to the repo, as the dev server does. Without the hub data, it reads the examples of `specimens/`. `--specimen` takes the same drawing options as a seed (`--view`, `--detail`, `--animate`, `--frames`, `--painter`, `--size`). The family comes from `--family`, else from the file, else aisc. `--seed`, `--form`, `--arms` and `--height` don't apply. `specimen.test.ts` covers the two hub files, the format and the errors. `doubler.test.ts` covers the doubler plates: the hub fields, where they sit next to the continuity plates, and the panel zone.
 
+### The frame test
+
+One `connections` row is not a subassembly: `Del_Caprio_et_al_2014_RBS-A` ("Exterior - Frame"). The joint of the row is one joint of a small frame, 1½ bay by 1½ storey, half scale. The row gives this joint only. The rest comes from the report (Del Carpio Ramos, Mosqueda and Lignos 2014, MCEER-14-0003), in `FRAME_TESTS` of `frame.ts`. Each value from the report has a note in the log.
+
+What we draw:
+
+- Two W12x30 columns, 3200 mm high, each one fixed on a base plate, on an interface plate on the floor. A cap plate on each column top.
+- The W14x26 girder over the bay (`l_b`, 4572 mm), then past the second column as a 2375 mm cantilever. The tip stands on a pinned link. The RBS cut of the row is at each end that is on a column: both ends of the bay beam (`rbs2` in `steel.ts`), and the cantilever near the second column.
+- A doubler plate on the second column only (the report says so, the row has `n_dp` 0).
+- W8x10 joists across the girder and into the column webs, under the slab. They are drawn, but they are not in the solver model.
+- The slab on both beams, with an opening at each column (`holes` in `slab.ts`).
+- The rig: the strong wall, a horizontal actuator on the HSS loading beam of the first column, a second one on the link member that joins the two column tops, two vertical actuators from a reaction beam, and the out-of-plane frame (two braced posts across each column, with a roller on each post).
+
+The solver holds the column tops sideways (the top actuator and the out-of-plane frame) and the cantilever tip up (`holdFrame()`). The test has no response file, so the playground says "No measured response for this test.", and `--step` and `--peak` stop with an error. `deform-connection.ts` throws for a frame, so a response file added later gives a clear error. A second frame test needs its own entry in `FRAME_TESTS`: without it, the reader throws `specimen_type "Exterior - Frame" is not supported yet`. `frame.test.ts` has a copy of the row, so CI checks it.
+
 ### The concrete slab
 
-14 of the 100 `connections` rows have `slab` YES, and we draw 13 of them. `slab.ts` draws the concrete and the deck ribs on the top flange. The reader takes `w_l`, `w_r`, `h_co`, `h_p`, `b_o` and `deck_ribs_orientation` (`perpenticular` in the data, `perpendicular` also works). If a size is missing, the steel is drawn alone and the log says so.
+14 of the 100 `connections` rows have `slab` YES, and we draw all of them. `slab.ts` draws the concrete and the deck ribs on the top flange. The reader takes `w_l`, `w_r`, `h_co`, `h_p`, `b_o` and `deck_ribs_orientation` (`perpenticular` in the data, `perpendicular` also works). If a size is missing, the steel is drawn alone and the log says so.
 
 The data doesn't give all of it, so we take these:
 
@@ -313,8 +328,7 @@ node hub-count.ts ../../resslab-hub-data  # or give the folder
 It prints one line for each table, then the errors grouped by field (November 2026):
 
 ```text
-connections: 99 / 100 drawn, 0 mechanism, 0 clash, 0 floating
-  specimen_type "Exterior - Frame" is not supported yet: 1 (Del_Caprio_et_al_2014_RBS-A)
+connections: 100 / 100 drawn, 0 mechanism, 0 clash, 0 floating
 braces: 294 / 294 drawn, 0 mechanism, 0 clash, 0 floating
 columns: 153 / 153 drawn, 0 mechanism, 0 clash, 0 floating
 hss_columns: 284 / 284 drawn, 0 mechanism, 0 clash, 0 floating

@@ -259,12 +259,17 @@ export function keyFields(spec: Specimen): [string, string][] {
   }
   const beams = spec.beams.map((b) => `${sec(b.section)}, ${mm(b.length)}`);
   const conns = [...new Set(spec.beams.map((b) => CONNS[b.connection]?.label ?? b.connection))];
+  // a frame test (frame.ts): two columns, the bay and the cantilever past the second one
+  const fr = spec.frame;
+  const [bay, tip] = spec.beams;
   return [
-    ['Test', 'beam-to-column'],
-    ['Column', `${sec(spec.column.section)}, ${mm(spec.column.height)} high`],
-    ['Beams', beams.length ? (new Set(beams).size === 1 ? `${beams.length} × ${beams[0]}` : beams.join(' + ')) : 'none, a column alone'],
+    ['Test', fr ? 'beam-to-column, in a frame' : 'beam-to-column'],
+    ['Column', `${fr ? '2 × ' : ''}${sec(spec.column.section)}, ${mm(spec.column.height)} high`],
+    ...(fr && bay
+      ? [['Beams', `${sec(bay.section)}, a ${mm(bay.length)} bay${tip ? ` and a ${mm(tip.length)} cantilever` : ''}`] as [string, string]]
+      : [['Beams', beams.length ? (new Set(beams).size === 1 ? `${beams.length} × ${beams[0]}` : beams.join(' + ')) : 'none, a column alone'] as [string, string]]),
     ...(conns.length ? [['Connection', conns.join(', ')] as [string, string]] : []),
-    ['Loaded at', spec.load === 'column' ? 'the column top' : 'the beam tips'],
+    ['Loaded at', fr ? 'the column tops and the first column, from a strong wall' : spec.load === 'column' ? 'the column top' : 'the beam tips'],
     // a plate is thin: one decimal (9.5 mm, not 10)
     ['Continuity plates', spec.continuity === false ? 'no' : spec.tContinuity ? `${Math.round(spec.tContinuity * 10) / 10} mm` : 'yes'],
     tables,

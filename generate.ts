@@ -25,6 +25,7 @@ import { actuator, block, clevis, hingeSize, link } from './rig.ts';
 import { cutBoxes, cutEnd, skewHardware } from './skew.ts';
 import { RIB_PITCH, SLAB_GAP, slabParts, TIP_GAP } from './slab.ts';
 import { drawGable, eaveDepth, gableLog, gableModel, gableParts, thrust, type Gable } from './gable.ts';
+import { frameLayout, frameRig, holdFrame, type FrameSt } from './frame.ts';
 
 export type Detail = 'members' | 'plates' | 'bolts';
 export type Params = {
@@ -224,6 +225,8 @@ export type Structure = {
   columnRig?: ColumnRig;
   // a beam-to-column test: its rig, for the deformed shape
   rig?: SpecimenRig;
+  // a frame test (frame.ts): two columns, the joists, the rig sizes
+  frame?: FrameSt;
   // a link test (bench.ts): col is the link section, H the height of its axis.
   // stiffeners: how many are drawn, span and height: the frame (not for TF1).
   link?: { config: LinkSpecimen['config']; at: LinkSpecimen['at']; e: number; stiffeners: number; span?: number; height?: number };
@@ -749,22 +752,39 @@ function specimen(spec: ConnSpecimen, cat: Catalog): Structure {
     }
     return { id, col: 0, z, bearing: b.bearing, L: b.length, conn: b.connection, sec, braces: [], ...(rbs ? { rbs } : {}), ...(tPlate ? { tPlate } : {}), ...(haunch ? { haunch } : {}) };
   });
+  // a frame test: beams[0] goes on to column 1, beams[1] starts there (frame.ts)
+  const cols: Col[] = [{ x: [0, 0, 0] }];
+  if (spec.frame) {
+    const [bay, tip] = arms;
+    if (!bay || arms.length > 2 || arms.some((a) => a.bearing !== bay.bearing || a.z !== bay.z)) throw bad('frame: one or two beams, on the same face at the same height');
+    if (bay.haunch || bay.tPlate) throw bad('frame: a haunch or flange plates are not supported yet');
+    if (bay.rbs && !(2 * (col.d / 2 + bay.rbs.a + bay.rbs.b) < bay.L - 200)) throw bad(`${bay.id}: the RBS cuts at its two ends do not fit in the span`);
+    Object.assign(bay, { to: 1, conn2: bay.conn });
+    cols.push({ x: mul(hdir(bay.bearing), bay.L) });
+    if (tip) tip.col = 1;
+  }
   for (const a of arms)
     for (const o of arms)
-      if (a !== o && a.bearing === o.bearing && a.z - a.sec.d < o.z && o.z - o.sec.d < a.z) throw bad(`${a.id} and ${o.id} are on the same face at the same height`);
+      if (a !== o && a.col === o.col && a.bearing === o.bearing && a.z - a.sec.d < o.z && o.z - o.sec.d < a.z) throw bad(`${a.id} and ${o.id} are on the same face at the same height`);
   const tcp = spec.tContinuity;
   if (tcp !== undefined && !(tcp > 0)) throw bad(`tContinuity must be a number above 0, not ${JSON.stringify(tcp)}`);
-  const dp = spec.doubler;
-  let doubler: Structure['doubler'];
-  if (dp) {
-    if (dp.n !== 1 && dp.n !== 2) throw bad(`doubler: n must be 1 or 2, not ${JSON.stringify(dp.n)}`);
-    if (!(dp.t > 0)) throw bad(`doubler: t must be a number above 0, not ${JSON.stringify(dp.t)}`);
-    if (dp.w !== undefined && !(dp.w > 0)) throw bad(`doubler: w must be a number above 0, not ${JSON.stringify(dp.w)}`);
+  // the doubler plates of a column, checked
+  const doublerOf = (dp: ConnSpecimen['doubler'], name: string): Structure['doubler'] => {
+    if (!dp) return undefined;
+    if (dp.n !== 1 && dp.n !== 2) throw bad(`${name}: n must be 1 or 2, not ${JSON.stringify(dp.n)}`);
+    if (!(dp.t > 0)) throw bad(`${name}: t must be a number above 0, not ${JSON.stringify(dp.t)}`);
+    if (dp.w !== undefined && !(dp.w > 0)) throw bad(`${name}: w must be a number above 0, not ${JSON.stringify(dp.w)}`);
     if (col.kind !== 'I') throw bad('doubler plates need an I column');
-    if (arms.length) {
-      const clear = col.d - 2 * col.tf;
-      doubler = { n: dp.n, t: dp.t, w: Math.min(dp.w ?? clear, clear) };
-    }
+    if (!arms.length) return undefined;
+    const clear = col.d - 2 * col.tf;
+    return { n: dp.n, t: dp.t, w: Math.min(dp.w ?? clear, clear) };
+  };
+  const doubler = doublerOf(spec.doubler, 'doubler');
+  let frame: FrameSt | undefined;
+  if (spec.frame) {
+    frame = frameLayout(spec, cat, bad);
+    const d1 = doublerOf(spec.frame.doubler1, 'frame: doubler1');
+    if (d1) frame.doubler1 = d1;
   }
   const sl = spec.slab;
   if (sl && arms.length) {
@@ -777,7 +797,7 @@ function specimen(spec: ConnSpecimen, cat: Catalog): Structure {
     const edge = col.bf / 2 + SLAB_GAP;
     if (Math.min(sl.left, sl.right) <= edge) throw bad(`slab: left ${sl.left} and right ${sl.right} mm must be more than the column opening (${edge} mm)`);
   }
-  return { form: 'specimen', id: spec.id, H, col, cols: [{ x: [0, 0, 0] }], arms, secs: [], base: 'none', continuity: spec.continuity, ...(spec.tContinuity !== undefined ? { tContinuity: spec.tContinuity } : {}), load, ...(doubler ? { doubler } : {}), ...(sl && arms.length ? { slab: sl } : {}) };
+  return { form: 'specimen', id: spec.id, H, col, cols, arms, secs: [], base: 'none', continuity: spec.continuity, ...(spec.tContinuity !== undefined ? { tContinuity: spec.tContinuity } : {}), load, ...(doubler ? { doubler } : {}), ...(sl && arms.length ? { slab: sl } : {}), ...(frame ? { frame } : {}) };
 }
 
 // ------------------------------------------------------------- test rig
@@ -998,7 +1018,8 @@ function model(st: Structure, p: Params): Model {
     const p0 = add(start(st, a), mul(h, s.a));
     chain(s.id, [p0, add(p0, mul(side, s.L))], s.sec, PINNED.includes(s.conn), w(s.sec) + p.load / 2);
   }
-  if (st.form === 'specimen') holdSpecimen(st, nodes);
+  if (st.frame) holdFrame(st, nodes);
+  else if (st.form === 'specimen') holdSpecimen(st, nodes);
   // a column is one member from the base to the splice, then to the top
   const lengths = new Map<string, number>([['column', sp ? sp.z : st.H], ['column-top', sp ? st.H - sp.z : 0]]);
   elems.forEach((e, i) => {
@@ -1550,7 +1571,9 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
     if (plates && ps.length) extras.push({ after: on, part: { id, step: 0, supports: [on], kind: 'plate', from, faces: ps.flatMap((q) => q.faces), boxes: ps.map((q) => q.box), dots: [], info } });
   };
   // a specimen stands in its test rig, not on a base plate
-  const rig = st.form === 'specimen' ? specimenRig(st) : undefined;
+  const rig = st.form === 'specimen' && !st.frame ? specimenRig(st) : undefined;
+  // a frame test stands on base plates, in the rig of the frame (frame.ts)
+  const frig = st.frame ? frameRig(st, endT(st.col), tb, st.cols.map((_, i) => colId(i))) : undefined;
   // each column: its lower shaft and, above a splice, its upper shaft
   const cols = st.cols.map((c, ci) => {
     const at = (z: number) => add(c.x, [0, 0, z]);
@@ -1573,13 +1596,20 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
       return { lo, hi: lo };
     }
     const centre = add(c.x, [0, 0, -tb / 2]);
+    if (frig && ci === 0) out.push(...frig.below);
     out.push({
-      id: baseId(ci), step: step++, supports: [], kind: 'base', from: [0, 0, -1], info: { type: 'Base plate', of: lo.id },
+      id: baseId(ci), step: step++, supports: frig ? [`interface${ci + 1}`] : [], kind: 'base', from: [0, 0, -1], info: { type: 'Base plate', of: lo.id },
       faces: box3(centre, [0, 1, 0], [0, 0, 1], st.col.bf + 150, st.col.d + 150, tb),
       boxes: [boxOf(centre, [0, 1, 0], [0, 0, 1], st.col.bf + 150, st.col.d + 150, tb)],
       dots: bolts ? [-1, 1].flatMap((sx) => [-1, 1].map((sy) => ({ p: add(c.x, [sx * (st.col.bf / 2 + 40), sy * (st.col.d / 2 + 40), 1]), n: [0, 0, 1] as V, anchor: true }))) : [],
     });
     out.push({ id: lo.id, step: step++, supports: [baseId(ci)], kind: 'column', from: [0, 0, 1], faces: memberFaces(lo, seg), boxes: memberBoxes(lo), dots: [], info: col(lo, 'Column', 'column'), round: isRound(lo.sec) });
+    if (frig) {
+      // the end plate on the cap, under the clevis of the link member
+      const tp = endT(st.col);
+      const f = flat(at(st.H + tp / 2), [1, 0, 0], [0, 1, 0], tp, rect(st.col.bf + 30, st.col.d + 30));
+      out.push({ id: `${lo.id}-cap`, step: step++, supports: [lo.id], kind: 'plate', from: [0, 0, -1], faces: f.faces, boxes: [f.box], dots: [], info: { type: 'End plate', of: lo.id } });
+    }
     if (!sp) return { lo, hi: lo };
     const hi = geo(`${colId(ci)}-top`, sp.sec, at(sp.z + (sp.kind === 'bearing' ? BEARING_T : 0)), at(st.H), false);
     const sid = `${colId(ci)}-splice`;
@@ -1595,11 +1625,18 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
 
   // one member and its end connections, in build order: plates, member, bolts
   // skew: a skewed end, the normal of the column face it lies on (skew.ts)
-  type End = { S: Geo; sId: string; conn: ConnType; at: 'from' | 'to'; skew?: V };
+  // pad: a plate between the support face and the connection (a doubler plate)
+  type End = { S: Geo; sId: string; conn: ConnType; at: 'from' | 'to'; skew?: V; pad?: number };
   // from: the direction the member (and its plates) come from. type and
   // who: its PartInfo type and its id in the solver model.
   const member = (g: Geo, ends: End[], from: V, type: string, who: string) => {
     const rs = ends.map((e) => (e.skew ? undefined : resolve(g, e.S, e.at)));
+    ends.forEach((e, i) => {
+      const r = rs[i];
+      if (!e.pad || !r) return;
+      r.gap = Math.max(0, r.gap - e.pad);
+      r.fp = add(r.fp, mul(r.direc, e.pad));
+    });
     g.copes = rs.flatMap((r) => (r?.cope ? [r.cope] : []));
     const hws = ends.map((e, i) => ({ e, hw: e.skew ? skewHardware(g, e.conn, e.skew, e.S) : hardware(g, e.conn, rs[i]!) }));
     const supports: string[] = [];
@@ -1674,6 +1711,7 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
     }
     const g = geo(a.id, a.sec, p0, p1, true);
     if (a.rbs) g.rbs = { ...a.rbs, a: a.rbs.a - SETBACK[a.conn] };
+    if (a.rbs && a.to !== undefined) g.rbs2 = { ...a.rbs, a: a.rbs.a - SETBACK[a.conn2!] };
     if (a.tPlate) g.tPlate = a.tPlate;
     if (a.haunch) g.haunch = a.haunch;
     const beam = (a.to === undefined ? 'Cantilever beam' : 'Bay beam') + (a.skew ? `, skewed ${Math.abs(a.skew)}°` : '') + (a.rbs ? ', RBS' : '');
@@ -1758,6 +1796,13 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
     const g = geo(s.id, s.sec, add(at, mul(side, supportFace(ag, side) + SETBACK[s.conn])), add(at, mul(side, s.L)), true);
     member(g, [{ S: ag, sId: ag.id, conn: s.conn, at: 'from' }], side, 'Secondary beam', s.id);
   }
+  // the joists of a frame test, on a column web or across the girder
+  for (const j of frig?.joists ?? []) {
+    const S = j.col !== undefined ? colAt(j.col, j.o[2]) : armGeo.get(st.arms[j.arm!].id)!;
+    const from = Math.max(j.from, supportFace(S, j.side) + SETBACK.shear_tab + (j.pad ?? 0));
+    const g = geo(j.id, st.frame!.joist!.sec, add(j.o, mul(j.side, from)), add(j.o, mul(j.side, j.out)), true);
+    member(g, [{ S, sId: S.id, conn: 'shear_tab', at: 'from', ...(j.pad ? { pad: j.pad } : {}) }], j.side, 'Joist', j.id);
+  }
   details(st, cols, armGeo, colAt, extra, seg);
 
   // keep the details that fit: one that goes through a part already there is left out
@@ -1784,6 +1829,8 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
     res.push(...slabParts(st.slab, st.col, beams, across(firstDir(st)), res));
   }
   if (rig) res.push(...rig.above);
+  if (frig && st.slab && plates) res.push(...slabParts(st.slab, st.col, frig.slab, across(firstDir(st)), res));
+  if (frig) res.push(...frig.above);
   // the mount of a pin joint has the step of its moving part, just before it
   let next = 0;
   const byId = new Map(res.map((q) => [q.id, q]));
@@ -1839,8 +1886,8 @@ function details(
     // Doubler plates on the web of a specimen column (no splice there). They
     // stop at the continuity plates. With none, they go 150 mm past the beam
     // flanges, cut where the column is cut (panelZone) so they bend with it.
-    const dp = st.doubler;
-    if (dp && ci === 0) {
+    const dp = ci === 0 ? st.doubler : st.frame?.doubler1;
+    if (dp) {
       const sec = lo.sec;
       const [z0, z1] = levels.length > 1
         ? [levels[0] + cpT(sec) / 2, levels[levels.length - 1] - cpT(sec) / 2]
