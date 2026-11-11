@@ -26,6 +26,7 @@ import { gzipSync } from 'node:zlib';
 import type { DeformState } from './deform.ts';
 import { DEFORMS, shapeAt, shapeSvg } from './deforms.ts';
 import { DEFAULTS, floating, generate, type Detail, type Params, type Result } from './generate.ts';
+import { clashes } from './clash.ts';
 import { renderHLR } from './hlr.ts';
 import { hubTable, toSpecimen, type HubRecord } from './hub.ts';
 import { loadCatalog, type Family } from './sections.ts';
@@ -149,6 +150,7 @@ export function main(argv: string[]) {
 
   const kb = (s: string) => (Buffer.byteLength(s) / 1024).toFixed(1);
   const lost = floating(r.parts);
+  const hits = clashes(r.parts);
   const beams = r.st.arms.map((a) => `${a.sec.id} ${a.gable ? 'gable ' : ''}${a.conn}${a.braces.map((b) => ' + brace ' + b.sec.id).join('')}`).join('; ');
   console.log(
     [
@@ -168,6 +170,7 @@ export function main(argv: string[]) {
       ...r.log.map((l) => '    ' + l),
       `  drawing: ${r.parts.length} parts, ${svg.faces} faces, ${svg.dots} bolts, ${kb(svg.svg)} kB, gzip ${(gzipSync(svg.svg).length / 1024).toFixed(1)} kB`,
       `  build order: ${lost.length ? 'FLOATING ' + lost.join(', ') : 'ok'} (${Math.max(...r.parts.map((p) => p.step)) + 1} steps)`,
+      `  clash: ${hits.length ? 'CLASH ' + hits.map(([a, b]) => `${a} / ${b}`).join(', ') : 'none'}`,
       `  ms: tables ${(t1 - t0).toFixed(1)}, topology ${r.ms.topology.toFixed(1)}, solve+size ${r.ms.solve.toFixed(1)}, geometry ${r.ms.geometry.toFixed(1)}, render ${(t3 - t2).toFixed(1)}, total generate+render ${(t3 - t1).toFixed(1)}`,
     ].join('\n'),
   );

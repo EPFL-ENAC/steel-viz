@@ -38,7 +38,7 @@ node shot.ts columns/Popov_Bertero_Chandramouli_C-1 --compare 2 --base 07e3602~1
 
 To look at what you change in the 3D view, you must use `shot.ts` and read the PNG (the Read tool shows images). `curl` can't reach the playground pane from the sandbox, and `shot.ts` doesn't need it: it starts its own Vite and its own headless Chrome and stops them at the end. It prints the notes of the rail and the page errors, and it exits 1 on a page error or when there is no canvas. It needs `google-chrome` on the PATH, or the env `CHROME`. A reaction wall can hide an actuator, so try another angle before you say a part is missing.
 
-Run `node --test` after every change to `generate.ts`, `gable.ts`, `steel.ts`, `skew.ts`, `slab.ts`, `clash.ts`, `bench.ts`, `rig.ts`, `hub.ts` or `deform*.ts`. `cli.ts` prints the solver log, the part count and `FLOATING` if a part comes before the part it stands on. It's the fastest way to look at one seed.
+Run `node --test` after every change to `generate.ts`, `gable.ts`, `steel.ts`, `skew.ts`, `slab.ts`, `clash.ts`, `bench.ts`, `rig.ts`, `hub.ts` or `deform*.ts`. `cli.ts` prints the solver log, the part count, `FLOATING` if a part comes before the part it stands on, and `CLASH` if two parts go through each other. It's the fastest way to look at one seed.
 
 Node only strips the types. `pnpm run type-check` checks them (`tsc` with `tsconfig.json`, no emit). CI runs `node --test`, then the type check, on every push and pull request. `erasableSyntaxOnly` refuses TypeScript that Node can't strip (no `enum`, no `namespace`, no constructor parameter properties). There is no linter.
 
