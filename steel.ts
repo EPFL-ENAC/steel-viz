@@ -1109,6 +1109,20 @@ function weldedHaunch(g: Geo, r: Resolved, hw: Hardware) {
   hw.reach.push(L); // the beam gets a vertex at the tip
 }
 
+// The plates of a gusset end (gusset, knife plate, cap, tab), mm thick.
+const GUSSET_T = 12;
+// End cap plates (gusset_cap). From CAP_WIDE_D the tab has the 4 bolts of
+// the knife plate (2 across, 151 mm wide). Under it, the tab has one line of
+// 2 bolts on the brace axis, so it is 2 * EDGE = 76 mm wide. The tab is
+// welded on the cap all around (CAP_WELD, the fillet leg), so it needs a
+// circle of hypot(76 + 12, 12 + 12) = 91.2 mm on the cap. The cap is the
+// tube plus a lip of CAP_LIP on each side, for its own weld on the tube. So
+// d + 10 >= 91.2: a smaller tube than CAP_MIN_D (82 mm) keeps the slot.
+const CAP_WELD = 6;
+const CAP_LIP = 5;
+export const CAP_WIDE_D = 114;
+export const CAP_MIN_D = Math.ceil(Math.hypot(2 * EDGE + 2 * CAP_WELD, GUSSET_T + 2 * CAP_WELD) - 2 * CAP_LIP);
+
 function gusset(g: Geo, r: Resolved, hw: Hardware, small: boolean, cap = false) {
   const { p, inward } = r;
   // Two plates and 4 bolts through both. The gusset is welded to the
@@ -1116,8 +1130,10 @@ function gusset(g: Geo, r: Resolved, hw: Hardware, small: boolean, cap = false) 
   // over the gusset. The bolts: 2 rows along the brace, 2 across. The
   // small gusset has 1 row (2 bolts) and a shorter slot. With `cap` (a
   // round tube), no slot: a round plate closes the tube end, and the tab
-  // is welded on it.
-  const t = 12;
+  // is welded on it. On a tube under CAP_WIDE_D the tab has 1 bolt across
+  // (2 in all), and the tab and the gusset are narrower.
+  const t = GUSSET_T;
+  const narrow = cap && g.sec.d < CAP_WIDE_D;
   let nrm = cross(r.direc, g.u);
   if (len(nrm) < 1e-3) nrm = g.v;
   nrm = norm(nrm);
@@ -1127,16 +1143,16 @@ function gusset(g: Geo, r: Resolved, hw: Hardware, small: boolean, cap = false) 
   if (!cap) hw.reach.push(slot);
   const near = EDGE + 12; // the bolt rows, mm before the tube end
   const far = small ? near : near + PITCH;
-  const half = PITCH / 2 + EDGE; // half width of the bolt area
+  const half = narrow ? EDGE : PITCH / 2 + EDGE; // half width of the bolt area
   const at = (u: number, s2: number, n = 0) => add(add(add(p, mul(inward, u)), mul(side, s2)), mul(nrm, n));
   for (const u of far > near ? [-near, -far] : [-near])
-    for (const s2 of [-PITCH / 2, PITCH / 2]) hw.dots.push({ p: at(u, s2, -t / 2), axis: nrm, half: t + 1 });
+    for (const s2 of narrow ? [0] : [-PITCH / 2, PITCH / 2]) hw.dots.push({ p: at(u, s2, -t / 2), axis: nrm, half: t + 1 });
   // knife plate: from the bolts into the slot, in the plane of the brace
   // full width under the bolts, then down to the tube width at its end
   if (cap) {
     // the cap: from the tube end out by t, a bit wider than the tube and
     // at least as wide as the tab. The tab: from the bolts to the cap.
-    const D = Math.max(g.sec.d + 10, 2 * half);
+    const D = Math.max(g.sec.d + 2 * CAP_LIP, 2 * half);
     const { u, v, w } = frame(at(-t, 0), at(0, 0));
     hw.faces.push(...smooth(prism(at(-t, 0), at(0, 0), profRound(D, ROUND_SIDES), u, v, w, t)));
     hw.boxes.push(boxOf(at(-t / 2, 0), side, inward, D, D, t));

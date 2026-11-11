@@ -137,7 +137,7 @@ export function variety(st: Structure): Variety {
     'secondary beam': secs.length > 0,
     brace: plain.length > 0,
     'double angle brace': plain.some((b) => b.sec.kind === '2L'),
-    // one tube end or the other: a small tube keeps its slot, even with `cap`
+    // one tube end or the other: a tube under CAP_MIN_D keeps its slot, even with `cap`
     'round tube brace': round.some((b) => braceConn(b) !== 'gusset_cap'),
     'round tube brace, end caps': round.some((b) => braceConn(b) === 'gusset_cap'),
     'channel secondary': secs.some((s) => s.sec.kind === 'C'),

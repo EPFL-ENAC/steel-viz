@@ -13,7 +13,7 @@ What we plan to do next. A checked item is done.
 - [ ] Move the round tube tables to RESSLab Hub too, when the hub has one.
 - [ ] Round tube tree columns. Not easy: every joint on a column (beam ends, continuity plates, splices, base plate) needs a flat face. A round column needs new joints for each one (through plates, ring stiffeners).
 - [ ] Round tube truss diagonals.
-- [ ] End cap plates on smaller tubes. Today a cap needs D >= 114 mm (`CAP_MIN_D`), so it is rare. A narrower tab (one row of bolts) would let it go lower.
+- [x] End cap plates on smaller tubes: from 82 mm (`CAP_MIN_D`), with a narrow tab (one line of 2 bolts) under 114 mm.
 - [x] Bolted beam splice and posts.
 - [x] More kinds of beam end connections: clip angles, seated, stiffened seat, tee, stiffened end plate (`CONNS` in `steel.ts`, `connKindsP`, `--conn-kinds`).
 - [x] Skewed arms on trees: 30 or 45 degrees off a column flange, with a skewed end plate or a weld (`skewP`, `--skew`, `skew.ts`).

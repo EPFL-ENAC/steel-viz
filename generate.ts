@@ -15,7 +15,7 @@ import { memberRatio, tooThin } from './checks.ts';
 import type { Catalog, Section } from './sections.ts';
 import { ANGLE_GAP, rodSection } from './sections.ts';
 import {
-  box3, boxOf, flat, geo, grips, hardware, isRound, memberBoxes, memberFaces, resolve, splicePlates, stiffener, supportFace, BEARING_T, BEAM_CONN_KINDS, CONNS, EDGE, PINNED, SETBACK, SPLICE_HALF,
+  box3, boxOf, flat, geo, grips, hardware, isRound, memberBoxes, memberFaces, resolve, splicePlates, stiffener, supportFace, BEARING_T, BEAM_CONN_KINDS, CAP_MIN_D, CONNS, EDGE, PINNED, SETBACK, SPLICE_HALF,
   type BeamConn, type ConnType, type Fit, type Geo, type Haunch, type P2, type Part, type PartInfo, type Plate, type Rbs,
 } from './steel.ts';
 import { overlap, own } from './clash.ts';
@@ -114,9 +114,9 @@ const orOld = (xs: Section[], old: Section[]) => (xs.length ? xs : old);
 // Round tube braces (see roundP). One keyed draw for each arm, from a stream
 // of its own, like shaped(). Its first value picks the round tube, the second
 // the end: a slotted tube on a knife plate (gusset), or an end cap plate with
-// a tab (gusset_cap). The tab is as wide as the bolts need (151 mm), so a
-// smaller tube than CAP_MIN_D keeps the slot.
-const CAP_MIN_D = 114;
+// a tab (gusset_cap). The tab and its weld must sit on the cap, so a smaller
+// tube than CAP_MIN_D (82 mm, see steel.ts) keeps the slot. Under CAP_WIDE_D
+// (114 mm) the tab is narrower, with one line of bolts.
 // the section list of the braces of an arm, and whether they get end caps
 function braceList(p: Params, cat: Catalog, a: Arm): { list: Section[]; cap: boolean } {
   const key = `${a.id}-braces`;
