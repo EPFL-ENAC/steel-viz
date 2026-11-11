@@ -6,7 +6,7 @@ What we plan to do next. A checked item is done.
 
 - [x] Channel, angle and WT profiles (C, L and T sections), with their own section tables. Double angle braces, channel secondaries and tee truss chords (`shapeP`, `--shapes`).
 - [ ] Move the channel and angle tables to RESSLab Hub when the hub needs them (its `steel_braces.csv` has angle and channel braces). Paired worktree and a hub pull request, then the usual rule: change them in the hub first.
-- [ ] Tee chords with the stem up, and the gussets on the stem.
+- [x] Tee chords with the stem up, and the gussets on the stem.
 - [ ] Double angle truss diagonals, unequal angles, single angle braces (the `L` section exists now, for the X bracing).
 - [x] X bracing in a bay: flat bars, rods with a turnbuckle, or single angles bolted where they cross. Tension only in the solver (`xP`, `xKind`, `--bracing x`).
 - [x] Round tube braces (CHS and pipes), on a knife plate or an end cap plate (`roundP`, `--round-tubes`), with our own CHS tables.
@@ -36,7 +36,7 @@ What we plan to do next. A checked item is done.
 - [ ] Notional loads (small side loads for the frame imperfections, EC3 5.3).
 - [ ] A shear check.
 - [x] D / t of a round tube (local buckling): F8 in bending, E7 in compression, a tube past 0.45 E / Fy is refused.
-- [ ] Checks for the channels, double angles and tees: lateral torsional buckling (F2 for a channel, F9 for a tee) and flexural-torsional buckling (E4). Today they take their full plastic moment.
+- [ ] Checks for the channels, double angles and tees: lateral torsional buckling (F2 for a channel, F9 for a tee) and flexural-torsional buckling (E4). Today they take their full plastic moment. A tee chord has its stem up: F9 must take the stem in compression under a sagging moment, in tension under a hogging one.
 - [ ] EC3 member checks for the `eu` family. Today the AISC formulas size both.
 - [ ] A lateral brace for the bottom chord of a cantilever truss. Without it, eu tree 19 stays under `alphaCr` 3 (and eu tree 7 with `--shapes 0`).
 
