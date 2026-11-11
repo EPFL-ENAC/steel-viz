@@ -52,6 +52,10 @@ test('what it refuses', () => {
     [[CR1, '--compare', '2', '--base=-x', '--out', 'a.png'], /--base needs/],
     [[CR1, '--compare', '1', '--dpr', '4', '--out', 'a.png'], /--compare 1/],
     [[CR1, '--theme', 'blue', '--out', 'a.png'], /--theme needs/],
+    [[CR1, '--form', 'tree', '--out', 'a.png'], /for a seed/],
+    [[CR1, '--family', 'eu', '--out', 'a.png'], /for a seed/],
+    [['--seed', '5', '--form', 'dome', '--out', 'a.png'], /--form needs/],
+    [['--seed', '5', '--family', 'us', '--out', 'a.png'], /--family needs/],
   ];
   for (const [argv, message] of refused) assert.throws(() => parseShotArgs(argv), message, argv.join(' '));
 });
@@ -68,6 +72,10 @@ test('the hash of the page', () => {
   assert.equal(c.get('compare'), '2');
   assert.equal(c.get('base'), '564ac4d~1');
   assert.equal(c.get('theme'), 'dark');
+  const f = parseShotArgs(['--seed', '140', '--form', 'tree', '--family', 'eu', '--out', 'a.png']);
+  assert.deepEqual([f.form, f.family], ['tree', 'eu']);
+  assert.equal(shotHash(f), 'seed=140&form=tree&family=eu');
+  assert.equal(parseShotArgs(['--seed', '5', '--out', 'a.png']).form, undefined);
 });
 
 test('compare, base and theme', () => {

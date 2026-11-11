@@ -31,6 +31,7 @@ node shot.ts connections/Lee_et_al_2002_CR1 --out cr1.png            # a PNG of 
 node shot.ts connections/Lee_et_al_2002_CR1 --step 440 --out cr1.png # at one step
 node shot.ts connections/Lee_et_al_2002_CR1 --peak --out cr1.png     # at the step with the biggest move of one point
 node shot.ts --seed 5 --out s5.png                                   # a seed. Also --az and --el for the angle, --dpr for more pixels (default 2)
+node shot.ts --seed 140 --form tree --family eu --out t.png            # a seed with a form and a family, as in the playground (default mix, aisc)
 node shot.ts --seed 5 --zoom 8 --at 0.6,0.4 --out z.png             # 8x closer, toward a point of the canvas (0,0 top left, default the middle)
 node shot.ts columns/Popov_Bertero_Chandramouli_C-1 --compare 2 --base 07e3602~1 --out c.png   # compare in one view (green new, red gone), --compare 1 side by side, --theme dark
 ```
