@@ -24,7 +24,9 @@ export type Elem = {
   q?: V; // uniform load along the element, global, N/mm
 };
 // N: max axial force, tension or compression. Nc: max compression (>= 0).
-export type ElemForces = { N: number; Nc: number; My: number; Mz: number };
+// Vy, Vz: the largest shear along v and along w (Vz goes with My, the strong
+// axis). With a uniform load the shear is linear, so the max is at an end.
+export type ElemForces = { N: number; Nc: number; My: number; Mz: number; Vy: number; Vz: number };
 // the factored stiffness of the free DOFs, kept for alphaCr()
 type System = { free: number[]; Kff: M; lu: Factored; prep: Prepared[] };
 export type Solved =
@@ -260,7 +262,9 @@ export function solve(nodes: FNode[], elems: Elem[], pivotTol = 1e-9): Solved {
     }
     // f[6] > 0 (f[0] < 0) pulls the element: tension
     axial[ei] = (f[6] - f[0]) / 2;
-    return { N: Math.max(Math.abs(f[0]), Math.abs(f[6])), Nc: Math.max(0, f[0], -f[6]), My, Mz };
+    const Vy = Math.max(Math.abs(f[1]), Math.abs(f[7]));
+    const Vz = Math.max(Math.abs(f[2]), Math.abs(f[8]));
+    return { N: Math.max(Math.abs(f[0]), Math.abs(f[6])), Nc: Math.max(0, f[0], -f[6]), My, Mz, Vy, Vz };
   });
   return { ok: true, d, forces, axial, sys: { free, Kff, lu, prep } };
 }

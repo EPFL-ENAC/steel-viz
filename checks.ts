@@ -10,19 +10,22 @@
 //   A round tube with D / t of 0.45 E / Fy or more is refused (tooThin).
 // - F6: weak axis bending of an I section, Mn = Fy Z.
 // - H1-1: axial force and bending together.
+// - G: shear, along both axes of every kind (see shear()). No interaction with
+//   the moment: AISC has none for these shapes.
 //
 // The buckling length is the member length (K = 1). That is right when the
 // global analysis already has the sway effects (EC3 5.2.2(3)b, the same idea
 // as the AISC direct analysis method): generate.ts amplifies the moments with
 // alphaCr from solver.ts for that.
 //
-// Not checked: shear, local buckling of slender plates of the other sections
+// Not checked: local buckling of slender plates of the other sections
 // (E7, F3), torsional and flexural-torsional buckling (E4), Cb > 1 (Cb = 1 is
 // the safe side for cantilevers and unbraced spans).
 import { E } from './solver.ts';
-import type { Section } from './sections.ts';
+import { ANGLE_GAP, type Section } from './sections.ts';
 
-export type MemberForces = { N: number; Nc: number; My: number; Mz: number };
+// Vz: the shear along w (with My, the strong axis), Vy: along v (with Mz)
+export type MemberForces = { N: number; Nc: number; My: number; Mz: number; Vy: number; Vz: number };
 
 // F8: a round tube with D / t of 0.45 E / Fy or more is out of the scope of
 // AISC. size() never picks it, and memberRatio() gives Infinity.
@@ -85,18 +88,82 @@ export function strongMoment(s: Section, Lb: number, fy: number): number {
   return Math.min(Mp, Fcr(Lb) * Sx);
 }
 
+// G2-3, G2-4: the web shear buckling factor Cv1, for a web of h / tw = lam
+// and the plate buckling factor kv (5.34, a web with no stiffener). G2.1(a)
+// (Cv1 = 1 for a rolled I up to 2.24 sqrt(E / Fy)) only changes the phi
+// factor, and we have none: (b) gives Cv1 = 1 up to 2.54 sqrt(E / Fy).
+export function cv1(lam: number, kv: number, fy: number): number {
+  const lim = 1.1 * Math.sqrt((kv * E) / fy);
+  return lam <= lim ? 1 : lim / lam;
+}
+
+// G2-9 to G2-11: the factor Cv2, for the tubes (G4), the tee stems and the
+// angle legs (G3) and the flanges in weak axis shear (G6)
+export function cv2(lam: number, kv: number, fy: number): number {
+  const r = Math.sqrt((kv * E) / fy);
+  if (lam <= 1.1 * r) return 1;
+  if (lam <= 1.37 * r) return (1.1 * r) / lam;
+  return (1.51 * kv * E) / (lam * lam * fy);
+}
+
+// G3 and G6: a plate b wide and t thick, sheared along b: 0.6 Fy b t Cv2 with
+// h / tw = b / t and kv = 1.2 (an outstanding leg, a stem, a flange)
+const plate = (b: number, t: number, fy: number) => 0.6 * fy * b * t * cv2(b / t, 1.2, fy);
+
+// Chapter G: the nominal shear strength Vn of a section, `strong` along w
+// (the depth, with My), `weak` along v (with Mz). L: the member length, for
+// the round tube (G5, Lv = L, the longest it can be: the safe side).
+export function shear(s: Section, L: number, fy: number): { strong: number; weak: number } {
+  const both = (v: number) => ({ strong: v, weak: v });
+  // G2.1: the web of an I or a channel, Aw = d tw, h the clear web
+  const web = (n: number) => n * 0.6 * fy * s.d * s.tw * cv1((s.d - 2 * s.tf) / s.tw, 5.34, fy);
+  switch (s.kind) {
+    case 'I': // G6: two flanges, each b = bf / 2 on both sides of the web
+      return { strong: web(1), weak: 2 * 0.6 * fy * s.bf * s.tf * cv2(s.bf / 2 / s.tf, 1.2, fy) };
+    case 'C': // G6: two flanges, b = bf for a channel
+      return { strong: web(1), weak: 2 * plate(s.bf, s.tf, fy) };
+    case '2C': // two channels, bf = both flanges and the gap
+      return { strong: web(2), weak: 4 * plate((s.bf - ANGLE_GAP) / 2, s.tf, fy) };
+    case 'T': // G3: the stem, b = d. G6: one flange, b = bf / 2 on both sides
+      return { strong: plate(s.d, s.tw, fy), weak: 0.6 * fy * s.bf * s.tf * cv2(s.bf / 2 / s.tf, 1.2, fy) };
+    case '2L': // G3: the legs along w (d) and the outstanding legs
+      return { strong: 2 * plate(s.d, s.tw, fy), weak: 2 * plate((s.bf - ANGLE_GAP) / 2, s.tf, fy) };
+    case 'L':
+      return { strong: plate(s.d, s.tw, fy), weak: plate(s.bf, s.tf, fy) };
+    case 'FB': // d the width, bf the thickness. Across the thickness b / t < 1, Cv2 = 1
+      return { strong: plate(s.d, s.bf, fy), weak: 0.6 * fy * s.d * s.bf };
+    case 'RHS': {
+      // G4: Aw = 2 h t, h = the side less 3 t (the corner radius is not kept)
+      const side = (H: number) => 0.6 * fy * 2 * (H - 3 * s.tf) * s.tf * cv2((H - 3 * s.tf) / s.tf, 5, fy);
+      return { strong: side(s.d), weak: side(s.bf) };
+    }
+    case 'CHS': {
+      // G5: Fcr Ag / 2, Fcr the larger of G5-2a and G5-2b, at most 0.6 Fy
+      const Dt = s.d / s.tf;
+      const Fcr = Math.min(0.6 * fy, Math.max((1.6 * E) / (Math.sqrt(L / s.d) * Dt ** 1.25), (0.78 * E) / Dt ** 1.5));
+      return both((Fcr * s.A) / 2);
+    }
+    default:
+      // ROD: a solid round bar is not in chapter G. Its peak shear stress is
+      // 4/3 of the mean: 0.6 Fy at the peak gives 0.6 Fy x 0.75 A.
+      return both(0.6 * fy * 0.75 * s.A);
+  }
+}
+
 // H1-1: Pr / Pc with the bending part
 const h1 = (p: number, m: number) => (p >= 0.2 ? p + (8 / 9) * m : p / 2 + m);
 
 // the use ratio of a member (1 = at its nominal strength): the compression
-// case with Pn, and the tension case with Fy A, the larger one. Infinity for
-// a round tube that is too thin (tooThin).
+// case with Pn, the tension case with Fy A, and the shear along both axes
+// (chapter G), the largest one. Infinity for a round tube that is too thin
+// (tooThin).
 export function memberRatio(s: Section, f: MemberForces, L: number, fy: number): number {
   if (tooThin(s, fy)) return Infinity;
   const weak = s.kind === 'CHS' ? roundMoment(s, fy) : fy * s.Ww;
   const m = f.My / strongMoment(s, L, fy) + f.Mz / weak;
   const c = f.Nc > 0 ? h1(f.Nc / compression(s, L, fy), m) : 0;
   const t = h1(f.N / (fy * s.A), m);
-  return Math.max(c, t);
+  const v = shear(s, L, fy);
+  return Math.max(c, t, f.Vz / v.strong, f.Vy / v.weak);
 }
 

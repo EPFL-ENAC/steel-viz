@@ -61,9 +61,9 @@ test('H1-1: both branches, and tension uses Fy A', () => {
   const Py = fy * ipe.A;
   const Mp = fy * ipe.Ws;
   // short member, no buckling: Pn = Py, Mn = Mp
-  near(memberRatio(ipe, { N: 0.1 * Py, Nc: 0.1 * Py, My: 0.5 * Mp, Mz: 0 }, 10, fy), 0.05 + 0.5);
-  near(memberRatio(ipe, { N: 0.4 * Py, Nc: 0.4 * Py, My: 0.45 * Mp, Mz: 0 }, 10, fy), 0.4 + (8 / 9) * 0.45);
+  near(memberRatio(ipe, { N: 0.1 * Py, Nc: 0.1 * Py, My: 0.5 * Mp, Mz: 0, Vy: 0, Vz: 0 }, 10, fy), 0.05 + 0.5);
+  near(memberRatio(ipe, { N: 0.4 * Py, Nc: 0.4 * Py, My: 0.45 * Mp, Mz: 0, Vy: 0, Vz: 0 }, 10, fy), 0.4 + (8 / 9) * 0.45);
   // a long member in tension does not buckle
-  near(memberRatio(ipe, { N: 0.5 * Py, Nc: 0, My: 0, Mz: 0 }, 6000, fy), 0.5);
-  assert.ok(memberRatio(ipe, { N: 0.5 * Py, Nc: 0.5 * Py, My: 0, Mz: 0 }, 6000, fy) > 1);
+  near(memberRatio(ipe, { N: 0.5 * Py, Nc: 0, My: 0, Mz: 0, Vy: 0, Vz: 0 }, 6000, fy), 0.5);
+  assert.ok(memberRatio(ipe, { N: 0.5 * Py, Nc: 0.5 * Py, My: 0, Mz: 0, Vy: 0, Vz: 0 }, 6000, fy) > 1);
 });

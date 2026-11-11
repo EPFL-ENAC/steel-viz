@@ -49,9 +49,9 @@ On seeds 1 to 40, 13 trees get a short brace with the default values, 30 with `b
 The sizing works in two steps, with public formulas from EC3 (Eurocode 3) and AISC 360-22:
 
 1. The whole structure: the solver finds the elastic critical load factor `alphaCr`. It is how many times the load the structure takes before it buckles as a whole (a buckling analysis with the geometric stiffness, in `solver.ts`). The moments are then multiplied by `1 / (1 - 1/alphaCr)`, for the sway effects (EC3 5.2.2). This rule needs `alphaCr >= 3`. If it is lower, the member with the most strain energy in the buckling mode gets a heavier section, and the solver runs again.
-2. Each member, in `checks.ts`: flexural buckling (AISC E3), lateral torsional buckling of I sections (F2), weak axis bending (F6), local buckling of the wall of a round tube (F8, E7), and the two together with the axial force (H1-1). The buckling length is the member length, because step 1 already has the sway. The ratio must stay under 0.6. There are no AISC phi factors, the 0.6 is the margin.
+2. Each member, in `checks.ts`: flexural buckling (AISC E3), lateral torsional buckling of I sections (F2), weak axis bending (F6), local buckling of the wall of a round tube (F8, E7), the two together with the axial force (H1-1), and shear (chapter G). The buckling length is the member length, because step 1 already has the sway. The ratio must stay under 0.6. There are no AISC phi factors, the 0.6 is the margin.
 
-Not checked: shear, local buckling of thin plates (E7, F3) except for round tubes, torsional buckling (E4), and notional loads (the small side loads for the frame imperfections). The channels, double angles and tees take their full plastic moment: no lateral torsional buckling for them (F2 for a channel, F9 for a tee), and E4 is the check that matters most for a double angle or a tee. Cb is 1, which is on the safe side for cantilevers. The same AISC formulas size the EU sections too. A few trees with a cantilever truss stay under `alphaCr` 3 (eu tree 19 of the 240 structures of the tests, and also eu tree 7 with `shapeP` 0): the bottom chord sways out of the truss plane, and nothing braces it sideways. The log says it.
+Not checked: local buckling of thin plates (E7, F3) except for round tubes, torsional buckling (E4), and notional loads (the small side loads for the frame imperfections). The channels, double angles and tees take their full plastic moment: no lateral torsional buckling for them (F2 for a channel, F9 for a tee), and E4 is the check that matters most for a double angle or a tee. Cb is 1, which is on the safe side for cantilevers. The same AISC formulas size the EU sections too. A few trees with a cantilever truss stay under `alphaCr` 3 (eu tree 19 of the 240 structures of the tests, and also eu tree 7 with `shapeP` 0): the bottom chord sways out of the truss plane, and nothing braces it sideways. The log says it.
 
 A round tube has no lateral torsional buckling, but its wall can buckle locally when it is thin. The checks use D / t (outside diameter over wall) with AISC F8 for bending and E7 for compression:
 
@@ -64,6 +64,19 @@ A round tube has no lateral torsional buckling, but its wall can buckle locally 
 | 0.45 E / Fy or more | refused | refused |
 
 S is the elastic modulus, Z the plastic one. In bending, Mn is never above Fy Z. The same Mn is used about both axes. A refused tube gets the ratio Infinity, and `size()` never picks it. At Fy 345 (AISC) the limits are 42.6, 67, 189 and 274. The thinnest tube of the tables has D / t 62 (`HSS10.750X0.188`), so only the noncompact case happens with the real tables, and it changes no seed: the round tubes are braces, pinned at both ends, so they only take the small moment of their own weight. `tubes.test.ts` checks each case with numbers worked by hand.
+
+Shear (AISC chapter G) is checked along both axes of a member: along the depth (it goes with the strong axis moment) and across. The solver gives the shear at the two ends, and with a uniform load the largest one is at an end. The sway factor of step 1 multiplies it too, like the moments. There is no interaction with the moment (AISC has none for rolled shapes).
+
+| kind | along the depth | across |
+|---|---|---|
+| I, channel | web, G2.1: 0.6 Fy d tw Cv1 (kv 5.34) | flanges, G6: 0.6 Fy bf tf Cv2 for each (kv 1.2) |
+| tee | stem, G3: 0.6 Fy d tw Cv2 (kv 1.2) | flange, G6 |
+| angle, double angle | legs along the shear, G3 (kv 1.2) | the other legs, G3 |
+| square or rectangular tube | G4: 0.6 Fy 2 h t Cv2 (kv 5), h = d - 3t | the same with bf |
+| round tube | G5: Fcr A / 2, the length of the member as Lv (safe side) | the same |
+| solid rod | 0.6 Fy on 3/4 of the area (not in chapter G: the peak stress of a round bar is 4/3 of the mean) | the same |
+
+Cv1 is 1 when h / tw stays under 1.10 sqrt(kv E / Fy) (62.7 at Fy 345, 61.8 at Fy 355). It is the case for all the I sections and channels of the tables except IPE AA 450 and IPE AA 500, so in practice the web check is 0.6 Fy d tw. Shear governs on short arms with a heavy load: aisc seed 63 gets a W16X26 (same weight, deeper web) in place of a W10X26 on its arm6. `shear.test.ts` checks each row with numbers worked by hand.
 
 Then come the small details, from a random draw of their own, so a seed keeps the same structure:
 
@@ -570,7 +583,7 @@ Files:
 - `sections.ts`: section properties (I, tube, rod, round tube, channel, double angle, tee) from the CSV tables. The rods and the tees are made in code. The round tubes (CHS and pipes) are in `Catalog.pipes`, not in `all`, so a specimen finds its section by name as before.
 - `sections/`, `tables.ts`: the CSV tables (see `sections/README.md`), and how Node reads them. `tables.ts` also reads a hub test and its response files for `cli.ts` and `shot.ts`.
 - `solver.ts`: 3D frame solver (6 DOF per node, pinned ends, finds mechanisms), and the buckling analysis (`alphaCr`).
-- `checks.ts`: the member checks (AISC 360-22 E3, E7 and F8 for round tubes, F2, F6, H1-1). `tubes.test.ts` checks the round tubes.
+- `checks.ts`: the member checks (AISC 360-22 E3, E7 and F8 for round tubes, F2, F6, H1-1, G for shear). `tubes.test.ts` checks the round tubes, `shear.test.ts` the shear.
 - `generate.ts`: topology, the fix loop, trusses and rods, posts and beam splices, and the sizing. Also the specimen path (`buildSpecimen`), and it sends a brace test, a column test (also HSS) or a link test to `bench.ts`.
 - `skew.ts`: the end of a skewed arm: the cut end, its clash boxes, the skewed end plate.
 - `slab.ts`: the concrete slab of a beam-to-column test. See "The concrete slab". `slab.test.ts` checks it.
