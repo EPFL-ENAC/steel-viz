@@ -76,7 +76,7 @@ Then come the small details, from a random draw of their own, so a seed keeps th
 Trusses and tension rods also come from a draw of their own, after the fix loop:
 
 - Truss: a beam gets a bottom chord 700 to 900 mm under it, with tube diagonals in a zigzag between the two. In a bay, both ends of the zigzag are on the bottom chord. On an arm, it ends at the tip on the top chord. The truss takes the place of the braces of that beam, but not of a short brace. A box beam gets a truss less often than a portal beam, because a box has 4 to 8 bay beams. A tree arm gets a lower truss, 450 to 650 mm, so it fits above the arm below it on the same face. It ends at the tip, on the top chord. Its diagonals have a small gusset with one row of 2 bolts. On seeds 1 to 40, a truss comes on 4 or 5 trees (it depends on the family), 11 portals and 12 boxes.
-- Tension rod: a round bar from the column down to the top of an arm that sticks out, with a clevis (a fork and a pin) at each end. Only on an arm with no braces, and only when the column has room above it, under the next arm and its braces.
+- Tension rod: a round bar from the column down to the top of an arm that sticks out, with a clevis (a fork and a pin) at each end. Only on an arm with no braces, and only when the column has room above it, under the next arm and its braces. A flat rod puts its clevis tab far back on the arm: when the tab goes through the end connection (the top flange plate of `flange_plates`), the rod moves out along the arm, 50 mm at a time, or it is left out when there is no room (`clearRods()` in `generate.ts`).
 
 The solver checks the structure again with them and sizes the chords, the diagonals and the rods. If the structure does not stand up anymore, they are left out.
 

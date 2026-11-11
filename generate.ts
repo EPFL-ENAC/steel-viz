@@ -533,6 +533,45 @@ function rodFor(st: Structure, a: Arm, cat: Catalog, rng: () => number): Rod | u
   return { a: at, zr, sec: cat.rods[Math.floor(cat.rods.length / 2)] };
 }
 
+// A flat rod puts its clevis tab far back from the point where it lands, so
+// the tab can go through the end connection of its arm (the top flange plate
+// of flange_plates). Build the parts and look: on a hit, move the rod out
+// along its arm, 50 mm at a time, with the rules of rodFor(). No room left:
+// no rod. Before the sizing, so the rod is sized where it stays, and again
+// after it (build()), as a bigger arm or column moves the plate. No random draw here,
+// so the seeds without a hit keep their look. True when a rod moved or went.
+function clearRods(st: Structure, p: Params, log: string[]): boolean {
+  let changed = false;
+  const hit = (a: Arm): string | undefined => {
+    const all = parts(st, 'plates', p.seg);
+    const id = rodId(a);
+    const mine = all.filter((q) => q.id === id || own(id, q.id));
+    for (const q of all) {
+      if (!q.boxes?.length || q.id.startsWith(id)) continue;
+      for (const r of mine) if (!own(q.id, r.id) && r.boxes?.some((b) => q.boxes!.some((c) => overlap(b, c)))) return q.id;
+    }
+    return undefined;
+  };
+  for (const a of st.arms) {
+    if (!a.rod) continue;
+    const first = hit(a);
+    if (!first) continue;
+    changed = true;
+    let left: string | undefined = first;
+    while (left) {
+      const at = a.rod.a + 50;
+      if (at > a.L - 150 || a.rod.zr - a.z < Math.max(400, 0.5 * at)) break;
+      a.rod.a = at;
+      left = hit(a);
+    }
+    if (left) {
+      a.rod = undefined;
+      log.push(`${a.id}: no tension rod, its clevis would go through ${first}`);
+    } else log.push(`${a.id}: tension rod moved out to ${a.rod.a} mm, its clevis went through ${first}`);
+  }
+  return changed;
+}
+
 // ------------------------------------------------------------- gable
 // A pitched roof on a portal (gable.ts), from a stream of its own. With two
 // storeys, on the top bay beam only: the floor beam stays flat and keeps its
@@ -582,7 +621,9 @@ function addTrussesAndRods(st: Structure, p: Params, cat: Catalog, rng: () => nu
     added = true;
     log.push(`${a.id}: tension rod, up to ${rod.zr} mm`);
   }
-  return added;
+  if (!added) return false;
+  clearRods(st, p, log);
+  return st.arms.some((a) => a.truss || a.rod);
 }
 
 // ------------------------------------------------------------- posts
@@ -2040,6 +2081,14 @@ function build(p0: Partial<Params>, cat: Catalog, detail: Detail): Result {
         m = model(st, p);
       }
     }
+  }
+  // the sizing of the rods and the posts can make an arm or the column
+  // bigger, and its end plate longer: look at the rods again. If one moved
+  // or went, check once more (check mode: no new section, so no new hit).
+  // A rod only adds stiffness, so the structure still stands without it.
+  if (ok && clearRods(st, p, log)) {
+    const f = again();
+    if (f) ratio = size(st, m, f, cat, p, true);
   }
   // more kinds of beam end, from a draw of their own (before the details:
   // the column splice keeps clear of their plates)

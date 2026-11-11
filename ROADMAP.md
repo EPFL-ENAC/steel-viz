@@ -23,7 +23,8 @@ What we plan to do next. A checked item is done.
 - [x] Trusses on trees. Today a tree never gets one: its arms are too short, too low, or have an arm below them on the same face. Allow a lower truss there.
 - [x] Fewer trusses on boxes. Boxes get one on 32 of 40 seeds. Try a lower `TRUSS_P.bay` in `generate.ts`.
 - [ ] Trusses on portal arms. They never get one either. The low truss of trees would fit on a few, but it changes portal 143, #2 of the top 12.
-- [ ] A rod clevis goes through an arm connection on aisc tree 140 (today's code, outside the seeds the tests run).
+- [x] A rod clevis goes through an arm connection on aisc tree 140 (today's code, outside the seeds the tests run). The clevis tab went through the top flange plate of `flange_plates`. `clearRods()` moves the rod out along its arm, or drops it, before and after the sizing. 3 trees had it in seeds 0 to 600 (aisc 140, eu 140, eu 469), `rod.test.ts` has them. `cli.ts` prints the clashes now.
+- [ ] A truss chord goes through the column on eu tree 506 (`arm3-chord`) and eu tree 540 (`arm8-chord`). Outside the seeds the tests run.
 - [x] Gable portal: a one storey portal with a pitched roof, haunches at the eaves and a bolted ridge splice (`gable.ts`, `gableP`, `--gable`).
 - [x] Gable on a two storey portal: on the top bay beam only, the floor beam stays flat. Mostly the condition in `addGable()`.
 - [ ] Gable on a box: the two bays of one side get the gable, with a ridge beam between the two ridges (a new member type).
