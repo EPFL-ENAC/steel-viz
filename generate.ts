@@ -1160,7 +1160,10 @@ function size(st: Structure, m: Model, res: Forces[], cat: Catalog, p: Params, c
     const tr = a.truss;
     if (tr) {
       const chords = shaped(p, chordId(a)) ? orOld(cat.tees, cat.beams) : cat.beams;
-      tr.chord = choose(chords, chordId(a), tr.chord, (s) => s.d >= 150 && s.d <= (tr.low ? LOW.chord : Math.max(a.sec.d, 360)));
+      // like the rafter above: a chord on a column web must fit between the
+      // flanges (a long tee chord gets wide since F9 in checks.ts)
+      const onWeb = faceOf(a) % 180 === 90;
+      tr.chord = choose(chords, chordId(a), tr.chord, (s) => s.d >= 150 && s.d <= (tr.low ? LOW.chord : Math.max(a.sec.d, 360)) && (!onWeb || s.bf + 40 <= webRoom(cat)));
       tr.webs.forEach((wb, k) => {
         const L = Math.hypot(wb.t - wb.b, tr.D - a.sec.d);
         wb.sec = choose(cat.tubes, webId(a, k), wb.sec, (s) => L / s.rmin < 200);

@@ -36,7 +36,7 @@ What we plan to do next. A checked item is done.
 - [ ] Notional loads (small side loads for the frame imperfections, EC3 5.3).
 - [x] A shear check (AISC 360-22 chapter G, along both axes, every kind of section).
 - [x] D / t of a round tube (local buckling): F8 in bending, E7 in compression, a tube past 0.45 E / Fy is refused.
-- [ ] Checks for the channels, double angles and tees: lateral torsional buckling (F2 for a channel, F9 for a tee) and flexural-torsional buckling (E4). Today they take their full plastic moment.
+- [x] Checks for the channels, double angles and tees: lateral torsional buckling (F2 for a channel, F9 for a tee and a double angle, F10 for one angle) and flexural-torsional buckling (E4). Cw and the shear center come from the dimensions.
 - [ ] EC3 member checks for the `eu` family. Today the AISC formulas size both.
 - [ ] A lateral brace for the bottom chord of a cantilever truss. Without it, eu tree 19 stays under `alphaCr` 3 (and eu tree 7 with `--shapes 0`).
 
