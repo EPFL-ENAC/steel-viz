@@ -5,6 +5,8 @@
 //   node shot.ts connections/Lee_et_al_2002_CR1 --step 440 --out cr1.png # at one step, from 0 as the slider
 //   node shot.ts connections/Lee_et_al_2002_CR1 --peak --out cr1.png     # at the step with the biggest move
 //   node shot.ts --seed 5 --out s5.png                                   # a seed
+//   node shot.ts --seed 140 --form tree --family eu --out t.png         # a seed, with a form and a family
+//     (--form mix|tree|portal|box, --family aisc|eu: as in the playground, default mix and aisc)
 //   also --az and --el for the angle, --dpr for more pixels (default 2)
 //   node shot.ts connections/Sato_et_al_2007_BFP-1 --zoom 8 --at 0.5,0.4 --out b.png # 8x closer, toward a point
 //     (--at: x,y as parts of the canvas, 0,0 top left, default the middle)
@@ -40,7 +42,7 @@ const DRAW_MS = 50_000; // the page must draw in this time
 const DEADLINE_MS = 60_000; // the whole run, with the cleanup after it
 const AFTER_ERROR_MS = 5_000; // a page error and no drawing yet: don't wait for long
 
-const USAGE = 'usage: node shot.ts <table>/<id> [--step N | --peak] [--az N] [--el N] [--dpr N] [--zoom N [--at x,y]] [--compare 1|2 [--base ref]] [--theme light|dark] --out file.png\n       node shot.ts --seed N [--az N] [--el N] [--dpr N] [--zoom N [--at x,y]] [--compare 1|2 [--base ref]] [--theme light|dark] --out file.png';
+const USAGE = 'usage: node shot.ts <table>/<id> [--step N | --peak] [--az N] [--el N] [--dpr N] [--zoom N [--at x,y]] [--compare 1|2 [--base ref]] [--theme light|dark] --out file.png\n       node shot.ts --seed N [--form mix|tree|portal|box] [--family aisc|eu] [--az N] [--el N] [--dpr N] [--zoom N [--at x,y]] [--compare 1|2 [--base ref]] [--theme light|dark] --out file.png';
 
 const sleep = (ms: number) => new Promise((ok) => setTimeout(ok, ms));
 
@@ -48,6 +50,8 @@ const sleep = (ms: number) => new Promise((ok) => setTimeout(ok, ms));
 export type ShotArgs = {
   test?: { table: string; id: string };
   seed?: number;
+  form?: 'mix' | 'tree' | 'portal' | 'box'; // with a seed
+  family?: 'aisc' | 'eu'; // with a seed
   step?: number;
   peak: boolean;
   az?: number;
@@ -79,7 +83,7 @@ export function parseShotArgs(argv: string[]): ShotArgs {
     args: glued,
     allowPositionals: true,
     options: {
-      seed: { type: 'string' }, step: { type: 'string' }, peak: { type: 'boolean' },
+      seed: { type: 'string' }, form: { type: 'string' }, family: { type: 'string' }, step: { type: 'string' }, peak: { type: 'boolean' },
       az: { type: 'string' }, el: { type: 'string' }, dpr: { type: 'string' }, out: { type: 'string' },
       zoom: { type: 'string' }, at: { type: 'string' },
       compare: { type: 'string' }, base: { type: 'string' }, theme: { type: 'string' },
@@ -91,6 +95,9 @@ export function parseShotArgs(argv: string[]): ShotArgs {
   if (name === undefined && v.seed === undefined) throw new Error('give a test as <table>/<id>, or --seed');
   if (v.step !== undefined && v.peak) throw new Error('give --step or --peak, not both');
   if (name === undefined && (v.step !== undefined || v.peak)) throw new Error('--step and --peak are for a test, a seed has no steps');
+  if (name !== undefined && (v.form !== undefined || v.family !== undefined)) throw new Error('--form and --family are for a seed, a test has its own');
+  if (v.form !== undefined && !['mix', 'tree', 'portal', 'box'].includes(v.form)) throw new Error(`--form needs mix, tree, portal or box, not "${v.form}"`);
+  if (v.family !== undefined && v.family !== 'aisc' && v.family !== 'eu') throw new Error(`--family needs aisc or eu, not "${v.family}"`);
   if (!v.out) throw new Error('give the image with --out');
   if (v.at !== undefined && v.zoom === undefined) throw new Error('--at is for --zoom');
   const at = (v.at ?? '0.5,0.5').split(',').map((x) => (x.trim() === '' ? NaN : Number(x)));
@@ -101,6 +108,8 @@ export function parseShotArgs(argv: string[]): ShotArgs {
   if (v.theme !== undefined && v.theme !== 'light' && v.theme !== 'dark') throw new Error(`--theme needs light or dark, not "${v.theme}"`);
   const a: ShotArgs = {
     seed: number('--seed', v.seed, isCount, 'a whole number from 0'),
+    form: v.form as ShotArgs['form'],
+    family: v.family as ShotArgs['family'],
     step: number('--step', v.step, isCount, 'a whole number from 0'),
     peak: !!v.peak,
     az: number('--az', v.az, () => true, 'a number'),
@@ -123,10 +132,12 @@ export function parseShotArgs(argv: string[]): ShotArgs {
 }
 
 // the settings of the page, as app/state.ts reads them
-export function shotHash(a: Pick<ShotArgs, 'test' | 'seed' | 'az' | 'el' | 'compare' | 'base' | 'theme'>): string {
+export function shotHash(a: Pick<ShotArgs, 'test' | 'seed' | 'form' | 'family' | 'az' | 'el' | 'compare' | 'base' | 'theme'>): string {
   const h = new URLSearchParams();
   if (a.test) h.set('specimen', `${a.test.table}/${a.test.id}`);
   else h.set('seed', String(a.seed));
+  if (a.form) h.set('form', a.form);
+  if (a.family) h.set('family', a.family);
   if (a.az !== undefined || a.el !== undefined) h.set('view', ''); // '' when the angle is free
   if (a.az !== undefined) h.set('az', String(a.az));
   if (a.el !== undefined) h.set('el', String(a.el));
@@ -185,7 +196,7 @@ export function peakStep(table: string, spec: Specimen, record: HubRecord, curve
 type Job = { label: string; step?: number; n?: number; peak?: { move: number; scale: number } };
 
 function readJob(a: ShotArgs): Job {
-  if (!a.test) return { label: `seed ${a.seed}` };
+  if (!a.test) return { label: `seed ${a.seed}${a.form ? ` ${a.form}` : ''}${a.family ? ` ${a.family}` : ''}` };
   const { table, id } = a.test;
   const hubData = findHubData();
   const record = findRecord(table, id, hubData);

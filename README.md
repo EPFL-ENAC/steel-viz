@@ -32,7 +32,7 @@ The sizing rules are the same for both shapes: L / r under 200 for a brace, a se
 Some arm braces are round tubes (CHS and pipes, 60 to 300 mm), from a draw of their own. `roundP` gives the chance (0.3 by default, `--round-tubes` in the CLI, "Round tube braces" in the playground). It is one draw per arm, on its own stream, keyed by the arm, so with `roundP` 0 a seed gives the same parts as before. A double angle comes first: a round tube only takes the place of a square tube. A round tube brace has one of two ends, from the same draw:
 
 - Slotted tube on a knife plate (`gusset`): the same end as a square tube. The knife plate goes into a slot cut in the tube.
-- End cap plate (`gusset_cap`): a round plate welded on the tube end, and a tab welded on the cap, bolted on the gusset with the same 4 bolts. No slot. Only on a tube of 114 mm or more: on a smaller one, the tab (wide enough for the bolts) would be much wider than the tube. Braces are sized from their forces and are mostly 60 to 90 mm, so this end is rare.
+- End cap plate (`gusset_cap`): a round plate welded on the tube end, and a tab welded on the cap, bolted on the gusset. No slot. On a tube of 114 mm or more (`CAP_WIDE_D`), the tab has the same 4 bolts as the knife plate (151 mm wide). From 82 to 114 mm, the tab has one line of 2 bolts on the brace axis, so it is 76 mm wide (2 edge distances), and the gusset is narrower too. A tube under 82 mm (`CAP_MIN_D`, in `steel.ts`) keeps the slot. Why 82 mm: the tab is welded on the cap all around, with a 6 mm fillet, so the tab and its weld need a circle of 91 mm on the cap. The cap is the tube plus a 5 mm lip on each side, for its own weld on the tube. So d + 10 >= 91.2. In the tables, this gives the cap to the tubes of 88.9 and 101.6 mm, and not to the ones of 76 mm and less.
 
 A round tube has 12 sides in the drawings (a rod has 16). With 12, no line runs along the tube, and the width changes by 3 % only with the view. Its long sides have no line of their own: the outline comes from the renderer (`hlr.ts`, and the outline pass of the 3D view, also with one weight).
 
@@ -49,9 +49,9 @@ On seeds 1 to 40, 13 trees get a short brace with the default values, 30 with `b
 The sizing works in two steps, with public formulas from EC3 (Eurocode 3) and AISC 360-22:
 
 1. The whole structure: the solver finds the elastic critical load factor `alphaCr`. It is how many times the load the structure takes before it buckles as a whole (a buckling analysis with the geometric stiffness, in `solver.ts`). The moments are then multiplied by `1 / (1 - 1/alphaCr)`, for the sway effects (EC3 5.2.2). This rule needs `alphaCr >= 3`. If it is lower, the member with the most strain energy in the buckling mode gets a heavier section, and the solver runs again.
-2. Each member, in `checks.ts`: flexural buckling (AISC E3), lateral torsional buckling of I sections (F2), weak axis bending (F6), local buckling of the wall of a round tube (F8, E7), and the two together with the axial force (H1-1). The buckling length is the member length, because step 1 already has the sway. The ratio must stay under 0.6. There are no AISC phi factors, the 0.6 is the margin.
+2. Each member, in `checks.ts`: flexural buckling (AISC E3), flexural-torsional buckling of tees and double angles (E4), lateral torsional buckling of I sections and channels (F2), of tees and double angles (F9) and of one angle (F10), weak axis bending (F6), local buckling of the wall of a round tube (F8, E7), the two together with the axial force (H1-1), and shear (chapter G). The buckling length is the member length, because step 1 already has the sway. The ratio must stay under 0.6. There are no AISC phi factors, the 0.6 is the margin.
 
-Not checked: shear, local buckling of thin plates (E7, F3) except for round tubes, torsional buckling (E4), and notional loads (the small side loads for the frame imperfections). The channels, double angles and tees take their full plastic moment: no lateral torsional buckling for them (F2 for a channel, F9 for a tee), and E4 is the check that matters most for a double angle or a tee. Cb is 1, which is on the safe side for cantilevers. The same AISC formulas size the EU sections too. A few trees with a cantilever truss stay under `alphaCr` 3 (eu tree 19 of the 240 structures of the tests, and also eu tree 7 with `shapeP` 0): the bottom chord sways out of the truss plane, and nothing braces it sideways. The log says it.
+Not checked: local buckling of thin plates (E7, F3, F9, F10) except for round tubes, E4 for a channel, one angle in compression (E5), the connectors of a double angle (E6), and notional loads (the small side loads for the frame imperfections). Cb is 1, which is on the safe side for cantilevers. The same AISC formulas size the EU sections too. A few trees with a cantilever truss stay under `alphaCr` 3 (eu tree 19 of the 240 structures of the tests, and also eu tree 7 with `shapeP` 0): the bottom chord sways out of the truss plane, and nothing braces it sideways. The log says it.
 
 A round tube has no lateral torsional buckling, but its wall can buckle locally when it is thin. The checks use D / t (outside diameter over wall) with AISC F8 for bending and E7 for compression:
 
@@ -65,6 +65,34 @@ A round tube has no lateral torsional buckling, but its wall can buckle locally 
 
 S is the elastic modulus, Z the plastic one. In bending, Mn is never above Fy Z. The same Mn is used about both axes. A refused tube gets the ratio Infinity, and `size()` never picks it. At Fy 345 (AISC) the limits are 42.6, 67, 189 and 274. The thinnest tube of the tables has D / t 62 (`HSS10.750X0.188`), so only the noncompact case happens with the real tables, and it changes no seed: the round tubes are braces, pinned at both ends, so they only take the small moment of their own weight. `tubes.test.ts` checks each case with numbers worked by hand.
 
+Shear (AISC chapter G) is checked along both axes of a member: along the depth (it goes with the strong axis moment) and across. The solver gives the shear at the two ends, and with a uniform load the largest one is at an end. The sway factor of step 1 multiplies it too, like the moments. There is no interaction with the moment (AISC has none for rolled shapes).
+
+| kind | along the depth | across |
+|---|---|---|
+| I, channel | web, G2.1: 0.6 Fy d tw Cv1 (kv 5.34) | flanges, G6: 0.6 Fy bf tf Cv2 for each (kv 1.2) |
+| tee | stem, G3: 0.6 Fy d tw Cv2 (kv 1.2) | flange, G6 |
+| angle, double angle | legs along the shear, G3 (kv 1.2) | the other legs, G3 |
+| square or rectangular tube | G4: 0.6 Fy 2 h t Cv2 (kv 5), h = d - 3t | the same with bf |
+| round tube | G5: Fcr A / 2, the length of the member as Lv (safe side) | the same |
+| solid rod | 0.6 Fy on 3/4 of the area (not in chapter G: the peak stress of a round bar is 4/3 of the mean) | the same |
+
+Cv1 is 1 when h / tw stays under 1.10 sqrt(kv E / Fy) (62.7 at Fy 345, 61.8 at Fy 355). It is the case for all the I sections and channels of the tables except IPE AA 450 and IPE AA 500, so in practice the web check is 0.6 Fy d tw. Shear governs on short arms with a heavy load: aisc seed 63 gets a W16X26 (same weight, deeper web) in place of a W10X26 on its arm6. `shear.test.ts` checks each row with numbers worked by hand.
+
+The open shapes (channel, tee, double angle, one angle) get their own checks. The tables have no warping constant Cw, no shear center and no elastic modulus for them, so `checks.ts` computes them from the plates of the section (`rects()` in `sections.ts`). J is the thin wall J (the sum of b t³ / 3).
+
+| shape | bending about the depth | across | compression |
+|---|---|---|---|
+| channel | F2, like an I, with Cw = (tf b'³ h0² / 12)(3 b' tf + 2 h0 tw) / (6 b' tf + h0 tw) (b' = bf - tw / 2, h0 = d - tf) and c = (h0 / 2) sqrt(Iy / Cw) | Fy Z, at most 1.6 Fy S (F6) | E3 |
+| tee | F9: the lower of My = Fy S and Mcr = (1.95 E / Lb) sqrt(Iy J)(B + sqrt(1 + B²)), B = -2.3 (d / Lb) sqrt(Iy / J) | the same as a channel | E4 |
+| double angle | F9: F10-2 and F10-3 with My and that Mcr, at most 1.5 My | the same as a channel | E4 |
+| one angle | F10, bent about a leg with no restraint, toe in compression: Mcr = (0.58 E b⁴ t / Lb²)(sqrt(1 + 0.88 (Lb t / b²)²) - 1), 0.8 My for the LTB part, at most 1.5 My | the same (equal legs) | E3 |
+
+The solver gives the size of the moment, not its sign. A chord that runs over several panels has both signs, so a tee or a double angle always has its stem (or its legs along the depth) in compression. This is the lower case, on the safe side, like Cb = 1. S is the smaller elastic modulus, to the tip of the stem.
+
+E4 for a tee and a double angle: the shear center is where the flange (or the outstanding legs) meets the stem, Cw = 0 (the E4 user note), Fez = G J / (A r0²), r0² = y0² + (Ix + Iy) / A, H = 1 - y0² / r0². Fe is the lower of Fex (flexural buckling about x) and the flexural-torsional value of E4-3, then Fcr comes from E3 as for the other shapes.
+
+These checks make the tee chords heavier (often 2 or 3 sizes): with the stem in compression, a long and light tee buckles sideways well before Fy S. A chord on a column web must still fit between the flanges of the deepest column, like the rafter of a gable. When no tee that fits is strong enough, the chord takes the heaviest one that fits and ends over the limit. The light and wide channels (MC10X6.5) give way to deeper or thicker ones. `open-shapes.test.ts` checks each formula with numbers worked by hand.
+
 Then come the small details, from a random draw of their own, so a seed keeps the same structure:
 
 - Column splice (on about a third of the structures): above a free level between 30 and 70 % of the height, the columns change to a lighter section, sized from the forces up there. A bearing splice is a cap plate and a base plate bolted at the corners. A flange splice has bolted plates on both flanges and on the web, with fill plates when the two sections don't have the same depth. If the plates would go through a brace or its gusset (a steep brace, or a wide double angle), the splice moves to the nearest free height, or is left out.
@@ -76,7 +104,7 @@ Then come the small details, from a random draw of their own, so a seed keeps th
 Trusses and tension rods also come from a draw of their own, after the fix loop:
 
 - Truss: a beam gets a bottom chord 700 to 900 mm under it, with tube diagonals in a zigzag between the two. In a bay, both ends of the zigzag are on the bottom chord. On an arm, it ends at the tip on the top chord. The truss takes the place of the braces of that beam, but not of a short brace. A box beam gets a truss less often than a portal beam, because a box has 4 to 8 bay beams. A tree arm gets a lower truss, 450 to 650 mm, so it fits above the arm below it on the same face. It ends at the tip, on the top chord. Its diagonals have a small gusset with one row of 2 bolts. On seeds 1 to 40, a truss comes on 4 or 5 trees (it depends on the family), 11 portals and 12 boxes.
-- Tension rod: a round bar from the column down to the top of an arm that sticks out, with a clevis (a fork and a pin) at each end. Only on an arm with no braces, and only when the column has room above it, under the next arm and its braces.
+- Tension rod: a round bar from the column down to the top of an arm that sticks out, with a clevis (a fork and a pin) at each end. Only on an arm with no braces, and only when the column has room above it, under the next arm and its braces. A flat rod puts its clevis tab far back on the arm: when the tab goes through the end connection (the top flange plate of `flange_plates`), the rod moves out along the arm, 50 mm at a time, or it is left out when there is no room (`clearRods()` in `generate.ts`).
 
 The solver checks the structure again with them and sizes the chords, the diagonals and the rods. If the structure does not stand up anymore, they are left out.
 
@@ -207,7 +235,7 @@ Parts must not go through each other. A secondary beam is coped (its flanges cut
 
 It can also draw a real test of RESSLab Hub instead of a seed: a specimen. For now it draws four kinds of test, each one in its test rig:
 
-- A beam-to-column subassembly (the test of one connection): one column with one or two beams. That's the `connection` table of the hub, 99 of its 100 tests.
+- A beam-to-column subassembly (the test of one connection): one column with one or two beams. That's the `connection` table of the hub, 99 of its 100 tests. The last one is a frame test, see "The frame test" below.
 - A brace test: one brace, alone or in a test frame. That's the `braces` table, all its 294 tests. See "Brace tests" below.
 - A column test: one column, pushed sideways at its top under an axial load. That's the `columns` table, all its 153 tests. See "Column tests" below.
 - An HSS column test: one square or rectangular tube, standing like a column test, or lying on two rollers and pushed at mid span. That's the `hss_columns` table, all its 284 tests. See "HSS column tests" below.
@@ -267,7 +295,7 @@ From a hub record:
 | BEEP | end plate | |
 | KBB | welded, with a haunch (`haunch.ts`) | the data says haunch, not Kaiser bracket: `d_h` is only on these rows, and the comments say "hanch". It has no outline, so we take `d_h` deep at the column face, `s_h` long, web and flange thick and wide as the beam, triangular unless the comments say straight (PN500C-SH) |
 
-What we draw differently from the real test goes into the log as a note: the connection, the RBS cut, the haunch, what we take for the slab. A test that is not a subassembly ("Exterior - Frame"), or a missing number, throws an error that names the field.
+What we draw differently from the real test goes into the log as a note: the connection, the RBS cut, the haunch, what we take for the slab. A missing number throws an error that names the field.
 
 ```sh
 node cli.ts --specimen specimens/Chi_and_Uang_2002_DC2.json --view iso   # writes steel-Chi_and_Uang_2002_DC2-iso.svg
@@ -276,9 +304,24 @@ node cli.ts --specimen connections/Chi_and_Uang_2002_DC2 --view iso      # the s
 
 `--specimen` takes a JSON file or `<table>/<id>`. With `<table>/<id>`, it reads the row from resslab-hub-data next to the repo, as the dev server does. Without the hub data, it reads the examples of `specimens/`. `--specimen` takes the same drawing options as a seed (`--view`, `--detail`, `--animate`, `--frames`, `--painter`, `--size`). The family comes from `--family`, else from the file, else aisc. `--seed`, `--form`, `--arms` and `--height` don't apply. `specimen.test.ts` covers the two hub files, the format and the errors. `doubler.test.ts` covers the doubler plates: the hub fields, where they sit next to the continuity plates, and the panel zone.
 
+### The frame test
+
+One `connections` row is not a subassembly: `Del_Caprio_et_al_2014_RBS-A` ("Exterior - Frame"). The joint of the row is one joint of a small frame, 1½ bay by 1½ storey, half scale. The row gives this joint only. The rest comes from the report (Del Carpio Ramos, Mosqueda and Lignos 2014, MCEER-14-0003), in `FRAME_TESTS` of `frame.ts`. Each value from the report has a note in the log.
+
+What we draw:
+
+- Two W12x30 columns, 3200 mm high, each one fixed on a base plate, on an interface plate on the floor. A cap plate on each column top.
+- The W14x26 girder over the bay (`l_b`, 4572 mm), then past the second column as a 2375 mm cantilever. The tip stands on a pinned link. The RBS cut of the row is at each end that is on a column: both ends of the bay beam (`rbs2` in `steel.ts`), and the cantilever near the second column.
+- A doubler plate on the second column only (the report says so, the row has `n_dp` 0).
+- W8x10 joists across the girder and into the column webs, under the slab. They are drawn, but they are not in the solver model.
+- The slab on both beams, with an opening at each column (`holes` in `slab.ts`).
+- The rig: the strong wall, a horizontal actuator on the HSS loading beam of the first column, a second one on the link member that joins the two column tops, two vertical actuators from a reaction beam, and the out-of-plane frame (two braced posts across each column, with a roller on each post).
+
+The solver holds the column tops sideways (the top actuator and the out-of-plane frame) and the cantilever tip up (`holdFrame()`). The test has no response file, so the playground says "No measured response for this test.", and `--step` and `--peak` stop with an error. `deform-connection.ts` throws for a frame, so a response file added later gives a clear error. A second frame test needs its own entry in `FRAME_TESTS`: without it, the reader throws `specimen_type "Exterior - Frame" is not supported yet`. `frame.test.ts` has a copy of the row, so CI checks it.
+
 ### The concrete slab
 
-14 of the 100 `connections` rows have `slab` YES, and we draw 13 of them. `slab.ts` draws the concrete and the deck ribs on the top flange. The reader takes `w_l`, `w_r`, `h_co`, `h_p`, `b_o` and `deck_ribs_orientation` (`perpenticular` in the data, `perpendicular` also works). If a size is missing, the steel is drawn alone and the log says so.
+14 of the 100 `connections` rows have `slab` YES, and we draw all of them. `slab.ts` draws the concrete and the deck ribs on the top flange. The reader takes `w_l`, `w_r`, `h_co`, `h_p`, `b_o` and `deck_ribs_orientation` (`perpenticular` in the data, `perpendicular` also works). If a size is missing, the steel is drawn alone and the log says so.
 
 The data doesn't give all of it, so we take these:
 
@@ -313,8 +356,7 @@ node hub-count.ts ../../resslab-hub-data  # or give the folder
 It prints one line for each table, then the errors grouped by field (November 2026):
 
 ```text
-connections: 99 / 100 drawn, 0 mechanism, 0 clash, 0 floating
-  specimen_type "Exterior - Frame" is not supported yet: 1 (Del_Caprio_et_al_2014_RBS-A)
+connections: 100 / 100 drawn, 0 mechanism, 0 clash, 0 floating
 braces: 294 / 294 drawn, 0 mechanism, 0 clash, 0 floating
 columns: 153 / 153 drawn, 0 mechanism, 0 clash, 0 floating
 hss_columns: 284 / 284 drawn, 0 mechanism, 0 clash, 0 floating
@@ -544,7 +586,7 @@ The build animation (`--animate`) shows the parts put in place, like on a site. 
 
 To find a structure that works as a logo, `score.ts` gives each one a score from 0 to 1. It looks at the big shapes from the chosen view: do they fill a square, does the weight sit on the columns, how many members, how many members cross each other. `pick.ts` scans many seeds and lists the best ones (450 structures take about 2 s). In the playground, "Find good seeds" does the same for 200 seeds and shows the best 8.
 
-To find a structure that works as a teaching sculpture, `score.ts` also gives its variety: how many different kinds of detail it shows, from a fixed list of 28 (`VARIETY_KINDS`). One kind is one detail a student can point at and name: a beam end kind, a splice, a truss, a tension rod, a post, foot gussets, a member shape, a kind of X brace. On the default seeds it goes from 4 to 16, with a mean of about 7.6. A box shows the most. Some kinds are rare: a round tube only gets its end caps from 114 mm, so only about 1 seed in 300 has them.
+To find a structure that works as a teaching sculpture, `score.ts` also gives its variety: how many different kinds of detail it shows, from a fixed list of 28 (`VARIETY_KINDS`). One kind is one detail a student can point at and name: a beam end kind, a splice, a truss, a tension rod, a post, foot gussets, a member shape, a kind of X brace. On the default seeds it goes from 4 to 16, with a mean of about 7.6. A box shows the most. Some kinds are rare: a round tube only gets its end caps from 82 mm, so only about 1 seed in 65 has them.
 
 The logo score and the variety have almost nothing to do with each other, so a seed can be good at one and bad at the other. The mix takes half of each, and counts 12 kinds or more as a full variety. `pick.ts --by logo|variety|mix` says what to sort by (logo if you don't give it). "Find good seeds" has the same choice in "Sort by", and a new sort uses the last scan again. The Analysis section of the playground shows the variety of the current seed, with its kinds.
 
@@ -570,7 +612,7 @@ Files:
 - `sections.ts`: section properties (I, tube, rod, round tube, channel, double angle, tee) from the CSV tables. The rods and the tees are made in code. The round tubes (CHS and pipes) are in `Catalog.pipes`, not in `all`, so a specimen finds its section by name as before.
 - `sections/`, `tables.ts`: the CSV tables (see `sections/README.md`), and how Node reads them. `tables.ts` also reads a hub test and its response files for `cli.ts` and `shot.ts`.
 - `solver.ts`: 3D frame solver (6 DOF per node, pinned ends, finds mechanisms), and the buckling analysis (`alphaCr`).
-- `checks.ts`: the member checks (AISC 360-22 E3, E7 and F8 for round tubes, F2, F6, H1-1). `tubes.test.ts` checks the round tubes.
+- `checks.ts`: the member checks (AISC 360-22 E3, E4, E7 and F8 for round tubes, F2, F6, F9, F10, H1-1, G for shear). `tubes.test.ts` checks the round tubes, `shear.test.ts` the shear, `open-shapes.test.ts` the channels, tees and angles.
 - `generate.ts`: topology, the fix loop, trusses and rods, posts and beam splices, and the sizing. Also the specimen path (`buildSpecimen`), and it sends a brace test, a column test (also HSS) or a link test to `bench.ts`.
 - `skew.ts`: the end of a skewed arm: the cut end, its clash boxes, the skewed end plate.
 - `slab.ts`: the concrete slab of a beam-to-column test. See "The concrete slab". `slab.test.ts` checks it.

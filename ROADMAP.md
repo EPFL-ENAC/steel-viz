@@ -13,7 +13,7 @@ What we plan to do next. A checked item is done.
 - [ ] Move the round tube tables to RESSLab Hub too, when the hub has one.
 - [ ] Round tube tree columns. Not easy: every joint on a column (beam ends, continuity plates, splices, base plate) needs a flat face. A round column needs new joints for each one (through plates, ring stiffeners).
 - [ ] Round tube truss diagonals.
-- [ ] End cap plates on smaller tubes. Today a cap needs D >= 114 mm (`CAP_MIN_D`), so it is rare. A narrower tab (one row of bolts) would let it go lower.
+- [x] End cap plates on smaller tubes: from 82 mm (`CAP_MIN_D`), with a narrow tab (one line of 2 bolts) under 114 mm.
 - [x] Bolted beam splice and posts.
 - [x] More kinds of beam end connections: clip angles, seated, stiffened seat, tee, stiffened end plate (`CONNS` in `steel.ts`, `connKindsP`, `--conn-kinds`).
 - [x] Skewed arms on trees: 30 or 45 degrees off a column flange, with a skewed end plate or a weld (`skewP`, `--skew`, `skew.ts`).
@@ -23,7 +23,7 @@ What we plan to do next. A checked item is done.
 - [x] Trusses on trees. Today a tree never gets one: its arms are too short, too low, or have an arm below them on the same face. Allow a lower truss there.
 - [x] Fewer trusses on boxes. Boxes get one on 32 of 40 seeds. Try a lower `TRUSS_P.bay` in `generate.ts`.
 - [ ] Trusses on portal arms. They never get one either. The low truss of trees would fit on a few, but it changes portal 143, #2 of the top 12.
-- [ ] A rod clevis goes through an arm connection on aisc tree 140 (today's code, outside the seeds the tests run).
+- [x] A rod clevis goes through an arm connection on aisc tree 140 (today's code, outside the seeds the tests run). The clevis tab went through the top flange plate of `flange_plates`. `clearRods()` moves the rod out along its arm, or drops it, before and after the sizing. 3 trees had it in seeds 0 to 600 (aisc 140, eu 140, eu 469), `rod.test.ts` has them. `cli.ts` prints the clashes now.
 - [x] Gable portal: a one storey portal with a pitched roof, haunches at the eaves and a bolted ridge splice (`gable.ts`, `gableP`, `--gable`).
 - [x] Gable on a two storey portal: on the top bay beam only, the floor beam stays flat. Mostly the condition in `addGable()`.
 - [ ] Gable on a box: the two bays of one side get the gable, with a ridge beam between the two ridges (a new member type).
@@ -34,9 +34,9 @@ What we plan to do next. A checked item is done.
 
 - [x] Buckling: `alphaCr` of the whole structure, and member checks with buckling (AISC 360-22 E3, F2, H1-1).
 - [ ] Notional loads (small side loads for the frame imperfections, EC3 5.3).
-- [ ] A shear check.
+- [x] A shear check (AISC 360-22 chapter G, along both axes, every kind of section).
 - [x] D / t of a round tube (local buckling): F8 in bending, E7 in compression, a tube past 0.45 E / Fy is refused.
-- [ ] Checks for the channels, double angles and tees: lateral torsional buckling (F2 for a channel, F9 for a tee) and flexural-torsional buckling (E4). Today they take their full plastic moment. A tee chord has its stem up: F9 must take the stem in compression under a sagging moment, in tension under a hogging one.
+- [x] Checks for the channels, double angles and tees: lateral torsional buckling (F2 for a channel, F9 for a tee and a double angle, F10 for one angle) and flexural-torsional buckling (E4). Cw and the shear center come from the dimensions.
 - [ ] EC3 member checks for the `eu` family. Today the AISC formulas size both.
 - [ ] A lateral brace for the bottom chord of a cantilever truss. Without it, eu tree 19 stays under `alphaCr` 3 (and eu tree 7 with `--shapes 0`).
 
@@ -58,16 +58,16 @@ Today the hub only takes an exported SVG for its logo (RESSLab-Team/resslab-hub#
 The specimen input draws five tables of the hub, each test in its test rig. `node hub-count.ts` gives the counts below (November 2026). No drawn test has a clash or a floating part. The details left out are in the log, as notes. Next:
 
 - [x] The test rig (`rig.ts`): pins, rollers, floor blocks, actuators and frame members, as parts of kind `rig`, drawn lighter. The column no longer stands on a base plate, like in a building.
-- [x] Beam-to-column tests (`connections`), beam loaded or column loaded: 99 of 100.
+- [x] Beam-to-column tests (`connections`), beam loaded or column loaded: 99 of 100. The last one is the frame test below.
 - [x] RBS: the cut in the beam flanges. Where it starts and how long it is come from the AISC 358 rule, the data doesn't give them.
 - [x] WUF-B: the bolted shear tab on the beam web, next to the welded flanges. Done: `welded_tab`, the tab has the size of the shear tab (`t_pl` is NA).
 - [x] WFP: welded flange plates, thick as `t_pl`, no bolts. Done: `welded_plates`.
 - [x] KBB: the 7 rows are drawn as welded haunches, not as Kaiser brackets, because that's what the data says: only these rows have `d_h` ("shift of the beam effective depth due to presence of hanches"), and the comments say "hanch". Done: `welded_haunch`. The data has no outline, so we take it (`haunch.ts`), and the note in the rail says so. The hinge is at `s_h`.
 - [x] Doubler plates on the column web (`n_dp`).
-- [x] The concrete slab (`slab`): the concrete and the deck ribs, in light lines, on the 13 tests we draw. The data has no slab length and no rib spacing, so we take them. The shear studs are not drawn, they are inside the concrete.
+- [x] The concrete slab (`slab`): the concrete and the deck ribs, in light lines, on the 14 tests with a slab. The data has no slab length and no rib spacing, so we take them. The shear studs are not drawn, they are inside the concrete.
 - [ ] The slab of the EBF tests (TF2c, TF3c, TF4c, 20 tests). Their rows give no size for it, so they keep their note.
 - [x] Continuity plates as thick as in the test (`t_cp`). When `t_cp` is NA, they take the thickness of the column flange, with a note.
-- [ ] "Exterior - Frame" (one test in the hub, Del_Caprio_et_al_2014_RBS-A).
+- [x] "Exterior - Frame" (one test in the hub, Del_Caprio_et_al_2014_RBS-A). Done: the whole frame and its rig, from the report (`frame.ts`). No deformed shape: the test has no response file.
 - [x] Brace tests (`braces`), SB, SBF and DBF: 294 of 294 (the 2 flat bars too).
 - [x] Double Channel braces (5 tests): `2C` in `sections.ts`, `doubleChannel()` in `hub.ts`.
 - [x] The single `Angle` braces (8 tests): the angle lies on one face of its gusset (`sideShift()` in `bench.ts`).

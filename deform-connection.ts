@@ -157,6 +157,7 @@ export function strutMove(s: RigStrut, on: Move): Move {
 
 function shape(r: Result, spec: Specimen, rec: HubRecord, at: Samples, scale: number): DeformState {
   if (spec.test !== undefined && spec.test !== 'connection') throw new Error(`${spec.id}: not a beam-to-column test`);
+  if ('frame' in spec && spec.frame) throw new Error(`${spec.id}: no deformed shape for a frame test yet`);
   const rig = r.rig;
   if (!rig || !r.st.arms.length) return { moves: {}, zones: [], scale, notes: ['No beam: no deformed shape.'] };
   const g = geometry(r);

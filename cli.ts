@@ -26,6 +26,7 @@ import { gzipSync } from 'node:zlib';
 import type { DeformState } from './deform.ts';
 import { DEFORMS, shapeAt, shapeSvg } from './deforms.ts';
 import { DEFAULTS, floating, generate, type Detail, type Params, type Result } from './generate.ts';
+import { clashes } from './clash.ts';
 import { renderHLR } from './hlr.ts';
 import { hubTable, toSpecimen, type HubRecord } from './hub.ts';
 import { loadCatalog, type Family } from './sections.ts';
@@ -149,6 +150,7 @@ export function main(argv: string[]) {
 
   const kb = (s: string) => (Buffer.byteLength(s) / 1024).toFixed(1);
   const lost = floating(r.parts);
+  const hits = clashes(r.parts);
   const beams = r.st.arms.map((a) => `${a.sec.id} ${a.gable ? 'gable ' : ''}${a.conn}${a.braces.map((b) => ' + brace ' + b.sec.id).join('')}`).join('; ');
   console.log(
     [
@@ -161,13 +163,14 @@ export function main(argv: string[]) {
         : r.st.columnTest
         ? `  structure: specimen, column test ${r.st.columnTest.ends}, ${r.st.col.id} ${r.st.columnTest.L} mm, pushed at ${r.st.columnTest.angle}° from the web`
         : spec
-        ? `  structure: specimen, column ${r.st.col.id} ${r.st.H} mm high, ${r.st.arms.length} beam${r.st.arms.length === 1 ? '' : 's'} (${beams})${r.st.continuity === false ? ', no continuity plates' : ''}, ${r.st.load} loaded`
+        ? `  structure: specimen, ${r.st.frame ? `frame, ${r.st.cols.length} columns` : 'column'} ${r.st.col.id} ${r.st.H} mm high, ${r.st.arms.length} beam${r.st.arms.length === 1 ? '' : 's'} (${beams})${r.st.continuity === false ? ', no continuity plates' : ''}${r.st.frame ? '' : `, ${r.st.load} loaded`}`
         : `  structure: ${r.st.form}, ${r.st.cols.length} × column ${r.st.col.id}, ${r.st.arms.length} arms (${beams})` +
           (r.st.secs.length ? `, ${r.st.secs.length} secondary (${r.st.secs.map((s) => `${s.sec.id} ${s.conn}`).join('; ')})` : ''),
       `  solver: ${r.ok ? 'stable' : 'MECHANISM'}, ${r.nodes} nodes, ${r.solves} solves, max ratio ${r.ratio.toFixed(2)}, alphaCr ${r.alpha === Infinity ? '-' : r.alpha.toFixed(1)}`,
       ...r.log.map((l) => '    ' + l),
       `  drawing: ${r.parts.length} parts, ${svg.faces} faces, ${svg.dots} bolts, ${kb(svg.svg)} kB, gzip ${(gzipSync(svg.svg).length / 1024).toFixed(1)} kB`,
       `  build order: ${lost.length ? 'FLOATING ' + lost.join(', ') : 'ok'} (${Math.max(...r.parts.map((p) => p.step)) + 1} steps)`,
+      `  clash: ${hits.length ? 'CLASH ' + hits.map(([a, b]) => `${a} / ${b}`).join(', ') : 'none'}`,
       `  ms: tables ${(t1 - t0).toFixed(1)}, topology ${r.ms.topology.toFixed(1)}, solve+size ${r.ms.solve.toFixed(1)}, geometry ${r.ms.geometry.toFixed(1)}, render ${(t3 - t2).toFixed(1)}, total generate+render ${(t3 - t1).toFixed(1)}`,
     ].join('\n'),
   );

@@ -15,7 +15,7 @@ import { readTables } from './tables.ts';
 const near = (a: number, b: number, tol = 0.001) =>
   assert.ok(Math.abs(a - b) <= tol * Math.abs(b), `${a} is not within ${tol * 100}% of ${b}`);
 const fy = 345;
-const none = { N: 0, Nc: 0, My: 0, Mz: 0 };
+const none = { N: 0, Nc: 0, My: 0, Mz: 0, Vy: 0, Vz: 0 };
 
 // D 200, t 10: D / t 20, compact. Z = (200³ - 180³) / 6 = 361 333 mm³,
 // Mn = Fy Z = 345 x 361 333 = 124.66 kN·m. A = 5969.0 mm², a short member
