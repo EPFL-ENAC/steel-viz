@@ -116,10 +116,8 @@ type Geo = { tri: number[]; seg: number[]; rad: number[]; ta: number[]; sa: numb
 // the roles: a head moves in, then the nut (after a head, or alone on an anchor
 // rod). The shank and the bolt end past the nut move with the head. The shank
 // hides when the bolt is done, a stub (a bolt with no grip: we don't know
-// where its end is) when the head is in. 0: not a bolt. A mark has the role of
-// its piece plus MARK.
+// where its end is) when the head is in. 0: not a bolt.
 const ROLE = { head: 1, nut: 2, alone: 3, end: 4, shank: 5, stub: 6 };
-const MARK = 8;
 const PITCH = 6; // mm: the thread, much coarser than a real one so it shows
 const NECK = 5; // mm: no thread just under the head
 const STUB = 30; // mm: the shank of a bolt with no grip
@@ -150,24 +148,11 @@ function prism(b: V, nn: V, h: number, r: number, k: number, { tri, seg, rad, ta
   for (let i = 0; i < 3 * k; i++) sa.push(...at);
 }
 // i: the index of the bolt in its part
-// A line on the outer face of a head or a nut, from r0 to a corner. It turns
-// with it and shows only while it turns, so the turn reads even on a hex (as
-// the match mark a fitter draws on a nut, to see how far it turned).
-function mark(b: V, nn: V, h: number, r0: number, { seg, rad, sa }: Geo, bolt: number, role: number) {
-  const top = add(b, mul(nn, h));
-  const [a1] = frame(nn);
-  seg.push(...add(top, mul(a1, r0)), ...add(top, mul(a1, R)));
-  rad.push(0, 0, 0);
-  sa.push(...b, bolt, ...nn, role + MARK);
-}
 function head(b: V, nn: V, g: Geo, i: number) {
   prism(b, nn, HEAD, R, 6, g, i, ROLE.head);
-  mark(b, nn, HEAD, 0, g, i, ROLE.head);
 }
 function nut(b: V, nn: V, g: Geo, i: number, alone = false) {
   prism(b, nn, NUT, R, 6, g, i, alone ? ROLE.alone : ROLE.nut);
-  // from the bolt end past the nut
-  mark(b, nn, NUT, SHANK, g, i, alone ? ROLE.alone : ROLE.nut);
   // the end of an anchor rod is there before its nut. The end of a bolt comes
   // with its head, so it moves out along -nn
   prism(add(b, mul(nn, NUT)), nn, TIP, SHANK, BAR, g, i, alone ? 0 : ROLE.end, mul(nn, -1));
@@ -241,7 +226,7 @@ vec3 move(vec3 p) {
 // bolts of this part started, the ms between two bolts, the ms of one (REST:
 // all of them are in). Bolt i starts at i times the gap. Its head moves from 0
 // to BOLT_IN of its time, its nut from BOLT_IN to 1 (a nut alone, from 0 to 1).
-// Before that it is hidden (sHide), and a mark is hidden after it too. A piece
+// Before that it is hidden (sHide). A piece
 // first comes from TRAVEL to SEAT with no turn (k^3 of its way left), up to
 // SEAT_AT of its time. Then it turns, and moves in with the turn, like on a
 // thread: what is left of both is (1 - u)^SCREW_EXP. The pieces that are not a
@@ -259,15 +244,13 @@ void screwAt() {
   sHide = false;
   float role = bn.w;
   if (role < 0.5) return;
-  bool mark = role > ${MARK}.5;
-  if (mark) role -= ${MARK}.0;
   float s = (bolt.x - bb.w * bolt.y) / bolt.z;
   float a = ${BOLT_IN.toFixed(3)};
   // the head, the bolt end, the shank and the stub move together
   bool head = role < 1.5 || role > 3.5;
   vec2 span = head ? vec2(0.0, a) : role < 2.5 ? vec2(a, 1.0) : vec2(0.0, 1.0);
-  // when it hides: a mark when its piece stops, the shank when the bolt is done
-  float gone = mark ? span.y : role > 5.5 ? a : role > 4.5 ? 1.0 : 1e30;
+  // when it hides: the shank when the bolt is done, the stub when the head is in
+  float gone = role > 5.5 ? a : role > 4.5 ? 1.0 : 1e30;
   if (s < span.x || s >= gone) {
     sHide = true;
     return;
