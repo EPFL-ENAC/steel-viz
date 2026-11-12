@@ -848,7 +848,11 @@ export type Fit = 'flange' | 'web' | 'beam';
 // the solid of one connection and its bolt dots. `reach`: how far the plates
 // go along the member, in mm from its end. `after`: plates that go on after
 // the member and stand on it (a haunch): they get their own part, after it.
-export type Hardware = { faces: Face[]; dots: Dot[]; reach: number[]; boxes: Box[]; after?: { faces: Face[]; boxes: Box[] } };
+// `welded`: faces welded on the member in the shop (the end cap of a round
+// tube). They go in the member part, so they arrive with it, and the 3D view
+// outlines them with the tube (they are smooth, like it). Their box stays in
+// `boxes`, with the connection, so the splice checks still see it.
+export type Hardware = { faces: Face[]; dots: Dot[]; reach: number[]; boxes: Box[]; after?: { faces: Face[]; boxes: Box[] }; welded?: Face[] };
 // One kind of connection.
 // - pinned: the solver takes the end as a pin (else it holds the moment).
 // - setback: the gap the member leaves at its end. For a gusset it leaves
@@ -1154,7 +1158,7 @@ function gusset(g: Geo, r: Resolved, hw: Hardware, small: boolean, cap = false) 
     // at least as wide as the tab. The tab: from the bolts to the cap.
     const D = Math.max(g.sec.d + 2 * CAP_LIP, 2 * half);
     const { u, v, w } = frame(at(-t, 0), at(0, 0));
-    hw.faces.push(...smooth(prism(at(-t, 0), at(0, 0), profRound(D, ROUND_SIDES), u, v, w, t)));
+    hw.welded = smooth(prism(at(-t, 0), at(0, 0), profRound(D, ROUND_SIDES), u, v, w, t));
     hw.boxes.push(boxOf(at(-t / 2, 0), side, inward, D, D, t));
     const tab = [at(-far - EDGE, -half), at(-far - EDGE, half), at(-near + EDGE, half), at(-near + EDGE, -half)];
     hw.faces.push(...slab(tab.map((q) => add(q, mul(nrm, -t / 2))), nrm, t));

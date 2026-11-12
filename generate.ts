@@ -1614,7 +1614,8 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
     const info: PartInfo = { type, sec: g.sec, L: Lg, conn: ends.map((e) => e.conn), member: who };
     const n = ends.find((e) => e.skew)?.skew;
     const [faces, boxes] = [memberFaces(g, seg, cuts), memberBoxes(g)];
-    out.push({ id: g.id, step: step++, supports, kind: 'member', from, faces: n ? cutEnd(faces, g, n) : faces, boxes: n ? cutBoxes(boxes, g, n) : boxes, dots: [], info, round: isRound(g.sec) });
+    const welded = plates ? hws.flatMap(({ hw }) => hw.welded ?? []) : [];
+    out.push({ id: g.id, step: step++, supports, kind: 'member', from, faces: [...(n ? cutEnd(faces, g, n) : faces), ...welded], boxes: n ? cutBoxes(boxes, g, n) : boxes, dots: [], info, round: isRound(g.sec) });
     for (const { e, hw } of hws)
       if (plates && hw.after) out.push({ id: `${g.id}-${e.at}-haunch`, step: step++, supports: [g.id, e.sId], kind: 'plate', from: g.w, faces: hw.after.faces, boxes: hw.after.boxes, dots: [], info: { type: 'Connection', of: g.id, conn: [e.conn] } });
     const dots = hws.flatMap(({ hw }) => hw.dots);
