@@ -28,7 +28,7 @@
     "dev": "vite",
     "build": "vite build",
     "build:lib": "rm -rf lib && tsc -p tsconfig.lib.json",
-    "test": "node --test",
+    "test": "node --test --test-concurrency=3",
     "type-check": "tsc"
   },
   "devDependencies": {

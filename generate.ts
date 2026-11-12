@@ -15,7 +15,7 @@ import { angleFits, memberRatio, tooThin } from './checks.ts';
 import type { Catalog, Family, Section } from './sections.ts';
 import { ANGLE_GAP, centroidDepth, rodSection } from './sections.ts';
 import {
-  box3, boxOf, flat, geo, grips, hardware, isRound, memberBoxes, memberFaces, profileSeam, resolve, splicePlates, stiffener, supportFace, BEARING_T, BEAM_CONN_KINDS, CAP_MIN_D, CONNS, EDGE, PINNED, SETBACK, SPLICE_HALF,
+  box3, boxOf, flat, geo, grips, hardware, isRound, memberBoxes, memberFaces, profileSeam, resolve, splicePlates, stiffener, supportFace, BEARING_T, BEAM_CONN_KINDS, CAP_MIN_D, CONNS, EDGE, LAP_REACH, PINNED, SETBACK, SPLICE_HALF,
   type BeamConn, type ConnType, type Fit, type Geo, type Haunch, type P2, type Part, type PartInfo, type Plate, type Rbs, type Seam,
 } from './steel.ts';
 import { overlap, own } from './clash.ts';
@@ -43,9 +43,10 @@ export type Params = {
   // kinds of before, so the same parts as before these kinds.
   connKindsP: number;
   // the chance that a member gets a channel, angle or tee section: the braces
-  // of an arm (double angles, or one angle on a small brace, see braceList),
-  // a secondary beam (a channel), a truss bottom chord (a tee). 0: only I,
-  // tubes and rods, as before these shapes.
+  // of an arm (double angles, or one angle on a small brace, see braceList)
+  // and the diagonals of a truss (double angles), a secondary beam (a
+  // channel), a truss bottom chord (a tee). 0: only I, tubes and rods, as
+  // before these shapes.
   shapeP: number;
   // the chance that a tree arm on a column flange leaves it at 30 or 45
   // degrees, from a stream of its own (skewArms). 0: every arm square, as
@@ -57,9 +58,10 @@ export type Params = {
   // the chance that a gable gets purlins on its rafters (gable.ts), from a
   // stream of its own. 0: bare rafters, as before purlins.
   purlinP: number;
-  // the chance that the braces of an arm are round tubes (when they don't get
-  // double angles from shapeP), from a stream of its own. 0: no round tube,
-  // so the same parts as before round tubes.
+  // the chance that the braces of an arm, or the diagonals of a truss, are
+  // round tubes (when they don't get double angles from shapeP), from a
+  // stream of its own. 0: no round tube, so the same parts as before round
+  // tubes.
   roundP: number;
   // the chance that a tree arm with no room for a full brace gets a short one
   // (shortBrace), from a stream of its own. 0: no short brace, so the same
@@ -116,23 +118,25 @@ const shaped = (p: Params, key: string) => p.shapeP > 0 && mulberry32(p.seed * 7
 // that gives only the I and tube tables)
 const orOld = (xs: Section[], old: Section[]) => (xs.length ? xs : old);
 
-// Round tube braces (see roundP). One keyed draw for each arm, from a stream
+// Round tube braces and truss diagonals (see roundP). One keyed draw for the
+// braces of each arm and one for the diagonals of each truss, from a stream
 // of its own, like shaped(). Its first value picks the round tube, the second
 // the end: a slotted tube on a knife plate (gusset), or an end cap plate with
 // a tab (gusset_cap). The tab and its weld must sit on the cap, so a smaller
 // tube than CAP_MIN_D (82 mm, see steel.ts) keeps the slot. Under CAP_WIDE_D
 // (114 mm) the tab is narrower, with one line of bolts.
 // A shaped brace (see shapeP) is a double angle, or on half of the arms one
-// angle (SINGLE_P): one keyed draw for each arm, from a stream of its own,
-// only for a shaped arm, so with shapeP 0 nothing changes. Its list has the
-// single angles first, then the double angles: size() takes the first one
-// that works, so a small brace gets one angle and a big one two.
+// angle (SINGLE_P, `oneAngle`, not for truss diagonals): one keyed draw for
+// each arm, from a stream of its own, only for a shaped arm, so with shapeP 0
+// nothing changes. Its list has the single angles first, then the double
+// angles: size() takes the first one that works, so a small brace gets one
+// angle and a big one two.
 const SINGLE_P = 0.5;
-// the section list of the braces of an arm, and whether they get end caps
-function braceList(p: Params, cat: Catalog, a: Arm): { list: Section[]; cap: boolean } {
-  const key = `${a.id}-braces`;
+// the section list of the braces of an arm (key `arm3-braces`) or of the
+// diagonals of a truss (`arm3-webs`), and whether they get end caps
+function braceList(p: Params, cat: Catalog, key: string, oneAngle = false): { list: Section[]; cap: boolean } {
   if (shaped(p, key)) {
-    const single = cat.braceAngles?.length && mulberry32(p.seed * 100663319 + fnv1a(`${a.id}-single`))() < SINGLE_P;
+    const single = oneAngle && cat.braceAngles?.length && mulberry32(p.seed * 100663319 + fnv1a(key.replace(/-braces$/, '-single')))() < SINGLE_P;
     return { list: single ? [...cat.braceAngles, ...cat.angles] : orOld(cat.angles, cat.tubes), cap: false };
   }
   if (p.roundP <= 0) return { list: cat.tubes, cap: false };
@@ -170,7 +174,10 @@ type Post = { a: number; h: number; sec: Section };
 // on the top chord, both measured along the arm. `low`: a low truss (see
 // LOW). `hMin`: the clear height the top chord must keep when it is sized.
 type Web = { b: number; t: number; sec: Section };
-type Truss = { D: number; end: number; chord: Section; conn: ConnType; conn2?: ConnType; webs: Web[]; low: boolean; hMin: number };
+// tubes: the diagonals were to be double angles or round tubes, but one of
+// them found no section that fits, so all of them are square tubes (for
+// good). cap: round tube diagonals get end cap plates (see braceList).
+type Truss = { D: number; end: number; chord: Section; conn: ConnType; conn2?: ConnType; webs: Web[]; low: boolean; hMin: number; tubes?: boolean; cap?: boolean };
 // A tension rod: from the column at height zr down to the top of the arm, `a` along it.
 type Rod = { a: number; zr: number; sec: Section };
 const chordId = (a: Arm) => `${a.id}-chord`;
@@ -459,6 +466,11 @@ const TRUSS_P = { bay: 0.35, box: 0.1, arm: 0.3 };
 // below on the same face. It takes the room under the arm, down to the floor
 // or to the arm below, and its diagonals use the small gusset.
 const LOW = { min: 450, max: 650, floor: 500, gap: 450, chord: 250, tube: 250 };
+// how far along a diagonal (or a brace) its end stops before the face it
+// lands on: hz and vz are its slope, along the face and across it. A double
+// angle has no knife plate, its gap is from the corner of the angles nearest
+// the face, half its depth to the side of the axis.
+const endGap = (conn: ConnType, sec: Section, hz: number, vz: number) => (SETBACK[conn] + (conn === 'gusset_lap' ? (sec.d / 2) * hz : 0)) / vz;
 // how far the face of the column is from its axis, for a beam on that bearing
 const colFace = (st: Structure, bearing: number) => (bearing % 180 === 0 ? st.col.d / 2 : st.col.tw / 2);
 // how far the end of an arm is from the column axis, along the arm. A
@@ -1267,6 +1279,8 @@ function stiffen(st: Structure, m: Model, stab: Stability, cat: Catalog, p: Para
       log.push(`alphaCr ${stab.alpha.toFixed(1)} below ${ALPHA_MIN}: ${who} ${cur.id} -> ${next.id}`);
       return true;
     }
+    // size() dropped it: the member changed kind (truss diagonals, angles to tubes)
+    if (!(who in minA)) continue;
     if (old === undefined) delete minA[who];
     else minA[who] = old;
   }
@@ -1308,6 +1322,12 @@ function size(st: Structure, m: Model, res: Forces[][], cat: Catalog, p: Params,
     maxRatio = Math.max(maxRatio, ratio(s));
     return s;
   };
+  // whether a section of the list works for this member
+  const works = (list: Section[], who: string, rule: (s: Section) => boolean) => {
+    const f = worst.get(who)!;
+    const L = m.len.get(who)!;
+    return list.some((s) => rule(s) && !tooThin(s, p.fy) && s.A >= (st.minA?.[who] ?? 0) && worstRatio(s, f, p.fy, L) < LIMIT);
+  };
   for (const a of st.arms) {
     // a top chord keeps the clear height of its truss
     // a gable rafter on a column web: its eave plate must fit between the
@@ -1322,10 +1342,33 @@ function size(st: Structure, m: Model, res: Forces[][], cat: Catalog, p: Params,
       // flanges (a long tee chord gets wide since F9 in checks.ts)
       const onWeb = faceOf(a) % 180 === 90;
       tr.chord = choose(chords, chordId(a), tr.chord, (s) => s.d >= 150 && s.d <= (tr.low ? LOW.chord : Math.max(a.sec.d, 360)) && (!onWeb || s.bf + 40 <= webRoom(cat)));
-      tr.webs.forEach((wb, k) => {
-        const L = Math.hypot(wb.t - wb.b, tr.D - a.sec.d);
-        wb.sec = choose(cat.tubes, webId(a, k), wb.sec, (s) => L / s.rmin < 200);
-      });
+      // all the diagonals of a truss get the same kind: one draw for the
+      // truss, as for the braces of an arm
+      const kind = braceList(p, cat, `${a.id}-webs`);
+      let webs = tr.tubes ? cat.tubes : kind.list;
+      tr.cap = kind.cap;
+      const h = tr.D - a.sec.d;
+      const rule = (wb: Web) => (s: Section) => {
+        const L = Math.hypot(wb.t - wb.b, h);
+        // room between the two ends, as for the tubes in trussFor()
+        const [hz, vz] = [Math.abs(wb.t - wb.b) / L, h / L];
+        const conn = braceConn({ sec: s, cap: tr.cap, short: tr.low });
+        if (L / s.rmin >= 200 || L - 2 * endGap(conn, s, hz, vz) < (tr.low ? LOW.tube : TUBE_MIN)) return false;
+        // the draw gave end caps: a round tube big enough to take one (the
+        // diagonals are short, the smallest tube would keep its slot)
+        if (tr.cap && !tr.low && s.kind === 'CHS' && s.d < CAP_MIN_D) return false;
+        // the plate of a double angle goes along it and is as wide as its
+        // legs: the two plates must not meet across the height of the truss
+        const plate = SETBACK[conn] + (s.d + 15) * hz + LAP_REACH * vz;
+        return conn !== 'gusset_lap' || 2 * plate + 25 <= h;
+      };
+      if (webs !== cat.tubes && !check && tr.webs.some((wb, k) => !works(webs, webId(a, k), rule(wb)))) {
+        tr.tubes = true;
+        webs = cat.tubes;
+        // the minimum areas alphaCr asked for were for the other kind
+        tr.webs.forEach((_, k) => delete st.minA?.[webId(a, k)]);
+      }
+      tr.webs.forEach((wb, k) => (wb.sec = choose(webs, webId(a, k), wb.sec, rule(wb))));
     }
     if (a.rod) a.rod.sec = choose(cat.rods, rodId(a), a.rod.sec);
     const post = a.post;
@@ -1336,7 +1379,7 @@ function size(st: Structure, m: Model, res: Forces[][], cat: Catalog, p: Params,
       post.sec = choose(cat.columns, postId(a), post.sec, (s) => (fits ? postFits(s, sec) : s.A <= post.sec.A));
     }
     // all the braces of an arm get the same kind: one draw for the arm
-    const braces = braceList(p, cat, a);
+    const braces = braceList(p, cat, `${a.id}-braces`, true);
     const room = angleRoom(st.arms, cat);
     a.braces.forEach((b, k) => {
       const L = Math.hypot(b.a, drop(a, b));
@@ -1386,18 +1429,18 @@ function braceGeo(st: Structure, a: Arm, b: Brace, k: number, S: Geo) {
   const C = add(add(start(st, a), mul(h, b.end ? a.L - b.a : b.a)), [0, 0, -a.sec.d]);
   const u = sub(C, B);
   const un = mul(u, 1 / Math.hypot(...u));
-  // a double angle has no knife plate: its gap is from the corner of the
-  // angles nearest the face, half its depth times the slope off the face
   const conn = braceConn(b);
   const [cos, sin] = [un[0] * hb[0] + un[1] * hb[1], un[2]];
   const lap = conn === 'gusset_lap' ? b.sec.d / 2 : 0;
+  // on the column the gap starts at its face (see endGap for the lap)
   const t0 = (supportFace(S, hb) + SETBACK[conn] + lap * sin) / cos;
-  const t1 = (SETBACK[conn] + lap * cos) / sin;
+  const t1 = endGap(conn, b.sec, cos, sin);
   return { g: geo(braceId(a, k), b.sec, add(B, mul(un, t0)), sub(C, mul(un, t1)), false), conn, hb };
 }
 // the end of a brace: a double angle, one angle or a flat bar laps a plate,
-// a rod has a clevis, a tube a knife plate (or an end cap plate, see braceList)
-export function braceConn(b: Brace): ConnType {
+// a rod has a clevis, a tube a knife plate (or an end cap plate, see braceList).
+// The diagonals of a truss take it too (short: a low truss).
+export function braceConn(b: Pick<Brace, 'sec' | 'cap' | 'short'>): ConnType {
   const s = b.sec;
   if (s.kind === '2L' || s.kind === 'L' || s.kind === 'FB') return 'gusset_lap';
   if (s.kind === 'ROD') return 'clevis';
@@ -1925,16 +1968,16 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
       const cg = geo(chordId(a), tr.chord, add(oc, mul(h, supportFace(Sc, h) + SETBACK[tr.conn])), c1, true, tr.chord.kind === 'T');
       armGeo.set(cg.id, cg);
       member(cg, cEnds, a.to === undefined ? h : [0, 0, 1], 'Truss bottom chord', chordId(a));
-      const web: ConnType = tr.low ? 'gusset_small' : 'gusset';
       // On a tee chord the diagonal lines meet the chord on its centroid, e
       // under the stem tip, so the chord takes no moment from them. The tube
       // still stops SETBACK above the stem tip. An I chord keeps its top line.
       const e = tr.chord.kind === 'T' ? tr.chord.d - centroidDepth(tr.chord) : 0;
       tr.webs.forEach((wb, k) => {
+        const web = braceConn({ sec: wb.sec, cap: tr.cap, short: tr.low });
         const B = add(oc, [h[0] * wb.b, h[1] * wb.b, -e]);
         const C = add(add(o, mul(h, wb.t)), [0, 0, -a.sec.d]);
         const un = norm(sub(C, B));
-        const t = SETBACK[web] / un[2];
+        const t = endGap(web, wb.sec, Math.hypot(un[0], un[1]), un[2]);
         const wg = geo(webId(a, k), wb.sec, add(B, mul(un, t + e / un[2])), sub(C, mul(un, t)), false);
         member(wg, [
           { S: cg, sId: cg.id, conn: web, at: 'from' },

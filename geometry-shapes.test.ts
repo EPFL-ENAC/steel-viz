@@ -2,7 +2,8 @@
 // Every member in its other shape, and none of them.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { floating, generate } from './generate.ts';
+import { DEFAULTS, floating, generate } from './generate.ts';
+import { memberRatio } from './checks.ts';
 import { clashes } from './clash.ts';
 import { cats, forms, shapes } from './geometry-check.ts';
 import { centroidDepth } from './sections.ts';
@@ -12,7 +13,8 @@ import type { V } from './vec.ts';
 // A tee bottom chord has its stem up, like on a real truss: at its lowest
 // level it is as wide as its flange, at its highest only as wide as its stem.
 // The plate of each diagonal stands on the stem tip, in the plane of the stem
-// (centred on it, t = 12 thick), with no bolts. The axis of the diagonal
+// (centred on it, t = 12 thick). A tube is welded on it, a double angle has
+// one plate between its two angles, bolted. The axis of the diagonal
 // meets the chord on its centroid. A chord runs along x or y (a skewed arm has
 // no truss), so its width is the smaller of the two spans.
 // Returns how many tee chords it looked at.
@@ -47,7 +49,10 @@ function teeStemUp(r: ReturnType<typeof generate>, at: string): number {
       assert.ok(Math.abs(Math.min(...pts(g).map((q) => q[2])) - z1) < 1, `${at} ${g.id}: not on the stem tip`);
       const off = pts(g).map((q) => q[ac] - mid);
       assert.ok(Math.abs(Math.min(...off) + 6) < 0.5 && Math.abs(Math.max(...off) - 6) < 0.5, `${at} ${g.id}: not in the plane of the stem`);
-      assert.equal(g.dots.length, 0, `${at} ${g.id}: bolts on the stem`);
+      // the bolts through the angles and the plate on the stem: 2 at each end
+      const dots = byId.get(`${a.id}-web${k + 1}-bolts`)?.dots ?? [];
+      const low = dots.filter((d) => d.p[2] < (z1 + zArm) / 2).length;
+      assert.equal(low, wb.sec.kind === '2L' ? 2 : 0, `${at} ${a.id}-web${k + 1}: ${low} bolts on the stem`);
       // the tube axis in the truss plane: through the mean of its corners,
       // along their main direction. From the centroid level to the bottom of
       // the arm it runs t - b along the chord.
@@ -78,8 +83,35 @@ test('shapeP 1 and shapeP 0', () => {
         assert.deepEqual(clashes(all.parts), [], at);
         assert.deepEqual(floating(all.parts), [], at);
         tees += teeStemUp(all, at);
-        assert.deepEqual(shapes(all.st).filter((k) => !/ (2L|L|C|T)$/.test(k)), [], at);
+        assert.deepEqual(shapes(all.st).filter((k) => !/ (2L|L|C|T|tubes)$/.test(k)), [], at);
         assert.deepEqual(shapes(generate({ seed, form, shapeP: 0 }, cat).st).filter((k) => / (2L|L|C|T)$/.test(k)), [], at);
       }
   assert.ok(tees >= 10, `only ${tees} tee chords`);
+});
+
+// The diagonals of a truss take their shape like the braces of an arm: one
+// draw for the whole truss, so they all have the same kind. A double angle
+// goes through the same checks as the others (E4 in memberRatio), and holds.
+test('double angle diagonals: one kind per truss, checked like the braces', () => {
+  let angles = 0;
+  for (const [name, cat] of Object.entries(cats))
+    for (const form of forms)
+      for (let seed = 1; seed <= 40; seed++) {
+        const r = generate({ seed, form }, cat);
+        const at = `${name} ${form} seed ${seed}`;
+        for (const a of r.st.arms) {
+          const tr = a.truss;
+          if (!tr) continue;
+          assert.equal(new Set(tr.webs.map((w) => w.sec.kind)).size, 1, `${at} ${a.id}: diagonals of two kinds`);
+          tr.webs.forEach((wb, k) => {
+            const m = r.members[`${a.id}-web${k + 1}`];
+            assert.ok(m, `${at} ${a.id}-web${k + 1}: no check`);
+            assert.ok(Math.abs(m.ratio - memberRatio(wb.sec, m, m.L, DEFAULTS.fy)) < 1e-9, `${at} ${a.id}-web${k + 1}: not the ratio of its section`);
+            if (wb.sec.kind !== '2L') return;
+            angles++;
+            assert.ok(m.ratio <= 0.6 + 1e-9, `${at} ${a.id}-web${k + 1}: ratio ${m.ratio.toFixed(2)}`);
+          });
+        }
+      }
+  assert.ok(angles >= 10, `only ${angles} double angle diagonals`);
 });

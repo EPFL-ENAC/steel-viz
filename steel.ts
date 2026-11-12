@@ -11,6 +11,8 @@ import { ANGLE_GAP, rects, type Section } from './sections.ts';
 
 export const PITCH = 75; // bolt pitch
 export const EDGE = 38; // bolt edge distance
+// how far the plate of a double angle (gussetLap) goes along it, from its end
+export const LAP_REACH = 2 * EDGE + PITCH;
 
 export type P2 = [number, number];
 export type Face = { pts: V[]; edges: [number, number][] };
@@ -1378,7 +1380,7 @@ function gussetLap(g: Geo, r: Resolved, hw: Hardware) {
   const dir = len(flat) > 0.3 ? norm(flat) : r.direc;
   const across = norm(cross(nrm, dir));
   const far = EDGE + PITCH;
-  hw.reach.push(far + EDGE);
+  hw.reach.push(LAP_REACH);
   const at = (u: number, dw: number, n = 0) => add(add(add(p, mul(inward, u)), mul(g.w, dw)), mul(nrm, n));
   const wb = wAt(g, (g.sec.tf + g.d) / 2);
   const one = g.sec.kind === 'L' || g.sec.kind === 'FB';
@@ -1386,7 +1388,7 @@ function gussetLap(g: Geo, r: Resolved, hw: Hardware) {
   for (const u of [EDGE, far]) hw.dots.push({ p: at(u, wb, one ? tw / 2 : 0), axis: nrm, half: t / 2 + (one ? tw / 2 : tw) });
   // the bolt area, a bit wider than the angles, joined to its foot on the face
   const [w0, w1] = [wAt(g, -15), wAt(g, g.d + 15)];
-  const area = [at(0, w0, -t / 2), at(far + EDGE, w0, -t / 2), at(far + EDGE, w1, -t / 2), at(0, w1, -t / 2)];
+  const area = [at(0, w0, -t / 2), at(LAP_REACH, w0, -t / 2), at(LAP_REACH, w1, -t / 2), at(0, w1, -t / 2)];
   const k = dot(dir, r.direc);
   const foot = area.map((q) => sub(q, mul(dir, dot(sub(q, r.fp), r.direc) / k)));
   const poly = hull2([...area, ...foot], across, dir);
