@@ -7,12 +7,13 @@ What we plan to do next. A checked item is done.
 - [x] Channel, angle and WT profiles (C, L and T sections), with their own section tables. Double angle braces, channel secondaries and tee truss chords (`shapeP`, `--shapes`).
 - [ ] Move the channel and angle tables to RESSLab Hub when the hub needs them (its `steel_braces.csv` has angle and channel braces). Paired worktree and a hub pull request, then the usual rule: change them in the hub first.
 - [x] Tee chords with the stem up, and the gussets on the stem.
-- [ ] Double angle truss diagonals, unequal angles, single angle braces (the `L` section exists now, for the X bracing).
+- [x] Double angle truss diagonals, on a lap plate (on the stem of a tee chord too).
+- [ ] Unequal angles, single angle braces (the `L` section exists now, for the X bracing).
 - [x] X bracing in a bay: flat bars, rods with a turnbuckle, or single angles bolted where they cross. Tension only in the solver (`xP`, `xKind`, `--bracing x`).
 - [x] Round tube braces (CHS and pipes), on a knife plate or an end cap plate (`roundP`, `--round-tubes`), with our own CHS tables.
 - [ ] Move the round tube tables to RESSLab Hub too, when the hub has one.
 - [ ] Round tube tree columns. Not easy: every joint on a column (beam ends, continuity plates, splices, base plate) needs a flat face. A round column needs new joints for each one (through plates, ring stiffeners).
-- [ ] Round tube truss diagonals.
+- [x] Round tube truss diagonals, with a slot or an end cap (`roundP`).
 - [x] End cap plates on smaller tubes: from 82 mm (`CAP_MIN_D`), with a narrow tab (one line of 2 bolts) under 114 mm.
 - [x] Bolted beam splice and posts.
 - [x] More kinds of beam end connections: clip angles, seated, stiffened seat, tee, stiffened end plate (`CONNS` in `steel.ts`, `connKindsP`, `--conn-kinds`).

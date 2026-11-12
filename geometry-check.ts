@@ -37,6 +37,9 @@ export function make(p: Partial<Params>, family: Family = 'aisc') {
 export function shapes(st: ReturnType<typeof generate>['st']) {
   return [
     ...st.arms.flatMap((a) => [...a.braces.filter((b) => !b.x).map((b) => `brace ${b.sec.kind}`), ...(a.truss ? [`chord ${a.truss.chord.kind}`] : [])]),
+    // the diagonals of a truss: one kind for all of them. "tubes": they were
+    // to be double angles, but one of them had no room for its lap plates
+    ...st.arms.flatMap((a) => (a.truss ? [`diagonal ${a.truss.tubes ? 'tubes' : a.truss.webs[0].sec.kind}`] : [])),
     ...st.secs.map((s) => `secondary ${s.sec.kind}`),
   ];
 }
@@ -109,7 +112,7 @@ export function defaultTests(name: Family) {
     for (const form of forms)
       for (let seed = 1; seed <= 40; seed++) for (const k of shapes(make({ seed, form }, name).st)) count[k] = (count[k] ?? 0) + 1;
     t.diagnostic(`${name}: ${Object.entries(count).sort().map(([k, n]) => `${k} ${n}`).join(', ')}`);
-    for (const k of ['brace 2L', 'brace RHS', 'brace CHS', 'secondary C', 'secondary I', 'chord T', 'chord I']) assert.ok(count[k] > 0, `${name}: no ${k}`);
+    for (const k of ['brace 2L', 'brace RHS', 'brace CHS', 'secondary C', 'secondary I', 'chord T', 'chord I', 'diagonal 2L', 'diagonal RHS']) assert.ok(count[k] > 0, `${name}: no ${k}`);
   });
 
   // the tooltip of the playground: every part says what it is, and every
