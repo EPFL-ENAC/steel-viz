@@ -17,20 +17,34 @@
 //   must be a file of the folder: again no path from the URL goes to the disk.
 // - A change outside app/ (generator, renderers, tables) reloads the whole
 //   page. The settings live in the URL hash, so they stay.
+//
+// This file must not import the generator (tables.ts, deforms.ts, deform.ts
+// and all they pull in), not even with a fixed import(): vite.config.ts
+// imports this file, and Vite restarts the whole server when a file the
+// config imports changes. So load() gets them from the runner of Vite's ssr
+// environment. The runner drops a module when its file changes.
 import { execFileSync, execSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
-import type { Plugin } from 'vite';
-import { responseFile } from '../deform.ts';
-import { DEFORMS } from '../deforms.ts';
+import { isRunnableDevEnvironment, type Plugin, type ViteDevServer } from 'vite';
 import type { Family } from '../sections.ts';
-import { HUB_TABLES, SHAPE_FILES, TABLE_FILES, findHubData } from '../tables.ts';
 
 const app = dirname(fileURLToPath(import.meta.url));
 const root = dirname(app);
 const BASE_REF = process.env.PLAYGROUND_BASE || 'main';
+
+// types only: erased, so not a config import
+type Gen = typeof import('../tables.ts') & typeof import('../deforms.ts') & Pick<typeof import('../deform.ts'), 'responseFile'>;
+
+let server: ViteDevServer | undefined;
+async function load(): Promise<Gen> {
+  const ssr = server?.environments.ssr;
+  if (!ssr || !isRunnableDevEnvironment(ssr)) throw new Error('the ssr environment of Vite has no runner');
+  const [tables, deforms, deform] = await Promise.all(['tables.ts', 'deforms.ts', 'deform.ts'].map((f) => ssr.runner.import(join(root, f))));
+  return { ...tables, ...deforms, responseFile: deform.responseFile };
+}
 
 const git = (...args: string[]) => {
   try {
@@ -60,6 +74,7 @@ const info = (url: string | undefined) => {
 };
 
 async function bundleBase(sha: string, ref: string) {
+  const { TABLE_FILES, SHAPE_FILES } = await load();
   const dir = join(root, 'node_modules', '.cache', 'steel-viz-base', sha);
   if (!existsSync(join(dir, 'generate.ts'))) {
     mkdirSync(dir, { recursive: true });
@@ -115,16 +130,16 @@ function baseScript(url?: string) {
   return bases.get(sha)!;
 }
 
-const hubData = findHubData();
-const hubFile = (table: string) => (hubData && Object.hasOwn(HUB_TABLES, table) ? join(hubData, HUB_TABLES[table]) : undefined);
+const hubFile = (g: Gen, hubData: string | undefined, table: string) =>
+  hubData && Object.hasOwn(g.HUB_TABLES, table) ? join(hubData, g.HUB_TABLES[table]) : undefined;
 
 // the response files of a test. undefined: no such table
-function hubResponses(table: string, id: string) {
-  if (!hubData || !Object.hasOwn(DEFORMS, table) || !Object.hasOwn(HUB_TABLES, table)) return undefined;
+function hubResponses(g: Gen, hubData: string | undefined, table: string, id: string) {
+  if (!hubData || !Object.hasOwn(g.DEFORMS, table) || !Object.hasOwn(g.HUB_TABLES, table)) return undefined;
   const out: Record<string, string> = {};
-  for (const spec of DEFORMS[table].responses) {
-    const dir = join(hubData, dirname(HUB_TABLES[table]), spec.folder);
-    const file = responseFile(spec, id);
+  for (const spec of g.DEFORMS[table].responses) {
+    const dir = join(hubData, dirname(g.HUB_TABLES[table]), spec.folder);
+    const file = g.responseFile(spec, id);
     if (existsSync(dir) && readdirSync(dir).includes(file)) out[spec.folder] = readFileSync(join(dir, file), 'utf8');
   }
   return out;
@@ -133,28 +148,43 @@ function hubResponses(table: string, id: string) {
 export const devTools = (): Plugin => ({
   name: 'steel-viz-dev',
   apply: 'serve',
-  configureServer(server) {
+  configureServer(s) {
+    server = s;
     baseScript(); // ready before the page asks for it
-    console.log(hubData ? `  hub tests: ${hubData}` : '  hub tests: no resslab-hub-data folder, only the examples of specimens/');
+    load().then(
+      (g) => {
+        const hubData = g.findHubData();
+        console.log(hubData ? `  hub tests: ${hubData}` : '  hub tests: no resslab-hub-data folder, only the examples of specimens/');
+      },
+      (e) => console.log(`  hub tests: the generator does not load: ${e.message ?? e}`),
+    );
     // the CSV is read at each request: a change in resslab-hub-data shows on reload
-    server.middlewares.use('/__dev/hub', (req, res) => {
-      const name = (req.url ?? '').split('?')[0].replace(/^\/+/, '');
-      const file = hubFile(name);
-      const test = name.match(/^(\w+)\/responses\/([\w.()%-]+)$/);
-      if (test) {
-        const files = hubResponses(test[1], decodeURIComponent(test[2]));
-        res.statusCode = files ? 200 : 404;
-        res.setHeader('content-type', 'application/json');
-        res.end(JSON.stringify(files ?? {}));
-      } else if (!name) {
-        res.setHeader('content-type', 'application/json');
-        res.end(JSON.stringify({ tables: Object.keys(HUB_TABLES).filter((t) => existsSync(hubFile(t) ?? '')) }));
-      } else if (!file || !existsSync(file)) {
-        res.statusCode = 404;
-        res.end(`no hub table "${name}"`);
-      } else {
-        res.setHeader('content-type', 'text/csv; charset=utf-8');
-        res.end(readFileSync(file, 'utf8'));
+    server.middlewares.use('/__dev/hub', async (req, res) => {
+      try {
+        const g = await load();
+        const hubData = g.findHubData();
+        const name = (req.url ?? '').split('?')[0].replace(/^\/+/, '');
+        const file = hubFile(g, hubData, name);
+        const test = name.match(/^(\w+)\/responses\/([\w.()%-]+)$/);
+        if (test) {
+          const files = hubResponses(g, hubData, test[1], decodeURIComponent(test[2]));
+          res.statusCode = files ? 200 : 404;
+          res.setHeader('content-type', 'application/json');
+          res.end(JSON.stringify(files ?? {}));
+        } else if (!name) {
+          res.setHeader('content-type', 'application/json');
+          res.end(JSON.stringify({ tables: Object.keys(g.HUB_TABLES).filter((t) => existsSync(hubFile(g, hubData, t) ?? '')) }));
+        } else if (!file || !existsSync(file)) {
+          res.statusCode = 404;
+          res.end(`no hub table "${name}"`);
+        } else {
+          res.setHeader('content-type', 'text/csv; charset=utf-8');
+          res.end(readFileSync(file, 'utf8'));
+        }
+      } catch (e: any) {
+        // a syntax error in the generator while you type: an answer, not a crash
+        res.statusCode = 500;
+        res.end(String(e?.message ?? e));
       }
     });
     // the use() path is cut from req.url: what is left is ?base=…
@@ -162,14 +192,18 @@ export const devTools = (): Plugin => ({
       res.setHeader('content-type', 'application/json');
       res.end(JSON.stringify(info(req.url)));
     });
+    // baseScript() never rejects: an error goes to globalThis.BASE_ERROR
     server.middlewares.use('/__dev/base.js', async (req, res) => {
       res.setHeader('content-type', 'text/javascript');
       res.end(await baseScript(req.url));
     });
   },
-  handleHotUpdate({ file, server }) {
+  // the ssr runner (load()): Vite drops its changed modules itself, and logs
+  // "(ssr) page reload <file>"
+  hotUpdate({ type, file }) {
+    if (this.environment.name !== 'client' || type !== 'update') return;
     if (file.startsWith(app + '/')) return; // the Vue app: normal hot reload
-    server.ws.send({ type: 'full-reload' });
+    this.environment.hot.send({ type: 'full-reload' });
     return [];
   },
 });
