@@ -267,7 +267,8 @@ export function profC(d: number, bf: number, tw: number, tf: number): P2[][] {
   return [ccw([[l, -h], [r, -h], [r, -h + t], [x, -h + t], [x, h - t], [r, h - t], [r, h], [l, h]])];
 }
 
-// a tee: the flange on top, the stem down
+// a tee: the flange on top, the stem down (in the member frame: geo() with
+// `up` turns it over, for a truss bottom chord)
 export function profT(d: number, bf: number, tw: number, tf: number): P2[][] {
   const [h, w, x, t] = [d / 2, bf / 2, tw / 2, tf];
   return [ccw([[-w, -h], [w, -h], [w, -h + t], [x, -h + t], [x, h], [-x, h], [-x, -h + t], [-w, -h + t]])];
@@ -388,7 +389,7 @@ export type Geo = {
   u: V;
   v: V;
   w: V;
-  sh: number; // d/2 for a top-of-steel line, 0 for a centre line
+  sh: number; // d/2 for a top-of-steel line (-d/2 when turned over, see geo), 0 for a centre line
   polys: P2[][];
   d: number;
   tw: number;
@@ -429,10 +430,15 @@ export function rbsCuts(g: Geo): Rbs[] {
   return [...(g.rbs ? [g.rbs] : []), ...(g.rbs2 ? [{ ...g.rbs2, a: L - g.rbs2.a - g.rbs2.b }] : [])];
 }
 
-export function geo(id: string, sec: Section, p0: V, p1: V, tos: boolean): Geo {
-  const { u, v, w } = frame(p0, p1);
+// `up`: the section turned over, w up and v the other way (still a right
+// handed frame). The top of the profile (the flange of a tee) is then at the
+// bottom, and with `tos` the line p0 p1 is still the top of steel. The code
+// that works in the member frame reads it with no change.
+export function geo(id: string, sec: Section, p0: V, p1: V, tos: boolean, up = false): Geo {
+  let { u, v, w } = frame(p0, p1);
+  if (up) [v, w] = [mul(v, -1), mul(w, -1)];
   const web = sec.kind === 'I' || sec.kind === 'C' || sec.kind === 'T';
-  return { id, sec, p0, p1, u, v, w, sh: tos ? sec.d / 2 : 0, polys: profile(sec), d: sec.d, tw: web ? sec.tw : sec.bf, copes: [] };
+  return { id, sec, p0, p1, u, v, w, sh: tos ? (up ? -1 : 1) * sec.d / 2 : 0, polys: profile(sec), d: sec.d, tw: web ? sec.tw : sec.bf, copes: [] };
 }
 
 // The flanges of a section in its profile, each one [left, right, thickness],
@@ -648,8 +654,9 @@ export function supportFace(S: Geo, direc: V): number {
 
 // `room`: when the member lands on the web of an I beam, the depths (from
 // the top of the member) between the flanges of that beam. `cope`: the cut
-// that keeps the member clear of those flanges.
-export type Resolved = { at: 'from' | 'to'; p: V; inward: V; direc: V; gap: number; fp: V; room?: [number, number]; cope?: Cope };
+// that keeps the member clear of those flanges. `stem`: the member lands on
+// the tip of the stem of a tee (a truss bottom chord, see gusset()).
+export type Resolved = { at: 'from' | 'to'; p: V; inward: V; direc: V; gap: number; fp: V; room?: [number, number]; cope?: Cope; stem?: boolean };
 
 // where a connection sits: the member end, the direction into the member,
 // the support face point and the gap between the two
@@ -663,6 +670,8 @@ export function resolve(g: Geo, S: Geo, at: 'from' | 'to'): Resolved {
   const dist = dot(sub(p, q), direc);
   const face = supportFace(S, direc);
   const r: Resolved = { at, p, inward, direc, gap: Math.max(0, dist - face), fp: add(q, mul(direc, face)) };
+  // the stem of a tee is toward +w in its frame
+  if (S.sec.kind === 'T' && dot(direc, S.w) > 0.5) r.stem = true;
   if (S.sec.kind === 'I' && Math.abs(dot(direc, S.v)) > 0.9 && dot(g.w, S.w) > 0.99) {
     const off = dot(sub(p, S.p0), S.w) + g.sh - g.d / 2; // top of g, in the depth of S
     const top = S.sh - S.d / 2;
@@ -1147,6 +1156,11 @@ function gusset(g: Geo, r: Resolved, hw: Hardware, small: boolean, cap = false) 
   // round tube), no slot: a round plate closes the tube end, and the tab
   // is welded on it. On a tube under CAP_WIDE_D the tab has 1 bolt across
   // (2 in all), and the tab and the gusset are narrower.
+  // With r.stem (a truss diagonal on a tee chord, stem up), one plate only:
+  // it is welded on the tip of the stem, in its plane (a stem extension, like
+  // on a real WT chord), and it goes into the slot of the tube, where it is
+  // welded (a round tube: up to its cap, welded on it). The stem, the plate
+  // and the tube are in one plane: no lap, no offset, no bolts.
   const t = GUSSET_T;
   const narrow = cap && g.sec.d < CAP_WIDE_D;
   let nrm = cross(r.direc, g.u);
@@ -1160,8 +1174,10 @@ function gusset(g: Geo, r: Resolved, hw: Hardware, small: boolean, cap = false) 
   const far = small ? near : near + PITCH;
   const half = narrow ? EDGE : PITCH / 2 + EDGE; // half width of the bolt area
   const at = (u: number, s2: number, n = 0) => add(add(add(p, mul(inward, u)), mul(side, s2)), mul(nrm, n));
-  for (const u of far > near ? [-near, -far] : [-near])
-    for (const s2 of narrow ? [0] : [-PITCH / 2, PITCH / 2]) hw.dots.push({ p: at(u, s2, -t / 2), axis: nrm, half: t + 1 });
+  if (!r.stem)
+    for (const u of far > near ? [-near, -far] : [-near])
+      for (const s2 of narrow ? [0] : [-PITCH / 2, PITCH / 2]) hw.dots.push({ p: at(u, s2, -t / 2), axis: nrm, half: t + 1 });
+  let tongue: V[] = []; // on the stem: the part of the plate in the slot
   // knife plate: from the bolts into the slot, in the plane of the brace
   // full width under the bolts, then down to the tube width at its end
   if (cap) {
@@ -1171,28 +1187,42 @@ function gusset(g: Geo, r: Resolved, hw: Hardware, small: boolean, cap = false) 
     const { u, v, w } = frame(at(-t, 0), at(0, 0));
     hw.welded = smooth(prism(at(-t, 0), at(0, 0), profRound(D, ROUND_SIDES), u, v, w, t));
     hw.boxes.push(boxOf(at(-t / 2, 0), side, inward, D, D, t));
-    const tab = [at(-far - EDGE, -half), at(-far - EDGE, half), at(-near + EDGE, half), at(-near + EDGE, -half)];
-    hw.faces.push(...slab(tab.map((q) => add(q, mul(nrm, -t / 2))), nrm, t));
-    hw.boxes.push(boxOf(at(-(far + near) / 2, 0), side, inward, t, 2 * half, far - near + 2 * EDGE));
+    if (!r.stem) {
+      const tab = [at(-far - EDGE, -half), at(-far - EDGE, half), at(-near + EDGE, half), at(-near + EDGE, -half)];
+      hw.faces.push(...slab(tab.map((q) => add(q, mul(nrm, -t / 2))), nrm, t));
+      hw.boxes.push(boxOf(at(-(far + near) / 2, 0), side, inward, t, 2 * half, far - near + 2 * EDGE));
+    }
   } else {
     const lk = far + EDGE + slot;
     const w = Math.min(half, g.sec.bf / 2 + 10);
     const knife = [at(-far - EDGE, -half), at(-far - EDGE, half), at(-near + EDGE, half), at(0, w), at(slot, w), at(slot, -w), at(0, -w), at(-near + EDGE, -half)];
-    hw.faces.push(...slab(knife.map((q) => add(q, mul(nrm, -t / 2))), nrm, t));
+    if (r.stem) tongue = [at(0, -w, -t / 2), at(slot, -w, -t / 2), at(slot, w, -t / 2), at(0, w, -t / 2)];
+    else hw.faces.push(...slab(knife.map((q) => add(q, mul(nrm, -t / 2))), nrm, t));
     hw.boxes.push(boxOf(at((slot - far - EDGE) / 2, 0), side, inward, t, 2 * half, lk));
   }
   // gusset: beside the knife plate, from the support face to the bolts. Its
-  // outline joins the bolt area to its own foot on the face.
-  const area = [at(-near + EDGE, -half, -t), at(-near + EDGE, half, -t), at(-far - EDGE, half, -t), at(-far - EDGE, -half, -t)];
+  // outline joins the bolt area to its own foot on the face. On the stem it
+  // is in the plane of the tube, and its tongue goes on into the slot.
+  const n0 = r.stem ? -t / 2 : -t;
+  const area = [at(-near + EDGE, -half, n0), at(-near + EDGE, half, n0), at(-far - EDGE, half, n0), at(-far - EDGE, -half, n0)];
   const foot = area.map((q) => sub(q, mul(r.direc, dot(sub(q, r.fp), r.direc))));
   const poly = hull2([...area, ...foot], across, r.direc);
-  hw.faces.push(...slab(poly, nrm, t));
+  hw.faces.push(...slab(tongue.length ? between(poly, area[0], area[1], tongue) : poly, nrm, t));
   // its solid for the clash check: the box around it, in the support frame
   const xs = poly.map((q) => dot(sub(q, r.fp), r.direc));
   const ys = poly.map((q) => dot(sub(q, r.fp), across));
   const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
-  const zc = dot(sub(poly[0], r.fp), nrm);
+  const zc = dot(sub(poly[0], r.fp), nrm) + (r.stem ? t / 2 : 0); // on the stem: the middle of the plate
   hw.boxes.push(boxOf(add(add(add(r.fp, mul(r.direc, (x0 + x1) / 2)), mul(across, (y0 + y1) / 2)), mul(nrm, zc)), across, r.direc, t, y1 - y0, x1 - x0));
+}
+
+// the outline `poly` with the points `ins` put between a and b, two
+// neighbours on it (ins goes from a to b)
+function between(poly: V[], a: V, b: V, ins: V[]): V[] {
+  const [i, j, n] = [poly.indexOf(a), poly.indexOf(b), poly.length];
+  if (j === (i + 1) % n) return [...poly.slice(0, i + 1), ...ins, ...poly.slice(i + 1)];
+  if (i === (j + 1) % n) return [...poly.slice(0, j + 1), ...[...ins].reverse(), ...poly.slice(j + 1)];
+  throw new Error('between: a and b are not neighbours on the outline');
 }
 
 function gussetLap(g: Geo, r: Resolved, hw: Hardware) {

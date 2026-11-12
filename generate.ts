@@ -13,7 +13,7 @@ import { add, cross, dot, len, mul, norm, sub, type V } from './vec.ts';
 import { buckling, solve, type Elem, type FNode, type Solved } from './solver.ts';
 import { memberRatio, tooThin } from './checks.ts';
 import type { Catalog, Section } from './sections.ts';
-import { ANGLE_GAP, rodSection } from './sections.ts';
+import { ANGLE_GAP, centroidDepth, rodSection } from './sections.ts';
 import {
   box3, boxOf, flat, geo, grips, hardware, isRound, memberBoxes, memberFaces, resolve, splicePlates, stiffener, supportFace, BEARING_T, BEAM_CONN_KINDS, CAP_MIN_D, CONNS, EDGE, PINNED, SETBACK, SPLICE_HALF,
   type BeamConn, type ConnType, type Fit, type Geo, type Haunch, type P2, type Part, type PartInfo, type Plate, type Rbs,
@@ -1812,16 +1812,21 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
         c1 = add(c1, mul(h, -(supportFace(Sj, mul(h, -1)) + SETBACK[tr.conn2!])));
         cEnds.push({ S: Sj, sId: Sj.id, conn: tr.conn2!, at: 'to' });
       }
-      const cg = geo(chordId(a), tr.chord, add(oc, mul(h, supportFace(Sc, h) + SETBACK[tr.conn])), c1, true);
+      // a tee bottom chord has its stem up, toward the diagonals, like on a real truss
+      const cg = geo(chordId(a), tr.chord, add(oc, mul(h, supportFace(Sc, h) + SETBACK[tr.conn])), c1, true, tr.chord.kind === 'T');
       armGeo.set(cg.id, cg);
       member(cg, cEnds, a.to === undefined ? h : [0, 0, 1], 'Truss bottom chord', chordId(a));
       const web: ConnType = tr.low ? 'gusset_small' : 'gusset';
+      // On a tee chord the diagonal lines meet the chord on its centroid, e
+      // under the stem tip, so the chord takes no moment from them. The tube
+      // still stops SETBACK above the stem tip. An I chord keeps its top line.
+      const e = tr.chord.kind === 'T' ? tr.chord.d - centroidDepth(tr.chord) : 0;
       tr.webs.forEach((wb, k) => {
-        const B = add(oc, mul(h, wb.b));
+        const B = add(oc, [h[0] * wb.b, h[1] * wb.b, -e]);
         const C = add(add(o, mul(h, wb.t)), [0, 0, -a.sec.d]);
         const un = norm(sub(C, B));
         const t = SETBACK[web] / un[2];
-        const wg = geo(webId(a, k), wb.sec, add(B, mul(un, t)), sub(C, mul(un, t)), false);
+        const wg = geo(webId(a, k), wb.sec, add(B, mul(un, t + e / un[2])), sub(C, mul(un, t)), false);
         member(wg, [
           { S: cg, sId: cg.id, conn: web, at: 'from' },
           { S: g, sId: a.id, conn: web, at: 'to' },
@@ -1920,14 +1925,16 @@ function details(
     if (st.form !== 'specimen') extra(`${id}-cap`, hi.id, [flat(cap, X, Y, 20, rect(hi.sec.bf + 2 * CAP_OVER, hi.sec.d + 2 * CAP_OVER))], down, 'Cap plate');
     // continuity plates, at the flange levels of each moment beam on a flange face
     const levels: number[] = [];
-    // each beam end on a column: column, connection, bearing, top of steel, section
+    // each beam end on a column: column, connection, bearing, top of steel,
+    // section, and if it is turned over (a tee chord, its flange at the bottom)
     const beamEnds = st.arms.flatMap((a) => [
-      [a.col, a.conn, faceOf(a), a.z, eaveSec(a)], [a.to, a.conn2, a.bearing + 180, a.z, eaveSec(a)],
-      ...(a.truss ? [[a.col, a.truss.conn, faceOf(a), a.z - a.truss.D, a.truss.chord], [a.to, a.truss.conn2, a.bearing + 180, a.z - a.truss.D, a.truss.chord]] : []),
-    ] as [number | undefined, ConnType | undefined, number, number, Section][]);
-    for (const [ci2, conn, bearing, zt, sec] of st.continuity === false ? [] : beamEnds) {
+      [a.col, a.conn, faceOf(a), a.z, eaveSec(a), false], [a.to, a.conn2, a.bearing + 180, a.z, eaveSec(a), false],
+      ...(a.truss ? [[a.col, a.truss.conn, faceOf(a), a.z - a.truss.D, a.truss.chord, true], [a.to, a.truss.conn2, a.bearing + 180, a.z - a.truss.D, a.truss.chord, true]] : []),
+    ] as [number | undefined, ConnType | undefined, number, number, Section, boolean][]);
+    for (const [ci2, conn, bearing, zt, sec, up] of st.continuity === false ? [] : beamEnds) {
       if (ci2 !== ci || !conn || !moment(conn) || bearing % 180 !== 0) continue;
-      for (const z of sec.kind === 'T' ? [zt - sec.tf / 2] : [zt - sec.tf / 2, zt - sec.d + sec.tf / 2])
+      const [top, bot] = [zt - sec.tf / 2, zt - sec.d + sec.tf / 2];
+      for (const z of sec.kind !== 'T' ? [top, bot] : up ? [bot] : [top])
         if (levels.every((l) => Math.abs(l - z) > 30)) levels.push(z);
     }
     const cpT = (sec: Section) => st.tContinuity ?? Math.max(10, Math.round(sec.tf));
@@ -1993,7 +2000,7 @@ function details(
         for (const s of [-1, 1]) {
           const sd = s < 0 ? 'a' : 'b';
           extra(`${webId(a, k)}-stiffener-t${sd}`, a.id, [stiffener(a.sec, ot, mul(g.v, s), Z, 10)], mul(g.v, s), 'Stiffener, truss node');
-          // a tee has no bottom flange to hold a stiffener
+          // a tee chord has its stem up: the diagonals land on it, no stiffener
           if (tr.chord.kind === 'I') extra(`${webId(a, k)}-stiffener-b${sd}`, cg.id, [stiffener(tr.chord, ob, mul(cg.v, s), Z, 10)], mul(cg.v, s), 'Stiffener, truss node');
         }
       });
