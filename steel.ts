@@ -1444,6 +1444,7 @@ export type RenderOpts = {
   stepMs?: number; // painter only: ms between two steps
   speed?: number; // exact renderer: how fast one part comes in (default 1)
   duration?: number; // exact renderer: the whole build lasts this long, ms (see timeline)
+  effects?: boolean; // exact renderer: bolts push in and site welds are made (default true). false: bolts pop in, no welds
   bolts?: boolean;
 };
 
