@@ -112,6 +112,7 @@ export const VARIETY_KINDS: string[] = [
   'brace',
   ...X_KINDS.map(xKind),
   'double angle brace',
+  'single angle brace',
   'round tube brace',
   'round tube brace, end caps',
   'channel secondary',
@@ -137,6 +138,7 @@ export function variety(st: Structure): Variety {
     'secondary beam': secs.length > 0,
     brace: plain.length > 0,
     'double angle brace': plain.some((b) => b.sec.kind === '2L'),
+    'single angle brace': plain.some((b) => b.sec.kind === 'L'),
     // one tube end or the other: a tube under CAP_MIN_D keeps its slot, even with `cap`
     'round tube brace': round.some((b) => braceConn(b) !== 'gusset_cap'),
     'round tube brace, end caps': round.some((b) => braceConn(b) === 'gusset_cap'),

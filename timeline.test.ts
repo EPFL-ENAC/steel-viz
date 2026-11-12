@@ -63,8 +63,9 @@ test('a short build with slow parts has many parts in the air at once', () => {
   assert.ok(inAir(timeline(parts, { speed: 0.25, duration: 2000 })) > inAir(timeline(parts, { speed: 4, duration: 20000 })));
 });
 
-// a sum of all the slots of the four structures, with no effects, as main gave it
-const MAIN = [16165900, 22018525.629, 3585080, 4129360, 8492165.993, 1528160, 15181120, 19951162.841, 3349280, 11690770, 12968987.857, 1907480];
+// a sum of all the slots of the four structures, with no effects, as main gave it.
+// Seed 143 changed with the unequal angles (its braces are 2L3X2X3/16 now).
+const MAIN = [16165900, 22018525.629, 3585080, 4129360, 8492165.993, 1528160, 15181120, 19951162.841, 3349280, 11687170, 12965387.857, 1900280];
 test('effects off: the slots of before, bolts pop in', () => {
   const sums = structures.flatMap((parts) =>
     [{}, { duration: 8000 }, { speed: 0.5, duration: 3000 }].map((o) => {

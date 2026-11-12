@@ -22,14 +22,14 @@ The hub has no channel, angle or round tube table, so these six files are ours f
 | `channel-aisc-sections.csv` | `id,d,bf,tw,tf` | steelpy 1.1.1, `steelpy/shape files/C_shapes.csv` and `MC_shapes.csv` |
 | `angle-aisc-sections.csv` | `id,d,b,t` | steelpy 1.1.1, `steelpy/shape files/L_shapes.csv` |
 | `channel-european-sections.csv` | `id,d,bf,tw,tf` | structuralcodes 0.7.3, `structuralcodes/geometry/profiles/_upn.py` and `_upe.py` |
-| `angle-european-sections.csv` | `id,d,b,t` | structuralcodes 0.7.3, `structuralcodes/geometry/profiles/_l.py` and `_li.py` |
+| `angle-european-sections.csv` | `id,d,b,t` | structuralcodes 0.7.3, `structuralcodes/geometry/profiles/_l.py` and `_li.py`, then the unequal angles of blue-prints 0.8.0 that `_li.py` doesn't have (`blueprints/structural_sections/steel/standard_profiles/lnp.py`, `L 60x40x6`) |
 | `chs-aisc-sections.csv` | `id,d,t` | steelpy 1.1.1, `steelpy/shape files/HSS_R_shapes.csv` and `PIPE_shapes.csv` |
 | `chs-european-sections.csv` | `id,d,t` | blue-prints 0.8.0, `blueprints/structural_sections/steel/standard_profiles/chs.py` |
 
-- `d`: depth (channel), long leg (angle) or outside diameter (round tube). `bf`: flange width. `b`: short leg. `tw`, `tf`, `t`: thicknesses.
+- `d`: depth (channel), one leg (angle) or outside diameter (round tube). `bf`: flange width. `b`: the other leg. `tw`, `tf`, `t`: thicknesses. In the EU angle table `d` is the long leg, in the AISC one it is the short leg (`L8X6`: `d` 152.4, `b` 203.2). `sections.ts` takes the long leg as the larger one, so the order doesn't matter.
 - The AISC values are in inches in the source, here in mm rounded to 0.1 mm. The ids are the AISC names: `C15X33.9`, `L4X3-1/2X1/2`, `HSS6.625X0.280`, `Pipe3-1/2STD`.
 - For an AISC round HSS or pipe, `t` is the design wall `tdes` (0.93 times the nominal wall), the one AISC uses for A, I and Z. The EU round tubes have one wall only.
-- The files have every size of the source. `sections.ts` keeps the round tubes from 60 to 300 mm.
+- The files have every size of the source. `sections.ts` keeps the round tubes from 60 to 300 mm, and picks the angles it needs (equal ones for the X braces, equal and unequal ones for the arm braces).
 - Channel flanges are tapered in the real C, MC and UPN shapes. `tf` is the mean thickness from the source. We draw parallel flanges, and no fillets, like for the I sections.
 - There is no T table. A WT is a W cut in two, so `sections.ts` makes the tees from the I tables.
 
