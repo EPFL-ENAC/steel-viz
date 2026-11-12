@@ -88,6 +88,14 @@ export function chsSection(id: string, D: number, t: number): Section {
 // its gap on v = 0 and the outstanding legs on top.
 export type Rect = [number, number, number, number];
 
+// how deep the centroid is, from the top of the section (the flange face of
+// a tee)
+export function centroidDepth(s: Section): number {
+  const rs = rects(s);
+  const A = rs.reduce((m, [a0, a1, b0, b1]) => m + (a1 - a0) * (b1 - b0), 0);
+  return rs.reduce((m, [a0, a1, b0, b1]) => m + (a1 - a0) * (b1 - b0) * (b0 + b1) / 2, 0) / A + s.d / 2;
+}
+
 export function rects(s: Section): Rect[] {
   const [h, w, tf, tw] = [s.d / 2, s.bf / 2, s.tf, s.tw];
   switch (s.kind) {

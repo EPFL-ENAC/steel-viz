@@ -13,7 +13,7 @@ import { add, cross, dot, len, mul, norm, sub, type V } from './vec.ts';
 import { buckling, solve, type Elem, type FNode, type Solved } from './solver.ts';
 import { memberRatio, tooThin } from './checks.ts';
 import type { Catalog, Section } from './sections.ts';
-import { ANGLE_GAP, rodSection } from './sections.ts';
+import { ANGLE_GAP, centroidDepth, rodSection } from './sections.ts';
 import {
   box3, boxOf, flat, geo, grips, hardware, isRound, memberBoxes, memberFaces, resolve, splicePlates, stiffener, supportFace, BEARING_T, BEAM_CONN_KINDS, CONNS, EDGE, PINNED, SETBACK, SPLICE_HALF,
   type BeamConn, type ConnType, type Fit, type Geo, type Haunch, type P2, type Part, type PartInfo, type Plate, type Rbs,
@@ -1724,12 +1724,16 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
       armGeo.set(cg.id, cg);
       member(cg, cEnds, a.to === undefined ? h : [0, 0, 1], 'Truss bottom chord', chordId(a));
       const web: ConnType = tr.low ? 'gusset_small' : 'gusset';
+      // On a tee chord the diagonal lines meet the chord on its centroid, e
+      // under the stem tip, so the chord takes no moment from them. The tube
+      // still stops SETBACK above the stem tip. An I chord keeps its top line.
+      const e = tr.chord.kind === 'T' ? tr.chord.d - centroidDepth(tr.chord) : 0;
       tr.webs.forEach((wb, k) => {
-        const B = add(oc, mul(h, wb.b));
+        const B = add(oc, [h[0] * wb.b, h[1] * wb.b, -e]);
         const C = add(add(o, mul(h, wb.t)), [0, 0, -a.sec.d]);
         const un = norm(sub(C, B));
         const t = SETBACK[web] / un[2];
-        const wg = geo(webId(a, k), wb.sec, add(B, mul(un, t)), sub(C, mul(un, t)), false);
+        const wg = geo(webId(a, k), wb.sec, add(B, mul(un, t + e / un[2])), sub(C, mul(un, t)), false);
         member(wg, [
           { S: cg, sId: cg.id, conn: web, at: 'from' },
           { S: g, sId: a.id, conn: web, at: 'to' },
