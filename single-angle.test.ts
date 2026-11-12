@@ -38,6 +38,30 @@ test('E5: the slenderness of one angle', () => {
   assert.ok(!angleFits({ ...s, tf: 5, tw: 5 }, 1000, 345), 'legs too thin');
 });
 
+test('E5: one unequal angle, bolted by its long leg', () => {
+  // L 150x100x10: i about the axis along the long leg 2.86 cm (EN 10056-1,
+  // iz), i about the other one 4.78 cm. The long leg is on the gusset (d), so
+  // ra is the small one.
+  const s = cats.eu.braceAngles.find((q) => q.id === 'L 150x100x10')!;
+  assert.deepEqual([s.kind, s.d, s.bf], ['L', 150, 100]);
+  const ra = Math.sqrt(s.Iw / s.A);
+  near(ra, 28.6, 0.04, 'ra');
+  near(Math.sqrt(s.Is / s.A), 47.8, 0.04, 'the other radius');
+  near(angleSlenderness(s, 2000), 72 + (0.75 * 2000) / ra, 1e-9, 'E5-1');
+  // the new small ones of the EU table (blue-prints), legs up to 1.7 to 1
+  const small = cats.eu.braceAngles.find((q) => q.id === 'L 60x40x6')!;
+  assert.deepEqual([small.d, small.bf, small.tf], [60, 40, 6]);
+  for (const cat of Object.values(cats)) {
+    assert.ok(cat.braceAngles.every((q) => q.d >= q.bf && q.d < 1.7 * q.bf), cat.family);
+    assert.ok(!cat.braceAngles.some((q) => q.id === 'L 100x50x10' || q.id === 'L6X3-1/2X1/2'), `${cat.family}: legs over 1.7 to 1`);
+    // a double angle: the long legs back to back
+    assert.ok(cat.angles.every((q) => q.kind === '2L' && q.d >= (q.bf - ANGLE_GAP) / 2), cat.family);
+    assert.ok(cat.angles.some((q) => q.d > (q.bf - ANGLE_GAP) / 2), `${cat.family}: no unequal double angle`);
+  }
+  // the X braces keep their equal angles
+  for (const cat of Object.values(cats)) assert.ok(cat.singles.every((q) => q.d === q.bf), cat.family);
+});
+
 // the parts of a structure by id, and all the corners of one
 const byId = (r: ReturnType<typeof generate>) => new Map(r.parts.map((q) => [q.id, q]));
 const pts = (q: Part): V[] => q.faces.flatMap((f) => f.pts);
@@ -71,7 +95,7 @@ function onPlate(r: ReturnType<typeof generate>, id: string, at: string) {
 
 test('shapeP 1: single angle braces, on their gusset, no clash, nothing floating', () => {
   for (const family of Object.keys(cats) as Family[]) {
-    let single = 0;
+    let [single, unequal] = [0, 0];
     for (const form of forms)
       for (let seed = 1; seed <= 40; seed++) {
         const at = `${family} ${form} ${seed}`;
@@ -80,11 +104,18 @@ test('shapeP 1: single angle braces, on their gusset, no clash, nothing floating
         assert.deepEqual(floating(r.parts), [], at);
         for (const a of r.st.arms)
           a.braces.forEach((b, k) => {
-            if (b.x || b.sec.kind !== 'L') return;
+            if (b.x || (b.sec.kind !== 'L' && b.sec.kind !== '2L')) return;
+            // the long leg on the gusset
+            const out = b.sec.kind === 'L' ? b.sec.bf : (b.sec.bf - ANGLE_GAP) / 2;
+            assert.ok(b.sec.d >= out, `${at} ${a.id}: the short leg is on the gusset`);
+            if (b.sec.d > out) unequal++;
+            if (b.sec.kind !== 'L') return;
+            assert.ok(!b.short, `${at} ${a.id}: one angle on a short brace`);
             single++;
             onPlate(r, `${a.id}-brace${k ? k + 1 : ''}`, at);
           });
       }
     assert.ok(single > 20, `${family}: only ${single} single angle braces`);
+    assert.ok(unequal > 20, `${family}: only ${unequal} unequal angle braces`);
   }
 });

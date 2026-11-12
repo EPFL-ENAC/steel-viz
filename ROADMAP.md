@@ -7,7 +7,8 @@ What we plan to do next. A checked item is done.
 - [x] Channel, angle and WT profiles (C, L and T sections), with their own section tables. Double angle braces, channel secondaries and tee truss chords (`shapeP`, `--shapes`).
 - [ ] Move the channel and angle tables to RESSLab Hub when the hub needs them (its `steel_braces.csv` has angle and channel braces). Paired worktree and a hub pull request, then the usual rule: change them in the hub first.
 - [x] Tee chords with the stem up, and the gussets on the stem.
-- [ ] Double angle truss diagonals, unequal angles, single angle braces (the `L` section exists now, for the X bracing).
+- [x] Unequal angles, single angle braces: one angle on a small arm brace (E5), unequal legs with the long leg on the gusset.
+- [ ] Double angle truss diagonals.
 - [x] X bracing in a bay: flat bars, rods with a turnbuckle, or single angles bolted where they cross. Tension only in the solver (`xP`, `xKind`, `--bracing x`).
 - [x] Round tube braces (CHS and pipes), on a knife plate or an end cap plate (`roundP`, `--round-tubes`), with our own CHS tables.
 - [ ] Move the round tube tables to RESSLab Hub too, when the hub has one.

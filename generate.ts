@@ -1268,7 +1268,9 @@ function size(st: Structure, m: Model, res: Forces[], cat: Catalog, p: Params, c
       const room = st.col.d - 2 * st.col.tf;
       const fitsWeb = (s: Section) => faceOf(a) % 180 !== 90 || ANGLE_GAP + 2 * s.bf + 40 <= room;
       const slender = (s: Section) => (s.kind === 'L' ? angleFits(s, L, p.fy) && fitsWeb(s) : L / s.rmin < 200);
-      b.sec = choose(braces.list, braceId(a, k), b.sec, (s) => slender(s) && (!b.short || s.d <= SHORT.tubeD));
+      // A short brace never takes one angle: E5 makes it big, and its two
+      // lapped plates meet on such a short brace.
+      b.sec = choose(braces.list, braceId(a, k), b.sec, (s) => slender(s) && (!b.short || (s.d <= SHORT.tubeD && s.kind !== 'L')));
       if (braces.cap) b.cap = true;
     });
   }

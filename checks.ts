@@ -12,8 +12,11 @@
 // - F9: a tee or a double angle bent in its plane of symmetry, always with the
 //   stem (or the legs along the depth) in compression: the solver gives |M|
 //   only, and a continuous chord has both signs. It is the safe side.
-// - F10: one equal angle bent about a leg (a geometric axis), with no
-//   restraint: yielding and LTB, the toe in compression.
+// - F10: one angle bent about a leg (a geometric axis), with no restraint:
+//   yielding and LTB, the toe in compression. The formula is the one of an
+//   equal angle. An unequal angle takes its short leg in it: a simple
+//   approximation, lower than with the long leg (AISC asks for the
+//   principal axes there, F10.2(b)(iii)).
 // - F8: a round tube, no LTB, but local buckling of its wall: Fy Z up to
 //   D / t = 0.07 E / Fy (compact), less past it (noncompact, slender).
 //   A round tube with D / t of 0.45 E / Fy or more is refused (tooThin).
@@ -171,9 +174,10 @@ function angleMn(My: number, Mcr: number): number {
 // F10, one equal angle bent about a leg, no restraint, toe in compression:
 // Mcr = (0.58 E b⁴ t / Lb²)(sqrt(1 + 0.88 (Lb t / b²)²) - 1), and My at 0.8
 // of the yield moment for the LTB part (F10.2(b)(ii)). Yielding: 1.5 My
-// (F10-1). The legs are equal, so the same Mcr about both axes.
+// (F10-1). The same Mcr about both axes. An unequal angle: b is the short leg
+// (see the header).
 export function angleMoment(s: Section, S: number, Lb: number, fy: number): number {
-  const [b, t] = [s.d, s.tf];
+  const [b, t] = [Math.min(s.d, s.bf), s.tf];
   const Mcr = ((0.58 * E * b ** 4 * t) / (Lb * Lb)) * (Math.sqrt(1 + 0.88 * ((Lb * t) / (b * b)) ** 2) - 1);
   return Math.min(1.5 * fy * S, angleMn(0.8 * fy * S, Mcr));
 }

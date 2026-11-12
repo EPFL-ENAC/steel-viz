@@ -269,6 +269,9 @@ const byArea = (a: Section, b: Section) => a.A - b.A;
 // caller, the hub), the channels, angles and pipes lists are empty.
 export function loadCatalog(family: Family, i: string, hss: string, channels = '', angles = '', pipes = ''): Catalog {
   const angleRows = angles ? parseCsv(angles) : [];
+  // the two legs of an angle row: the AISC table gives the short one first
+  const long = (r: Record<string, string>) => Math.max(+r.d, +r.b);
+  const short = (r: Record<string, string>) => Math.min(+r.d, +r.b);
   const allShapes = parseCsv(i)
     .filter((r) => (family === 'aisc' ? /^W\d/.test(r.id) : /^(IPE|HE) /.test(r.id)))
     .map((r) => iSection(r.id, +r.d, +r.bf, +r.tf, +r.tw))
@@ -284,15 +287,18 @@ export function loadCatalog(family: Family, i: string, hss: string, channels = '
     rods: RODS[family].map(([id, D]) => rodSection(id, D)),
     // C3, UPN 80 and up: a shear tab fits on the web
     channels: (channels ? parseCsv(channels) : []).map((r) => channelSection(r.id, +r.d, +r.bf, +r.tf, +r.tw)).filter((s) => s.d >= 75).sort(byArea),
-    // equal angles, L3 to L8 and L 75 to L 200: one bolt line fits in the leg
-    angles: angleRows.filter((r) => r.d === r.b && +r.d >= 75 && +r.d <= 210).map((r) => doubleAngle(r.id, +r.d, +r.t)).sort(byArea),
+    // double angles, long leg from L3 to L8 and L 75 to L 200: one bolt line
+    // fits in the leg. An unequal one has its long legs back to back, on the
+    // gusset.
+    angles: angleRows.filter((r) => long(r) >= 75 && long(r) <= 210).map((r) => doubleAngleOf(`2${r.id}`, long(r), short(r), +r.t)).sort(byArea),
     tees: shapes.map(teeOf).sort(byArea),
     flats: FLATS[family].map(([id, b, t]) => flatBar(id, b, t)).sort(byArea),
     // equal angles, L2 to L6 and L 50 to L 150: a single X brace
     singles: angleRows.filter((r) => r.d === r.b && +r.d >= 50 && +r.d <= 155).map((r) => singleAngle(r.id, +r.d, +r.t)).sort(byArea),
-    // one angle for an arm brace, legs from 50 to 155 mm: one bolt line fits
-    // in the leg on the gusset. Not `singles`: the X braces keep their list.
-    braceAngles: angleRows.filter((r) => r.d === r.b && +r.d >= 50 && +r.d <= 155).map((r) => singleAngle(r.id, +r.d, +r.t)).sort(byArea),
+    // one angle for an arm brace, long leg from 50 to 155 mm: one bolt line
+    // fits in it, on the gusset. Legs up to 1.7 to 1: E5 (checks.ts) is
+    // written for that. Not `singles`: the X braces keep their list.
+    braceAngles: angleRows.filter((r) => long(r) >= 50 && long(r) <= 155 && long(r) < 1.7 * short(r)).map((r) => singleAngleOf(r.id, long(r), short(r), +r.t)).sort(byArea),
     // round tubes from 60 to 300 mm, like the square ones. Not in `all`: a
     // specimen finds its round tube by its sizes, not in a table.
     pipes: (pipes ? parseCsv(pipes) : []).map((r) => chsSection(r.id, +r.d, +r.t)).filter((s) => s.d >= 60 && s.d <= 300).sort(byArea),
