@@ -636,7 +636,7 @@ Files:
 - `webgl.ts`: the 3D view of the playground, in plain WebGL2.
 - `triangles.ts`: the triangles of a flat face, for `webgl.ts` and `hlr.ts`.
 - `cli.ts`, `cli.test.ts`: the command line, and the tests of its flags and of `--step`.
-- `shot.ts`: a PNG of the 3D view, at any step of a test, for agents (`node shot.ts <table>/<id> --peak --out a.png`). `--compare 1|2` and `--base <ref>` shoot "Compare with main", `--theme dark` the dark theme. It starts its own Vite and headless Chrome. It isn't in the package.
+- `shot.ts`: a PNG of the 3D view, at any step of a test, for agents (`node shot.ts <table>/<id> --peak --out a.png`). `--compare 1|2` and `--base <ref>` shoot "Compare with main", `--theme dark` the dark theme. `--at-ms 300,900` takes frames of the build at these times (ms from its start), with `--duration` in s (default 8) and `--speed`: it stops the clock of the viewer with `seek()`. It starts its own Vite and headless Chrome. It isn't in the package.
 - `app/`, `vite.config.ts`: the playground, a Vue app served by Vite.
 - `index.ts`, `3d.ts`: the two entries of the package (see below).
 - `package.test.ts`: checks that the light entry and the 3D entry load no package and no Node API.

@@ -13,6 +13,9 @@
 //   node shot.ts --seed 5 --compare 2 --base 564ac4d~1 --out c.png      # compare with a base, in one view
 //     (--compare 1: side by side, the image has both views. --base: a git ref,
 //     default PLAYGROUND_BASE or main. --theme light|dark: default light)
+//   node shot.ts --seed 5 --at-ms 300,900,1500 --out b.png               # frames of the build, b-300.png ...
+//     (ms from the start of the build. --duration: the build time in s, default 8,
+//     --speed: the part speed, default 1, as the two knobs of the playground)
 //
 // It starts its own Vite on a free port and its own headless Chrome with a temp
 // profile, and stops both at the end. It doesn't use the playground pane: from
@@ -42,7 +45,7 @@ const DRAW_MS = 50_000; // the page must draw in this time
 const DEADLINE_MS = 60_000; // the whole run, with the cleanup after it
 const AFTER_ERROR_MS = 5_000; // a page error and no drawing yet: don't wait for long
 
-const USAGE = 'usage: node shot.ts <table>/<id> [--step N | --peak] [--az N] [--el N] [--dpr N] [--zoom N [--at x,y]] [--compare 1|2 [--base ref]] [--theme light|dark] --out file.png\n       node shot.ts --seed N [--form mix|tree|portal|box] [--family aisc|eu] [--az N] [--el N] [--dpr N] [--zoom N [--at x,y]] [--compare 1|2 [--base ref]] [--theme light|dark] --out file.png';
+const USAGE = 'usage: node shot.ts <table>/<id> [--step N | --peak] [--az N] [--el N] [--dpr N] [--zoom N [--at x,y]] [--compare 1|2 [--base ref]] [--theme light|dark] [--at-ms ms,... [--duration s] [--speed k]] --out file.png\n       node shot.ts --seed N [--form mix|tree|portal|box] [--family aisc|eu] [--az N] [--el N] [--dpr N] [--zoom N [--at x,y]] [--compare 1|2 [--base ref]] [--theme light|dark] [--at-ms ms,... [--duration s] [--speed k]] --out file.png';
 
 const sleep = (ms: number) => new Promise((ok) => setTimeout(ok, ms));
 
@@ -62,6 +65,9 @@ export type ShotArgs = {
   compare?: 1 | 2; // compare with the base: 1 side by side, 2 one view
   base?: string; // the base, a git ref
   theme?: 'light' | 'dark';
+  atMs?: number[]; // frames of the build, ms from its start
+  duration?: number; // the build time, s
+  speed?: number; // the part speed
   out: string;
 };
 
@@ -87,6 +93,7 @@ export function parseShotArgs(argv: string[]): ShotArgs {
       az: { type: 'string' }, el: { type: 'string' }, dpr: { type: 'string' }, out: { type: 'string' },
       zoom: { type: 'string' }, at: { type: 'string' },
       compare: { type: 'string' }, base: { type: 'string' }, theme: { type: 'string' },
+      'at-ms': { type: 'string' }, duration: { type: 'string' }, speed: { type: 'string' },
     },
   });
   if (positionals.length > 1) throw new Error(`give one test, not ${positionals.length}`);
@@ -106,6 +113,11 @@ export function parseShotArgs(argv: string[]): ShotArgs {
   if (v.base !== undefined && v.compare === undefined) throw new Error('--base is for --compare');
   if (v.base !== undefined && (!v.base.trim() || v.base.startsWith('-'))) throw new Error(`--base needs a git ref, not "${v.base}"`);
   if (v.theme !== undefined && v.theme !== 'light' && v.theme !== 'dark') throw new Error(`--theme needs light or dark, not "${v.theme}"`);
+  if ((v.duration !== undefined || v.speed !== undefined) && v['at-ms'] === undefined) throw new Error('--duration and --speed are for --at-ms');
+  if (v['at-ms'] !== undefined && (v.step !== undefined || v.peak)) throw new Error('--at-ms is for the build, not with --step or --peak');
+  if (v['at-ms'] !== undefined && v.compare !== undefined) throw new Error('--at-ms is not for --compare: only one view plays the build here');
+  const atMs = v['at-ms']?.split(',').map((x) => (x.trim() === '' ? NaN : Number(x)));
+  if (atMs && (!atMs.length || atMs.some((x) => !(x >= 0)))) throw new Error(`--at-ms needs times in ms from 0, as 300,900, not "${v['at-ms']}"`);
   const a: ShotArgs = {
     seed: number('--seed', v.seed, isCount, 'a whole number from 0'),
     form: v.form as ShotArgs['form'],
@@ -120,6 +132,9 @@ export function parseShotArgs(argv: string[]): ShotArgs {
     compare: v.compare === undefined ? undefined : (Number(v.compare) as 1 | 2),
     base: v.base,
     theme: v.theme as ShotArgs['theme'],
+    atMs,
+    duration: atMs ? number('--duration', v.duration, (n) => n > 0, 'a number of s above 0') ?? 8 : undefined,
+    speed: atMs ? number('--speed', v.speed, (n) => n > 0, 'a number above 0') ?? 1 : undefined,
     out: v.out,
   };
   if (a.compare === 1 && a.dpr > 2) throw new Error('--dpr above 2 is for one canvas, not for --compare 1');
@@ -132,7 +147,7 @@ export function parseShotArgs(argv: string[]): ShotArgs {
 }
 
 // the settings of the page, as app/state.ts reads them
-export function shotHash(a: Pick<ShotArgs, 'test' | 'seed' | 'form' | 'family' | 'az' | 'el' | 'compare' | 'base' | 'theme'>): string {
+export function shotHash(a: Pick<ShotArgs, 'test' | 'seed' | 'form' | 'family' | 'az' | 'el' | 'compare' | 'base' | 'theme' | 'duration' | 'speed'>): string {
   const h = new URLSearchParams();
   if (a.test) h.set('specimen', `${a.test.table}/${a.test.id}`);
   else h.set('seed', String(a.seed));
@@ -144,7 +159,17 @@ export function shotHash(a: Pick<ShotArgs, 'test' | 'seed' | 'form' | 'family' |
   if (a.compare) h.set('compare', String(a.compare));
   if (a.base) h.set('base', a.base);
   if (a.theme) h.set('theme', a.theme);
+  if (a.duration) h.set('duration', String(a.duration));
+  if (a.speed) h.set('speed', String(a.speed));
   return h.toString();
+}
+
+// the file of one frame: with more than one time, the time goes in the name
+export function frameFile(out: string, ms: number, many: boolean): string {
+  if (!many) return out;
+  const dot = out.lastIndexOf('.');
+  const cut = dot > out.lastIndexOf('/') ? dot : out.length;
+  return `${out.slice(0, cut)}-${ms}${out.slice(cut)}`;
 }
 
 // ---- Chrome
@@ -372,6 +397,12 @@ const zoomAt = (k: number, fx: number, fy: number) => {
 };
 // the only thing over the canvas: the capture must show the canvas alone
 const hideHint = () => document.querySelector<HTMLElement>('.hint')?.style.setProperty('visibility', 'hidden');
+// the clock of the build stops at this time (webgl.ts seek, set on window in dev by Pane.vue)
+const seekBuild = (ms: number) => {
+  const v = (window as any).__steel;
+  if (!v?.seek) throw new Error('no viewer with seek() on the page');
+  v.seek(ms);
+};
 const nextFrames = () => new Promise<void>((ok) => requestAnimationFrame(() => requestAnimationFrame(() => ok())));
 const railNotes = () => [...new Set([...document.querySelectorAll('.source-note, .response .note, .test-notes li')].map((e) => e.textContent?.trim() ?? ''))].filter(Boolean);
 
@@ -464,9 +495,22 @@ async function shoot(a: ShotArgs, job: Job, out: string, chromeBin: string, vite
   await page.call(nextFrames); // the frame with the shape, then one more
 
   // the canvas has no preserveDrawingBuffer, so no toDataURL
-  const shot = await page.send('Page.captureScreenshot', { format: 'png', clip: { ...box, scale: 1 } });
-  const png = Buffer.from(shot.data, 'base64');
-  writeFileSync(out, png);
+  const capture = async (file: string) => {
+    const shot = await page.send('Page.captureScreenshot', { format: 'png', clip: { ...box, scale: 1 } });
+    const png = Buffer.from(shot.data, 'base64');
+    writeFileSync(file, png);
+    return png;
+  };
+  const files: string[] = [];
+  let png: Buffer;
+  if (a.atMs) {
+    for (const ms of a.atMs) {
+      await page.call(seekBuild, ms);
+      await page.call(nextFrames);
+      files.push(frameFile(out, ms, a.atMs.length > 1));
+      png = await capture(files.at(-1)!);
+    }
+  } else png = await capture(out);
 
   const s = await page.call(slider);
   console.log(job.label);
@@ -482,7 +526,11 @@ async function shoot(a: ShotArgs, job: Job, out: string, chromeBin: string, vite
   console.log(`page errors: ${errors.length ? '' : 'none'}`);
   for (const e of errors) console.log(`  ${e}`);
   // the size in the IHDR chunk of the PNG
-  console.log(`${a.out}: ${png.readUInt32BE(16)} x ${png.readUInt32BE(20)} px`);
+  const size = `${png!.readUInt32BE(16)} x ${png!.readUInt32BE(20)} px`;
+  if (a.atMs) {
+    console.log(`the build: ${a.duration} s, part speed ${a.speed}`);
+    a.atMs.forEach((ms, i) => console.log(`${ms} ms: ${files[i]}, ${size}`));
+  } else console.log(`${a.out}: ${size}`);
   return errors.length ? 1 : 0;
 }
 

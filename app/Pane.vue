@@ -171,6 +171,8 @@ onMounted(() => {
   } catch {
     hasGL.value = false; // no WebGL: only the SVG
   }
+  // shot.ts calls seek() on it, to take a frame at one time of the build
+  if (import.meta.env.DEV && props.main) (window as any).__steel = viewer;
   paint();
   nextTick(() => draw(props.built?.animate));
 });

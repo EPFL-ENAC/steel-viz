@@ -66,6 +66,9 @@ export type Viewer = {
   // play the build animation. speed: how fast one part comes in (2: twice as
   // fast). duration: the whole build lasts this long, ms (see timeline)
   build(speed?: number, duration?: number): void;
+  // stop the clock of the build at this time, ms from its start (null: let it
+  // play on). For shot.ts, which takes a frame at one time of the build.
+  seek(ms: number | null): void;
   setWeights(two: boolean): void;
   setColors(c: Colors): void;
   // the deformed shape of a test (null: undeformed). The parts keep it until
@@ -775,10 +778,12 @@ export function createViewer(
 
   // ---- the build animation: same timeline as the SVG
   let anim: { t0: number; slots: ReturnType<typeof timeline>; dirs: V[]; end: number; bolt: number } | null = null;
+  let clock: number | null = null; // seek(): the build stays at this time
+  let played: [number, number | undefined] | null = null; // the last build(), for seek()
   const ease = (t: number) => 1 - (1 - t) ** 3;
   const animate = (now: number): boolean => {
     if (!anim) return false;
-    const t = now - anim.t0;
+    const t = clock ?? now - anim.t0;
     pieces.forEach((p, i) => {
       const sl = anim!.slots.get(p.part.step)!;
       p.visible = t >= sl.start;
@@ -793,7 +798,7 @@ export function createViewer(
       const far = p.part.kind === 'plate' || p.part.kind === 'base' || p.part.kind === 'slab' ? 0.12 * radius : 2.6 * radius;
       p.off = mul(anim!.dirs[i], far * (1 - k));
     });
-    if (t < anim.end) return true;
+    if (t < anim.end) return clock === null;
     stopAnim();
     return false;
   };
@@ -873,6 +878,7 @@ export function createViewer(
   };
 
   const build = (speed = 1, duration?: number) => {
+    played = [speed, duration];
     stopAnim();
     setHover(null);
     const slots = timeline(pieces.map((p) => p.part), { speed, duration });
@@ -888,6 +894,13 @@ export function createViewer(
     });
     const end = buildEnd(slots) + 100;
     anim = { t0: performance.now(), slots, dirs, end, bolt: BOLT_MS / speed };
+    clock = null;
+    redraw();
+  };
+  const seek = (ms: number | null) => {
+    if (ms !== null && !anim && played) build(...played); // the build is over: play it again
+    if (anim && ms === null && clock !== null) anim.t0 = performance.now() - clock;
+    clock = ms;
     redraw();
   };
 
@@ -1091,6 +1104,7 @@ export function createViewer(
     show,
     view,
     build,
+    seek,
     reset,
     frame: current,
     setFrame,
