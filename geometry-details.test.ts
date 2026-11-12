@@ -1,8 +1,10 @@
 // node --test
-// Beam splices and posts at 0, every brace a round tube, and the end cap plates.
+// Beam splices and posts at 0, every brace and truss diagonal a round tube,
+// and the end cap plates.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { braceConn, floating, generate } from './generate.ts';
+import { braceConn, DEFAULTS, floating, generate } from './generate.ts';
+import { memberRatio, tooThin } from './checks.ts';
 import { clashes } from './clash.ts';
 import { CAP_MIN_D, CAP_WIDE_D } from './steel.ts';
 import type { Section } from './sections.ts';
@@ -34,6 +36,37 @@ test('round tube braces', () => {
         for (const q of r.parts) if (q.info?.type === 'Brace') for (const c of q.info.conn ?? []) ends.add(c);
       }
     for (const k of ['gusset', 'gusset_cap']) assert.ok(ends.has(k), `${name}: no ${k} end`);
+  }
+});
+
+// roundP 1 and shapeP 0: the diagonals of every truss are round tubes, with
+// the ends of a round tube brace (slot or end cap, and the small gusset on a
+// low truss). They are checked like the braces: D / t under the F8 limit, the
+// ratio of their own section. No clash, no floating part.
+test('round tube truss diagonals', () => {
+  for (const name of names) {
+    const ends = new Set<string>();
+    let n = 0;
+    for (const form of forms)
+      for (let seed = 1; seed <= 40; seed++) {
+        const r = generate({ seed, form, roundP: 1, shapeP: 0 }, cats[name]);
+        const at = `${name} ${form} seed ${seed}`;
+        if (!r.st.arms.some((a) => a.truss)) continue;
+        assert.deepEqual(clashes(r.parts), [], at);
+        assert.deepEqual(floating(r.parts), [], at);
+        assert.deepEqual(shapes(r.st).filter((k) => k.startsWith('diagonal') && k !== 'diagonal CHS'), [], at);
+        for (const q of r.parts) {
+          if (q.info?.type !== 'Truss diagonal') continue;
+          const m = r.members[q.info.member!];
+          assert.ok(q.round, `${at} ${q.id}: no round flag`);
+          assert.ok(!tooThin(q.info.sec!, DEFAULTS.fy), `${at} ${q.id}: too thin`);
+          assert.ok(Math.abs(m.ratio - memberRatio(q.info.sec!, m, m.L, DEFAULTS.fy)) < 1e-9, `${at} ${q.id}: not the ratio of its section`);
+          for (const c of q.info.conn ?? []) ends.add(c);
+          n++;
+        }
+      }
+    assert.ok(n >= 20, `${name}: only ${n} round tube diagonals`);
+    for (const k of ['gusset', 'gusset_cap', 'gusset_small']) assert.ok(ends.has(k), `${name}: no ${k} end on a diagonal`);
   }
 });
 

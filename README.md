@@ -30,10 +30,12 @@ Some members get another shape, from a draw of their own. `shapeP` gives the cha
 
 The sizing rules are the same for both shapes: L / r under 200 for a brace, a secondary fits between the flanges of its arm, the same depth limits for a chord. A tee chord gets only one continuity plate in the column, at its flange (the bottom), and no stiffener at the truss nodes: the diagonals land on its stem. The solver model keeps the nodes on the top line of the chord, as for an I chord. Every tee chord has its stem up, so this takes no random draw. Each draw is seeded from the member id, so it takes nothing from the other draws. With `--shapes 0`, a seed gives only I, tube and rod members, as before these shapes.
 
-Some arm braces are round tubes (CHS and pipes, 60 to 300 mm), from a draw of their own. `roundP` gives the chance (0.3 by default, `--round-tubes` in the CLI, "Round tube braces" in the playground). It is one draw per arm, on its own stream, keyed by the arm, so with `roundP` 0 a seed gives the same parts as before. A double angle comes first: a round tube only takes the place of a square tube. A round tube brace has one of two ends, from the same draw:
+Some arm braces and truss diagonals are round tubes (CHS and pipes, 60 to 300 mm), from a draw of their own. `roundP` gives the chance (0.3 by default, `--round-tubes` in the CLI, "Round tubes" in the playground). It is one draw per arm, on its own stream, keyed by the arm, so with `roundP` 0 a seed gives the same parts as before. A double angle comes first: a round tube only takes the place of a square tube. A round tube brace has one of two ends, from the same draw:
 
 - Slotted tube on a knife plate (`gusset`): the same end as a square tube. The knife plate goes into a slot cut in the tube.
 - End cap plate (`gusset_cap`): a round plate welded on the tube end, and a tab welded on the cap, bolted on the gusset. No slot. On a tube of 114 mm or more (`CAP_WIDE_D`), the tab has the same 4 bolts as the knife plate (151 mm wide). From 82 to 114 mm, the tab has one line of 2 bolts on the brace axis, so it is 76 mm wide (2 edge distances), and the gusset is narrower too. A tube under 82 mm (`CAP_MIN_D`, in `steel.ts`) keeps the slot. Why 82 mm: the tab is welded on the cap all around, with a 6 mm fillet, so the tab and its weld need a circle of 91 mm on the cap. The cap is the tube plus a 5 mm lip on each side, for its own weld on the tube. So d + 10 >= 91.2. In the tables, this gives the cap to the tubes of 88.9 and 101.6 mm, and not to the ones of 76 mm and less.
+
+The diagonals of a truss take the same draw as the braces of an arm: one draw per truss, keyed by the arm (`arm3-webs`), so all the diagonals of a truss have the same kind and the same end. A double angle comes first here too. A diagonal is short, so the smallest round tube that holds is often under 82 mm. When the draw gives end caps, the diagonals take a round tube of 82 mm or more, so they can have the cap. On a low truss, a round tube diagonal has the small gusset and no cap, like a short brace. If one diagonal of the truss finds no section that fits, all of them stay square tubes.
 
 A round tube has 12 sides in the drawings (a rod has 16). With 12, no line runs along the tube, and the width changes by 3 % only with the view. Its long sides have no line of their own: the outline comes from the renderer (`hlr.ts`, and the outline pass of the 3D view, also with one weight).
 
@@ -227,7 +229,7 @@ Arms, height and load are not the only knobs. These `Params` in `generate.ts` ch
 | `colSpliceP` | 0.6 | `--col-splice` | Details | the chance of a column splice |
 | `connKindsP` | 0.35 | `--conn-kinds` | Details, more connection kinds | the chance that a beam end gets one of the newer kinds (see "Beam end connections") |
 | `skewP` | 0.3 | `--skew` | Details, skewed arms | the chance that a tree arm leaves its column at 30 or 45 degrees (see "Skewed arms"). 0 gives the trees of before. |
-| `roundP` | 0.3 | `--round-tubes` | Details, round tube braces | the chance that the braces of an arm are round tubes |
+| `roundP` | 0.3 | `--round-tubes` | Details, round tubes | the chance that the braces of an arm, or the diagonals of a truss, are round tubes |
 | `shortBraceP` | 0.5 | `--short-braces` | Details, short arm braces | the chance of a short brace on a tree arm with no room for a full one |
 
 ```sh
@@ -237,7 +239,7 @@ node cli.ts --seed 5 --form tree --arm-length 0.5,0.9 --arm-height 0.6,1
 
 A setting can give a mechanism (the status says so), never a clash or a floating part (`params-*.test.ts` and `geometry-*.test.ts`, 25 seeds for each case). One known limit: above a load of 200 kN/m (the top of the slider), a tree with short braces can have clashes.
 
-Parts must not go through each other. A secondary beam is coped (its flanges cut back) where it meets the flanges of its arm, and its plate fits between those flanges. A brace stays above the arms under it on the same face of its column, and is long enough that its two gussets don't touch. `clash.ts` checks this with boxes, and `geometry-*.test.ts` runs it on every form, 240 structures, on 72 more with every member in its other shape (`shapeP` 1), and on 72 more with round tube braces (`roundP` 1).
+Parts must not go through each other. A secondary beam is coped (its flanges cut back) where it meets the flanges of its arm, and its plate fits between those flanges. A brace stays above the arms under it on the same face of its column, and is long enough that its two gussets don't touch. `clash.ts` checks this with boxes, and `geometry-*.test.ts` runs it on every form, 240 structures, on 72 more with every member in its other shape (`shapeP` 1), and on 72 more with round tube braces (`roundP` 1). The round tube diagonals are checked on the 120 structures of each family with `roundP` 1.
 
 It can also draw a real test of RESSLab Hub instead of a seed: a specimen. For now it draws four kinds of test, each one in its test rig:
 

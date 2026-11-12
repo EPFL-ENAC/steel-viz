@@ -57,9 +57,10 @@ export type Params = {
   // the chance that a gable gets purlins on its rafters (gable.ts), from a
   // stream of its own. 0: bare rafters, as before purlins.
   purlinP: number;
-  // the chance that the braces of an arm are round tubes (when they don't get
-  // double angles from shapeP), from a stream of its own. 0: no round tube,
-  // so the same parts as before round tubes.
+  // the chance that the braces of an arm, or the diagonals of a truss, are
+  // round tubes (when they don't get double angles from shapeP), from a
+  // stream of its own. 0: no round tube, so the same parts as before round
+  // tubes.
   roundP: number;
   // the chance that a tree arm with no room for a full brace gets a short one
   // (shortBrace), from a stream of its own. 0: no short brace, so the same
@@ -116,7 +117,8 @@ const shaped = (p: Params, key: string) => p.shapeP > 0 && mulberry32(p.seed * 7
 // that gives only the I and tube tables)
 const orOld = (xs: Section[], old: Section[]) => (xs.length ? xs : old);
 
-// Round tube braces (see roundP). One keyed draw for each arm, from a stream
+// Round tube braces and truss diagonals (see roundP). One keyed draw for the
+// braces of each arm and one for the diagonals of each truss, from a stream
 // of its own, like shaped(). Its first value picks the round tube, the second
 // the end: a slotted tube on a knife plate (gusset), or an end cap plate with
 // a tab (gusset_cap). The tab and its weld must sit on the cap, so a smaller
@@ -161,9 +163,10 @@ type Post = { a: number; h: number; sec: Section };
 // on the top chord, both measured along the arm. `low`: a low truss (see
 // LOW). `hMin`: the clear height the top chord must keep when it is sized.
 type Web = { b: number; t: number; sec: Section };
-// tubes: the diagonals were to be double angles, but one of them found no
-// angle short enough for its lap plates, so all of them are tubes (for good)
-type Truss = { D: number; end: number; chord: Section; conn: ConnType; conn2?: ConnType; webs: Web[]; low: boolean; hMin: number; tubes?: boolean };
+// tubes: the diagonals were to be double angles or round tubes, but one of
+// them found no section that fits, so all of them are square tubes (for
+// good). cap: round tube diagonals get end cap plates (see braceList).
+type Truss = { D: number; end: number; chord: Section; conn: ConnType; conn2?: ConnType; webs: Web[]; low: boolean; hMin: number; tubes?: boolean; cap?: boolean };
 // A tension rod: from the column at height zr down to the top of the arm, `a` along it.
 type Rod = { a: number; zr: number; sec: Section };
 const chordId = (a: Arm) => `${a.id}-chord`;
@@ -1247,15 +1250,21 @@ function size(st: Structure, m: Model, res: Forces[], cat: Catalog, p: Params, c
       // flanges (a long tee chord gets wide since F9 in checks.ts)
       const onWeb = faceOf(a) % 180 === 90;
       tr.chord = choose(chords, chordId(a), tr.chord, (s) => s.d >= 150 && s.d <= (tr.low ? LOW.chord : Math.max(a.sec.d, 360)) && (!onWeb || s.bf + 40 <= webRoom(cat)));
-      // all the diagonals of a truss get the same kind: one draw for the truss
-      let webs = !tr.tubes && shaped(p, `${a.id}-webs`) ? orOld(cat.angles, cat.tubes) : cat.tubes;
+      // all the diagonals of a truss get the same kind: one draw for the
+      // truss, as for the braces of an arm
+      const kind = braceList(p, cat, `${a.id}-webs`);
+      let webs = tr.tubes ? cat.tubes : kind.list;
+      tr.cap = kind.cap;
       const h = tr.D - a.sec.d;
       const rule = (wb: Web) => (s: Section) => {
         const L = Math.hypot(wb.t - wb.b, h);
         // room between the two ends, as for the tubes in trussFor()
         const [hz, vz] = [Math.abs(wb.t - wb.b) / L, h / L];
-        const conn = braceConn({ sec: s, short: tr.low });
+        const conn = braceConn({ sec: s, cap: tr.cap, short: tr.low });
         if (L / s.rmin >= 200 || L - 2 * endGap(conn, s, hz, vz) < (tr.low ? LOW.tube : TUBE_MIN)) return false;
+        // the draw gave end caps: a round tube big enough to take one (the
+        // diagonals are short, the smallest tube would keep its slot)
+        if (tr.cap && !tr.low && s.kind === 'CHS' && s.d < CAP_MIN_D) return false;
         // the plate of a double angle goes along it and is as wide as its
         // legs: the two plates must not meet across the height of the truss
         const plate = SETBACK[conn] + (s.d + 15) * hz + LAP_REACH * vz;
@@ -1264,7 +1273,7 @@ function size(st: Structure, m: Model, res: Forces[], cat: Catalog, p: Params, c
       if (webs !== cat.tubes && !check && tr.webs.some((wb, k) => !works(webs, webId(a, k), rule(wb)))) {
         tr.tubes = true;
         webs = cat.tubes;
-        // the minimum areas alphaCr asked for were for angles, a tube is stiffer
+        // the minimum areas alphaCr asked for were for the other kind
         tr.webs.forEach((_, k) => delete st.minA?.[webId(a, k)]);
       }
       tr.webs.forEach((wb, k) => (wb.sec = choose(webs, webId(a, k), wb.sec, rule(wb))));
@@ -1858,7 +1867,7 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
       // still stops SETBACK above the stem tip. An I chord keeps its top line.
       const e = tr.chord.kind === 'T' ? tr.chord.d - centroidDepth(tr.chord) : 0;
       tr.webs.forEach((wb, k) => {
-        const web = braceConn({ sec: wb.sec, short: tr.low });
+        const web = braceConn({ sec: wb.sec, cap: tr.cap, short: tr.low });
         const B = add(oc, [h[0] * wb.b, h[1] * wb.b, -e]);
         const C = add(add(o, mul(h, wb.t)), [0, 0, -a.sec.d]);
         const un = norm(sub(C, B));

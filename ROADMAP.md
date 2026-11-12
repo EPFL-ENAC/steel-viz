@@ -13,7 +13,7 @@ What we plan to do next. A checked item is done.
 - [x] Round tube braces (CHS and pipes), on a knife plate or an end cap plate (`roundP`, `--round-tubes`), with our own CHS tables.
 - [ ] Move the round tube tables to RESSLab Hub too, when the hub has one.
 - [ ] Round tube tree columns. Not easy: every joint on a column (beam ends, continuity plates, splices, base plate) needs a flat face. A round column needs new joints for each one (through plates, ring stiffeners).
-- [ ] Round tube truss diagonals.
+- [x] Round tube truss diagonals, with a slot or an end cap (`roundP`).
 - [x] End cap plates on smaller tubes: from 82 mm (`CAP_MIN_D`), with a narrow tab (one line of 2 bolts) under 114 mm.
 - [x] Bolted beam splice and posts.
 - [x] More kinds of beam end connections: clip angles, seated, stiffened seat, tee, stiffened end plate (`CONNS` in `steel.ts`, `connKindsP`, `--conn-kinds`).
