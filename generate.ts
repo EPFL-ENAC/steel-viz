@@ -10,12 +10,12 @@
 // A real test specimen (specimen.ts) skips all the random draws: its column
 // and beams are given, the solver only checks it.
 import { add, cross, dot, len, mul, norm, sub, type V } from './vec.ts';
-import { buckling, solve, type Elem, type FNode, type Solved } from './solver.ts';
+import { buckling, sideCase, solve, type Elem, type FNode, type Solved } from './solver.ts';
 import { memberRatio, tooThin } from './checks.ts';
-import type { Catalog, Section } from './sections.ts';
+import type { Catalog, Family, Section } from './sections.ts';
 import { ANGLE_GAP, centroidDepth, rodSection } from './sections.ts';
 import {
-  box3, boxOf, flat, geo, grips, hardware, isRound, memberBoxes, memberFaces, profileSeam, resolve, splicePlates, stiffener, supportFace, BEARING_T, BEAM_CONN_KINDS, CAP_MIN_D, CONNS, EDGE, PINNED, SETBACK, SPLICE_HALF,
+  box3, boxOf, flat, geo, grips, hardware, isRound, memberBoxes, memberFaces, profileSeam, resolve, splicePlates, stiffener, supportFace, BEARING_T, BEAM_CONN_KINDS, CAP_MIN_D, CONNS, EDGE, LAP_REACH, PINNED, SETBACK, SPLICE_HALF,
   type BeamConn, type ConnType, type Fit, type Geo, type Haunch, type P2, type Part, type PartInfo, type Plate, type Rbs, type Seam,
 } from './steel.ts';
 import { overlap, own } from './clash.ts';
@@ -43,8 +43,9 @@ export type Params = {
   // kinds of before, so the same parts as before these kinds.
   connKindsP: number;
   // the chance that a member gets a channel, angle or tee section: the braces
-  // of an arm (double angles), a secondary beam (a channel), a truss bottom
-  // chord (a tee). 0: only I, tubes and rods, as before these shapes.
+  // of an arm and the diagonals of a truss (double angles), a secondary beam
+  // (a channel), a truss bottom chord (a tee). 0: only I, tubes and rods, as
+  // before these shapes.
   shapeP: number;
   // the chance that a tree arm on a column flange leaves it at 30 or 45
   // degrees, from a stream of its own (skewArms). 0: every arm square, as
@@ -56,9 +57,10 @@ export type Params = {
   // the chance that a gable gets purlins on its rafters (gable.ts), from a
   // stream of its own. 0: bare rafters, as before purlins.
   purlinP: number;
-  // the chance that the braces of an arm are round tubes (when they don't get
-  // double angles from shapeP), from a stream of its own. 0: no round tube,
-  // so the same parts as before round tubes.
+  // the chance that the braces of an arm, or the diagonals of a truss, are
+  // round tubes (when they don't get double angles from shapeP), from a
+  // stream of its own. 0: no round tube, so the same parts as before round
+  // tubes.
   roundP: number;
   // the chance that a tree arm with no room for a full brace gets a short one
   // (shortBrace), from a stream of its own. 0: no short brace, so the same
@@ -115,15 +117,16 @@ const shaped = (p: Params, key: string) => p.shapeP > 0 && mulberry32(p.seed * 7
 // that gives only the I and tube tables)
 const orOld = (xs: Section[], old: Section[]) => (xs.length ? xs : old);
 
-// Round tube braces (see roundP). One keyed draw for each arm, from a stream
+// Round tube braces and truss diagonals (see roundP). One keyed draw for the
+// braces of each arm and one for the diagonals of each truss, from a stream
 // of its own, like shaped(). Its first value picks the round tube, the second
 // the end: a slotted tube on a knife plate (gusset), or an end cap plate with
 // a tab (gusset_cap). The tab and its weld must sit on the cap, so a smaller
 // tube than CAP_MIN_D (82 mm, see steel.ts) keeps the slot. Under CAP_WIDE_D
 // (114 mm) the tab is narrower, with one line of bolts.
-// the section list of the braces of an arm, and whether they get end caps
-function braceList(p: Params, cat: Catalog, a: Arm): { list: Section[]; cap: boolean } {
-  const key = `${a.id}-braces`;
+// the section list of the braces of an arm (key `arm3-braces`) or of the
+// diagonals of a truss (`arm3-webs`), and whether they get end caps
+function braceList(p: Params, cat: Catalog, key: string): { list: Section[]; cap: boolean } {
   if (shaped(p, key)) return { list: orOld(cat.angles, cat.tubes), cap: false };
   if (p.roundP <= 0) return { list: cat.tubes, cap: false };
   const rng = mulberry32(p.seed * 50331653 + fnv1a(key));
@@ -160,7 +163,10 @@ type Post = { a: number; h: number; sec: Section };
 // on the top chord, both measured along the arm. `low`: a low truss (see
 // LOW). `hMin`: the clear height the top chord must keep when it is sized.
 type Web = { b: number; t: number; sec: Section };
-type Truss = { D: number; end: number; chord: Section; conn: ConnType; conn2?: ConnType; webs: Web[]; low: boolean; hMin: number };
+// tubes: the diagonals were to be double angles or round tubes, but one of
+// them found no section that fits, so all of them are square tubes (for
+// good). cap: round tube diagonals get end cap plates (see braceList).
+type Truss = { D: number; end: number; chord: Section; conn: ConnType; conn2?: ConnType; webs: Web[]; low: boolean; hMin: number; tubes?: boolean; cap?: boolean };
 // A tension rod: from the column at height zr down to the top of the arm, `a` along it.
 type Rod = { a: number; zr: number; sec: Section };
 const chordId = (a: Arm) => `${a.id}-chord`;
@@ -449,6 +455,11 @@ const TRUSS_P = { bay: 0.35, box: 0.1, arm: 0.3 };
 // below on the same face. It takes the room under the arm, down to the floor
 // or to the arm below, and its diagonals use the small gusset.
 const LOW = { min: 450, max: 650, floor: 500, gap: 450, chord: 250, tube: 250 };
+// how far along a diagonal (or a brace) its end stops before the face it
+// lands on: hz and vz are its slope, along the face and across it. A double
+// angle has no knife plate, its gap is from the corner of the angles nearest
+// the face, half its depth to the side of the axis.
+const endGap = (conn: ConnType, sec: Section, hz: number, vz: number) => (SETBACK[conn] + (conn === 'gusset_lap' ? (sec.d / 2) * hz : 0)) / vz;
 // how far the face of the column is from its axis, for a beam on that bearing
 const colFace = (st: Structure, bearing: number) => (bearing % 180 === 0 ? st.col.d / 2 : st.col.tw / 2);
 // how far the end of an arm is from the column axis, along the arm. A
@@ -604,6 +615,13 @@ function logGable(st: Structure, p: Params, log: string[]) {
     const r = solve(m.nodes, m.elems);
     log.push(gableLog(a, colFace(st, a.bearing), r.ok ? thrust(a, m.nodes, m.elems, m.owner, r.axial) : NaN));
   }
+}
+
+// the notional loads of the final structure (one more solve, for m)
+function logNotional(st: Structure, p: Params, family: Family, log: string[]) {
+  const m = model(st, p);
+  const r = solve(m.nodes, m.elems);
+  if (r.ok) log.push(sides(st, m, r, family).log);
 }
 
 // trusses first, so a rod knows the chords above it
@@ -1114,32 +1132,97 @@ const LIMIT = 0.6;
 type Forces = { N: number; Nc: number; My: number; Mz: number; Vy: number; Vz: number };
 // L: the member length, its buckling length (K = 1, see checks.ts)
 const ratioOf = (s: Section, f: Forces, fy: number, L: number) => memberRatio(s, f, L, fy);
-function worstOf(m: Model, res: Forces[]) {
-  const worst = new Map<string, Forces>();
-  m.owner.forEach((who, i) => {
-    const w = worst.get(who) ?? { N: 0, Nc: 0, My: 0, Mz: 0, Vy: 0, Vz: 0 };
-    const r = res[i];
-    worst.set(who, { N: Math.max(w.N, r.N), Nc: Math.max(w.Nc, r.Nc), My: Math.max(w.My, r.My), Mz: Math.max(w.Mz, r.Mz), Vy: Math.max(w.Vy, r.Vy), Vz: Math.max(w.Vz, r.Vz) });
-  });
-  for (const who of m.tension) worst.set(who, tensionOnly(worst.get(who)!));
+// the worst forces of each member along its elements, one per load case
+// (CASES). The cases are not mixed: a column is not sized for +x and +y at once.
+function worstOf(m: Model, res: Forces[][]) {
+  const worst = new Map<string, Forces[]>();
+  res.forEach((forces, c) =>
+    m.owner.forEach((who, i) => {
+      const all = worst.get(who) ?? worst.set(who, []).get(who)!;
+      const w = all[c] ?? { N: 0, Nc: 0, My: 0, Mz: 0, Vy: 0, Vz: 0 };
+      const r = forces[i];
+      all[c] = { N: Math.max(w.N, r.N), Nc: Math.max(w.Nc, r.Nc), My: Math.max(w.My, r.My), Mz: Math.max(w.Mz, r.Mz), Vy: Math.max(w.Vy, r.Vy), Vz: Math.max(w.Vz, r.Vz) };
+    }),
+  );
+  for (const who of m.tension) worst.set(who, worst.get(who)!.map(tensionOnly));
   return worst;
 }
+// the ratio of a member in its worst case
+const worstRatio = (s: Section, fs: Forces[], fy: number, L: number) => Math.max(...fs.map((f) => ratioOf(s, f, fy, L)));
 
 // Sway effects (EC3 5.2.2(5)B): the moments times 1 / (1 - 1/alphaCr), and
 // the shears too (the shear of a column comes from its sway moments). The
 // rule needs alphaCr >= 3: below, stiffen() makes a member heavier, and the
 // factor stays at its value for 3 (1.5).
 const ALPHA_MIN = 3;
-// compressed: the members with an element in compression
-type Stability = { alpha: number; amp: number; forces: Forces[]; energy: Map<string, number>; compressed: Set<string> };
+
+// Notional loads: a perfect structure under vertical loads gets no side
+// force, a real one is a little out of plumb. Each column node gets a side
+// force, phi times the vertical load that enters the column there (from the
+// gravity solve), so each level gets phi times its vertical load. This is
+// EC3 Fig. 5.4 (phi N at both ends of each column storey). The beams get no
+// side load along their length: no weak axis bending from it.
+// - eu, EC3 5.3.2(3): phi = 1/200 alpha_h alpha_m, with alpha_h = 2 / sqrt(h)
+//   (h in m, kept in [2/3, 1]) and alpha_m = sqrt(0.5 (1 + 1/m)), m the
+//   columns in a row along the load that carry at least half the mean load
+//   of that row.
+// - aisc, AISC 360-22 C2.2b: 0.002 (alpha = 1, the loads are factored).
+// The load cases (CASES): gravity alone, then gravity with the side load
+// along +x, -x, +y, -y. The worst case sizes each member.
+export const CASES = ['gravity', '+x', '-x', '+y', '-y'];
+export function notionalShare(family: Family, H: number, m: number): number {
+  if (family === 'aisc') return 0.002;
+  const ah = Math.min(1, Math.max(2 / 3, 2 / Math.sqrt(H / 1000)));
+  return (ah * Math.sqrt(0.5 * (1 + 1 / m))) / 200;
+}
+type Sides = { cases: { node: number; f: V }[][]; log: string };
+function sides(st: Structure, m: Model, r: Extract<Solved, { ok: true }>, family: Family): Sides {
+  // each column, its elements from the base up: the compression of each
+  // storey, and the vertical load that enters at each node (the jump)
+  const enter: { node: number; W: number }[] = [];
+  const bases = st.cols.map((c) => {
+    const els = m.elems
+      .map((e, i) => ({ e, i }))
+      .filter(({ i, e }) => (m.owner[i] === 'column' || m.owner[i] === 'column-top') && Math.hypot(m.nodes[e.i].x[0] - c.x[0], m.nodes[e.i].x[1] - c.x[1]) < 1)
+      .sort((a, b) => m.nodes[a.e.i].x[2] - m.nodes[b.e.i].x[2]);
+    const C = els.map(({ i }) => -r.axial[i]);
+    els.forEach(({ e }, k) => enter.push({ node: e.j, W: C[k] - (C[k + 1] ?? 0) }));
+    return { x: c.x, N: Math.max(0, C[0] ?? 0) };
+  });
+  // m along axis k: the smallest count of loaded columns in a row (the most phi)
+  const count = (k: 0 | 1) => {
+    const rows = new Map<number, number[]>();
+    for (const b of bases) {
+      const key = Math.round(b.x[1 - k]);
+      rows.set(key, [...(rows.get(key) ?? []), b.N]);
+    }
+    const ms = [...rows.values()].map((ns) => {
+      const mean = ns.reduce((a, n) => a + n, 0) / ns.length;
+      return ns.filter((n) => n >= 0.5 * mean).length;
+    });
+    return Math.max(1, Math.min(...ms));
+  };
+  const [px, py] = [notionalShare(family, st.H, count(0)), notionalShare(family, st.H, count(1))];
+  const at = (s: V) => enter.map(({ node, W }) => ({ node, f: mul(s, W) }));
+  const frac = (x: number) => (family === 'aisc' ? x.toFixed(3) : `1/${Math.round(1 / x)}`);
+  const share = px === py ? `${frac(px)} of the vertical loads` : `${frac(px)} of the vertical loads along x, ${frac(py)} along y`;
+  const rule = family === 'aisc' ? 'AISC 360-22 C2.2b' : 'EC3 5.3.2';
+  return { cases: [at([px, 0, 0]), at([-px, 0, 0]), at([0, py, 0]), at([0, -py, 0])], log: `notional loads ${share} (${rule})` };
+}
+
+// compressed: the members with an element in compression (gravity case)
+type Stability = { alpha: number; amp: number; forces: Forces[][]; energy: Map<string, number>; compressed: Set<string> };
 // Not the posts: their top is held by what they carry, which we don't draw.
 // Free, a short post with its load sways and twists the beam (alphaCr < 1).
 // The member check covers the buckling of the post itself.
-function stability(m: Model, r: Extract<Solved, { ok: true }>): Stability {
+// alphaCr comes from the axial forces of gravity alone. The factor
+// multiplies the side cases too (EC3 5.2.2(5)B). No sides: a specimen.
+function stability(m: Model, r: Extract<Solved, { ok: true }>, side?: Sides): Stability {
   const axial = r.axial.map((n, i) => (m.owner[i].endsWith('-post') || m.tension.has(m.owner[i]) ? 0 : n));
   const b = buckling(m.nodes, m.elems, { ...r, axial });
   const amp = 1 / (1 - 1 / Math.max(b.alpha, ALPHA_MIN));
-  const forces = r.forces.map((f) => ({ ...f, My: f.My * amp, Mz: f.Mz * amp, Vy: f.Vy * amp, Vz: f.Vz * amp }));
+  const cases = [r.forces, ...(side?.cases ?? []).map((s) => sideCase(m.nodes, m.elems, r, s))];
+  const forces = cases.map((fs) => fs.map((f) => ({ ...f, My: f.My * amp, Mz: f.Mz * amp, Vy: f.Vy * amp, Vz: f.Vz * amp })));
   const energy = new Map<string, number>();
   m.owner.forEach((who, i) => energy.set(who, (energy.get(who) ?? 0) + b.energy[i]));
   const compressed = new Set(m.owner.filter((_, i) => axial[i] < 0));
@@ -1209,6 +1292,8 @@ function stiffen(st: Structure, m: Model, stab: Stability, cat: Catalog, p: Para
       log.push(`alphaCr ${stab.alpha.toFixed(1)} below ${ALPHA_MIN}: ${who} ${cur.id} -> ${next.id}`);
       return true;
     }
+    // size() dropped it: the member changed kind (truss diagonals, angles to tubes)
+    if (!(who in minA)) continue;
     if (old === undefined) delete minA[who];
     else minA[who] = old;
   }
@@ -1225,7 +1310,7 @@ const webClear = (arms: Arm[], z = -Infinity) => Math.max(0, ...arms.filter((a) 
   ...(a.truss && a.z - a.truss.D - a.truss.chord.d > z ? [a.truss.chord.bf + 40] : []),
 ]));
 
-function size(st: Structure, m: Model, res: Forces[], cat: Catalog, p: Params, check = false): number {
+function size(st: Structure, m: Model, res: Forces[][], cat: Catalog, p: Params, check = false): number {
   const worst = worstOf(m, res);
   let maxRatio = 0;
   // the lightest section that works; in check mode, the current one is kept
@@ -1235,11 +1320,17 @@ function size(st: Structure, m: Model, res: Forces[], cat: Catalog, p: Params, c
     const fits = (s: Section) => rule(s) && !tooThin(s, p.fy);
     const ok = (s: Section) => fits(s) && s.A >= (st.minA?.[who] ?? 0);
     const L = m.len.get(who)!;
-    const ratio = (s: Section) => ratioOf(s, f, p.fy, L);
+    const ratio = (s: Section) => worstRatio(s, f, p.fy, L);
     // none works: the heaviest one that keeps the rule (the minimum area can't break it)
     const s = check ? cur : (list.find((s) => ok(s) && ratio(s) < LIMIT) ?? list.findLast(ok) ?? list.findLast(fits) ?? list[list.length - 1]);
     maxRatio = Math.max(maxRatio, ratio(s));
     return s;
+  };
+  // whether a section of the list works for this member
+  const works = (list: Section[], who: string, rule: (s: Section) => boolean) => {
+    const f = worst.get(who)!;
+    const L = m.len.get(who)!;
+    return list.some((s) => rule(s) && !tooThin(s, p.fy) && s.A >= (st.minA?.[who] ?? 0) && ratioOf(s, f, p.fy, L) < LIMIT);
   };
   for (const a of st.arms) {
     // a top chord keeps the clear height of its truss
@@ -1255,10 +1346,33 @@ function size(st: Structure, m: Model, res: Forces[], cat: Catalog, p: Params, c
       // flanges (a long tee chord gets wide since F9 in checks.ts)
       const onWeb = faceOf(a) % 180 === 90;
       tr.chord = choose(chords, chordId(a), tr.chord, (s) => s.d >= 150 && s.d <= (tr.low ? LOW.chord : Math.max(a.sec.d, 360)) && (!onWeb || s.bf + 40 <= webRoom(cat)));
-      tr.webs.forEach((wb, k) => {
-        const L = Math.hypot(wb.t - wb.b, tr.D - a.sec.d);
-        wb.sec = choose(cat.tubes, webId(a, k), wb.sec, (s) => L / s.rmin < 200);
-      });
+      // all the diagonals of a truss get the same kind: one draw for the
+      // truss, as for the braces of an arm
+      const kind = braceList(p, cat, `${a.id}-webs`);
+      let webs = tr.tubes ? cat.tubes : kind.list;
+      tr.cap = kind.cap;
+      const h = tr.D - a.sec.d;
+      const rule = (wb: Web) => (s: Section) => {
+        const L = Math.hypot(wb.t - wb.b, h);
+        // room between the two ends, as for the tubes in trussFor()
+        const [hz, vz] = [Math.abs(wb.t - wb.b) / L, h / L];
+        const conn = braceConn({ sec: s, cap: tr.cap, short: tr.low });
+        if (L / s.rmin >= 200 || L - 2 * endGap(conn, s, hz, vz) < (tr.low ? LOW.tube : TUBE_MIN)) return false;
+        // the draw gave end caps: a round tube big enough to take one (the
+        // diagonals are short, the smallest tube would keep its slot)
+        if (tr.cap && !tr.low && s.kind === 'CHS' && s.d < CAP_MIN_D) return false;
+        // the plate of a double angle goes along it and is as wide as its
+        // legs: the two plates must not meet across the height of the truss
+        const plate = SETBACK[conn] + (s.d + 15) * hz + LAP_REACH * vz;
+        return conn !== 'gusset_lap' || 2 * plate + 25 <= h;
+      };
+      if (webs !== cat.tubes && !check && tr.webs.some((wb, k) => !works(webs, webId(a, k), rule(wb)))) {
+        tr.tubes = true;
+        webs = cat.tubes;
+        // the minimum areas alphaCr asked for were for the other kind
+        tr.webs.forEach((_, k) => delete st.minA?.[webId(a, k)]);
+      }
+      tr.webs.forEach((wb, k) => (wb.sec = choose(webs, webId(a, k), wb.sec, rule(wb))));
     }
     if (a.rod) a.rod.sec = choose(cat.rods, rodId(a), a.rod.sec);
     const post = a.post;
@@ -1269,7 +1383,7 @@ function size(st: Structure, m: Model, res: Forces[], cat: Catalog, p: Params, c
       post.sec = choose(cat.columns, postId(a), post.sec, (s) => (fits ? postFits(s, sec) : s.A <= post.sec.A));
     }
     // all the braces of an arm get the same kind: one draw for the arm
-    const braces = braceList(p, cat, a);
+    const braces = braceList(p, cat, `${a.id}-braces`);
     a.braces.forEach((b, k) => {
       const L = Math.hypot(b.a, drop(a, b));
       if (b.x) return void (b.sec = choose(xList(cat, b.x), braceId(a, k), b.sec, xRule(b.x, L)));
@@ -1289,7 +1403,7 @@ function size(st: Structure, m: Model, res: Forces[], cat: Catalog, p: Params, c
   st.col = choose(cat.columns, 'column', st.col, (c) => c.d - 2 * c.tf >= needClear && c.d >= 250 && colL / c.rmin < 200 && (!shortOnFlange || c.d <= SHORT.col));
   // the upper shaft is sized by sizeTop, here it is only checked
   const top = worst.get('column-top');
-  if (st.splice && top) maxRatio = Math.max(maxRatio, ratioOf(st.splice.sec, top, p.fy, m.len.get('column-top')!));
+  if (st.splice && top) maxRatio = Math.max(maxRatio, worstRatio(st.splice.sec, top, p.fy, m.len.get('column-top')!));
   return maxRatio;
 }
 
@@ -1311,18 +1425,18 @@ function braceGeo(st: Structure, a: Arm, b: Brace, k: number, S: Geo) {
   const C = add(add(start(st, a), mul(h, b.end ? a.L - b.a : b.a)), [0, 0, -a.sec.d]);
   const u = sub(C, B);
   const un = mul(u, 1 / Math.hypot(...u));
-  // a double angle has no knife plate: its gap is from the corner of the
-  // angles nearest the face, half its depth times the slope off the face
   const conn = braceConn(b);
   const [cos, sin] = [un[0] * hb[0] + un[1] * hb[1], un[2]];
   const lap = conn === 'gusset_lap' ? b.sec.d / 2 : 0;
+  // on the column the gap starts at its face (see endGap for the lap)
   const t0 = (supportFace(S, hb) + SETBACK[conn] + lap * sin) / cos;
-  const t1 = (SETBACK[conn] + lap * cos) / sin;
+  const t1 = endGap(conn, b.sec, cos, sin);
   return { g: geo(braceId(a, k), b.sec, add(B, mul(un, t0)), sub(C, mul(un, t1)), false), conn, hb };
 }
 // the end of a brace: a double angle, one angle or a flat bar laps a plate,
-// a rod has a clevis, a tube a knife plate (or an end cap plate, see braceList)
-export function braceConn(b: Brace): ConnType {
+// a rod has a clevis, a tube a knife plate (or an end cap plate, see braceList).
+// The diagonals of a truss take it too (short: a low truss).
+export function braceConn(b: Pick<Brace, 'sec' | 'cap' | 'short'>): ConnType {
   const s = b.sec;
   if (s.kind === '2L' || s.kind === 'L' || s.kind === 'FB') return 'gusset_lap';
   if (s.kind === 'ROD') return 'clevis';
@@ -1563,8 +1677,19 @@ const past = (...cs: (ConnType | undefined)[]): [number, number] =>
 function pickSplice(st: Structure, p: Params, rng: () => number): { sp: Splice; alts: number[] } | undefined {
   if (rng() >= p.colSpliceP || st.H < 2000) return undefined;
   const kind = rng() < 0.5 ? 'bearing' : 'flange';
+  const ok: number[] = [];
+  for (let z = r50(0.3 * st.H); z <= 0.7 * st.H; z += 50) if (spliceFree(st, { z, sec: st.col, kind }, SPLICE_GAP)) ok.push(z);
+  if (!ok.length) return undefined;
+  const z = ok[Math.floor(rng() * ok.length)];
+  return { sp: { z, sec: st.col, kind }, alts: ok.filter((x) => x !== z).sort((x, y) => Math.abs(x - z) - Math.abs(y - z) || x - y) };
+}
+
+// Are the splice plates clear of the beam ends, braces and rods, by `gap`?
+// The heights they take come from the sections of now: a size() after
+// pickSplice() (stiffen() in again()) can make a beam deeper.
+function spliceFree(st: Structure, sp: Splice, gap: number): boolean {
   // the height the plates take, around the cut
-  const [below, above] = kind === 'bearing' ? [0, BEARING_T] : [SPLICE_HALF, SPLICE_HALF];
+  const [below, above] = sp.kind === 'bearing' ? [0, BEARING_T] : [SPLICE_HALF, SPLICE_HALF];
   const busy: [number, number][] = [[0, 400]];
   for (const a of st.arms) {
     // an extended end plate reaches 90 mm past the flanges, flange plates 16
@@ -1578,12 +1703,7 @@ function pickSplice(st: Structure, p: Params, rng: () => number): { sp: Splice; 
     }
     if (a.rod) busy.push([a.rod.zr - 400, a.rod.zr + 100]);
   }
-  const ok: number[] = [];
-  for (let z = r50(0.3 * st.H); z <= 0.7 * st.H; z += 50)
-    if (busy.every(([lo, hi]) => z + above + SPLICE_GAP <= lo || z - below - SPLICE_GAP >= hi)) ok.push(z);
-  if (!ok.length) return undefined;
-  const z = ok[Math.floor(rng() * ok.length)];
-  return { sp: { z, sec: st.col, kind }, alts: ok.filter((x) => x !== z).sort((x, y) => Math.abs(x - z) - Math.abs(y - z) || x - y) };
+  return busy.every(([lo, hi]) => sp.z + above + gap <= lo || sp.z - below - gap >= hi);
 }
 
 // Do the splice plates go through a brace or its gusset? pickSplice() keeps
@@ -1620,13 +1740,13 @@ function spliceHits(st: Structure, sp: Splice): boolean {
 // the upper shaft: the lightest section, not heavier than the lower one,
 // that takes the forces above the splice and leaves room for the beams that
 // frame into its web
-function sizeTop(st: Structure, m: Model, res: Forces[], cat: Catalog, fy: number) {
+function sizeTop(st: Structure, m: Model, res: Forces[][], cat: Catalog, fy: number) {
   const sp = st.splice!;
   const f = worstOf(m, res).get('column-top')!;
   const need = webClear(st.arms, sp.z);
   const L = m.len.get('column-top')!;
   const minA = st.minA?.['column-top'] ?? 0;
-  sp.sec = cat.columns.find((s) => s.A <= st.col.A && s.A >= minA && s.d >= 200 && s.d - 2 * s.tf >= need && ratioOf(s, f, fy, L) < LIMIT) ?? st.col;
+  sp.sec = cat.columns.find((s) => s.A <= st.col.A && s.A >= minA && s.d >= 200 && s.d - 2 * s.tf >= need && worstRatio(s, f, fy, L) < LIMIT) ?? st.col;
   // the same section above and below: no reason to splice
   if (sp.sec === st.col) st.splice = undefined;
   // a flange splice between two very different depths needs thick fills: bear instead
@@ -1844,16 +1964,16 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
       const cg = geo(chordId(a), tr.chord, add(oc, mul(h, supportFace(Sc, h) + SETBACK[tr.conn])), c1, true, tr.chord.kind === 'T');
       armGeo.set(cg.id, cg);
       member(cg, cEnds, a.to === undefined ? h : [0, 0, 1], 'Truss bottom chord', chordId(a));
-      const web: ConnType = tr.low ? 'gusset_small' : 'gusset';
       // On a tee chord the diagonal lines meet the chord on its centroid, e
       // under the stem tip, so the chord takes no moment from them. The tube
       // still stops SETBACK above the stem tip. An I chord keeps its top line.
       const e = tr.chord.kind === 'T' ? tr.chord.d - centroidDepth(tr.chord) : 0;
       tr.webs.forEach((wb, k) => {
+        const web = braceConn({ sec: wb.sec, cap: tr.cap, short: tr.low });
         const B = add(oc, [h[0] * wb.b, h[1] * wb.b, -e]);
         const C = add(add(o, mul(h, wb.t)), [0, 0, -a.sec.d]);
         const un = norm(sub(C, B));
-        const t = SETBACK[web] / un[2];
+        const t = endGap(web, wb.sec, Math.hypot(un[0], un[1]), un[2]);
         const wg = geo(webId(a, k), wb.sec, add(B, mul(un, t + e / un[2])), sub(C, mul(un, t)), false);
         member(wg, [
           { S: cg, sId: cg.id, conn: web, at: 'from' },
@@ -2045,20 +2165,24 @@ export function floating(ps: Part[]): string[] {
 
 // The check of one member in the final structure: its worst forces (N and
 // N·mm, the moments and shears with the sway factor), its ratio (limit
-// LIMIT) and its length in the solver model.
-export type MemberCheck = { ratio: number; N: number; Nc: number; My: number; Mz: number; Vy: number; Vz: number; L: number };
+// LIMIT), the load case that gives them (CASES) and its length in the
+// solver model.
+export type MemberCheck = { ratio: number; N: number; Nc: number; My: number; Mz: number; Vy: number; Vz: number; L: number; case: string };
 
 // One more solve of the final structure, for Result.members. Nothing changes
 // in the structure: no fix, no sizing, no random draw.
-function checks(st: Structure, p: Params): Record<string, MemberCheck> {
+function checks(st: Structure, p: Params, family?: Family): Record<string, MemberCheck> {
   const m = model(st, p);
   const r = solve(m.nodes, m.elems);
   if (!r.ok) return {};
   const out: Record<string, MemberCheck> = {};
-  for (const [who, f] of worstOf(m, stability(m, r).forces)) {
+  for (const [who, fs] of worstOf(m, stability(m, r, family && sides(st, m, r, family)).forces)) {
     const sec = sectionOf(st, who);
     const L = m.len.get(who);
-    if (sec && L !== undefined) out[who] = { ...f, ratio: ratioOf(sec, f, p.fy, L), L };
+    if (!sec || L === undefined) continue;
+    const ratios = fs.map((f) => ratioOf(sec, f, p.fy, L));
+    const c = ratios.indexOf(Math.max(...ratios));
+    out[who] = { ...fs[c], ratio: ratios[c], L, case: CASES[c] };
   }
   return out;
 }
@@ -2119,7 +2243,7 @@ function build(p0: Partial<Params>, cat: Catalog, detail: Detail): Result {
       continue;
     }
     ok = true;
-    const stab = stability(m, r);
+    const stab = stability(m, r, sides(st, m, r, cat.family));
     ({ alpha, amp } = stab);
     // too soft for the sway rule: a heavier member, not counted as a sizing pass
     if (alpha < ALPHA_MIN && stiffen(st, m, stab, cat, p, log)) continue;
@@ -2135,7 +2259,7 @@ function build(p0: Partial<Params>, cat: Catalog, detail: Detail): Result {
       solves++;
       const r = solve((m = model(st, p)).nodes, m.elems);
       if (!r.ok) return undefined;
-      const stab = stability(m, r);
+      const stab = stability(m, r, sides(st, m, r, cat.family));
       ({ alpha, amp } = stab);
       if (k === 8 || alpha >= ALPHA_MIN || !stiffen(st, m, stab, cat, p, log)) return stab.forces;
     }
@@ -2226,8 +2350,9 @@ function build(p0: Partial<Params>, cat: Catalog, detail: Detail): Result {
       if (f && alpha >= Math.min(ALPHA_MIN, before.alpha)) {
         ratio = size(st, m, f, cat, p, true);
         log.push(`splice at ${st.splice.z} mm (${st.splice.kind}), ${st.col.id} below, ${st.splice.sec.id} above`);
-        if (eaveHits(st, st.splice)) {
-          log.push('splice: in the way of the gable eave (a deeper or wider rafter), left out');
+        const eave = eaveHits(st, st.splice);
+        if (eave || !spliceFree(st, st.splice, 0)) {
+          log.push(`splice: in the way of ${eave ? 'the gable eave (a deeper or wider rafter)' : 'a beam end (a deeper beam)'}, left out`);
           st.splice = undefined;
           // the sections changed since `before`: the forces and the ratio with no cut
           const g = again();
@@ -2254,12 +2379,13 @@ function build(p0: Partial<Params>, cat: Catalog, detail: Detail): Result {
     if (f) ratio = size(st, m, f, cat, p, true);
   }
   if (ok) logGable(st, p, log);
+  if (ok) logNotional(st, p, cat.family, log);
   log.push(alphaLog(alpha, amp));
   log.push(`${sized} sizing passes, final max ratio ${ratio.toFixed(2)} (limit ${LIMIT})`);
   const t2 = performance.now();
   const ps = parts(st, detail, p.seg);
   const t3 = performance.now();
-  const members = ok ? checks(st, p) : {};
+  const members = ok ? checks(st, p, cat.family) : {};
   return { st, parts: ps, ok, log, ratio, alpha, solves, ms: { topology: t1 - t0, solve: t2 - t1, geometry: t3 - t2 }, nodes: m.nodes.length, members };
 }
 

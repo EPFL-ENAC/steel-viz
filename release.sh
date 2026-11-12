@@ -21,7 +21,7 @@ git fetch -q origin main
 ! git rev-parse -q --verify "refs/tags/v$v" >/dev/null || fail "tag v$v exists already"
 
 pnpm install --frozen-lockfile
-node --test
+pnpm test
 pnpm run type-check
 pnpm run build:lib
 

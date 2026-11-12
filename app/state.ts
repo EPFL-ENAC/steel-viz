@@ -51,7 +51,7 @@ const DEFAULTS = {
   colSplice: GEN.colSpliceP,
   connKinds: GEN.connKindsP,
   skew: GEN.skewP,
-  round: GEN.roundP, // round tube braces
+  round: GEN.roundP, // round tube braces and truss diagonals
   shortBraces: GEN.shortBraceP, // short braces on tree arms
   // view
   viewer: '3d', // 3d, svg or both

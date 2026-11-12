@@ -24,15 +24,18 @@ Some members get another shape, from a draw of their own. `shapeP` gives the cha
 | member | usual shape | other shape |
 |---|---|---|
 | the braces of an arm (all of them, one draw per arm) | square tube, on a gusset with a knife plate | double angle (two equal angles back to back, legs from 75 to about 200 mm), bolted on a gusset plate that sits in the gap between the angles (`gusset_lap`) |
+| the diagonals of a truss (all of them, one draw per truss) | square tube, on a gusset with a knife plate | double angle, bolted on a lap plate, as for a brace. On a tee chord, the lap plate is welded on the tip of the stem, in its plane, so the two angles sit on each side of the stem. If one diagonal has no room for its two lap plates (a short diagonal of a low truss), all the diagonals of the truss stay square tubes |
 | a secondary beam | I | channel (C, MC, UPN, UPE), coped like an I, on the same shear tab |
-| a truss bottom chord | I | tee (WT, or half an IPE or HE), flange down, stem up, toward the diagonals, like the bottom chord of a real truss. Each diagonal has one plate: welded on the tip of the stem, in its plane (a stem extension), it goes into the slot of the tube and is welded there. The stem, the plate and the tube are in one plane, with no bolts. The axis of each diagonal meets the chord on its centroid, so the diagonals put no moment in the chord. |
+| a truss bottom chord | I | tee (WT, or half an IPE or HE), flange down, stem up, toward the diagonals, like the bottom chord of a real truss. Each diagonal has one plate: welded on the tip of the stem, in its plane (a stem extension), it goes into the slot of the tube and is welded there. The stem, the plate and the tube are in one plane, with no bolts. A double angle diagonal is bolted on this plate instead, one angle on each side. The axis of each diagonal meets the chord on its centroid, so the diagonals put no moment in the chord. |
 
 The sizing rules are the same for both shapes: L / r under 200 for a brace, a secondary fits between the flanges of its arm, the same depth limits for a chord. A tee chord gets only one continuity plate in the column, at its flange (the bottom), and no stiffener at the truss nodes: the diagonals land on its stem. The solver model keeps the nodes on the top line of the chord, as for an I chord. Every tee chord has its stem up, so this takes no random draw. Each draw is seeded from the member id, so it takes nothing from the other draws. With `--shapes 0`, a seed gives only I, tube and rod members, as before these shapes.
 
-Some arm braces are round tubes (CHS and pipes, 60 to 300 mm), from a draw of their own. `roundP` gives the chance (0.3 by default, `--round-tubes` in the CLI, "Round tube braces" in the playground). It is one draw per arm, on its own stream, keyed by the arm, so with `roundP` 0 a seed gives the same parts as before. A double angle comes first: a round tube only takes the place of a square tube. A round tube brace has one of two ends, from the same draw:
+Some arm braces and truss diagonals are round tubes (CHS and pipes, 60 to 300 mm), from a draw of their own. `roundP` gives the chance (0.3 by default, `--round-tubes` in the CLI, "Round tubes" in the playground). It is one draw per arm, on its own stream, keyed by the arm, so with `roundP` 0 a seed gives the same parts as before. A double angle comes first: a round tube only takes the place of a square tube. A round tube brace has one of two ends, from the same draw:
 
 - Slotted tube on a knife plate (`gusset`): the same end as a square tube. The knife plate goes into a slot cut in the tube.
 - End cap plate (`gusset_cap`): a round plate welded on the tube end, and a tab welded on the cap, bolted on the gusset. No slot. On a tube of 114 mm or more (`CAP_WIDE_D`), the tab has the same 4 bolts as the knife plate (151 mm wide). From 82 to 114 mm, the tab has one line of 2 bolts on the brace axis, so it is 76 mm wide (2 edge distances), and the gusset is narrower too. A tube under 82 mm (`CAP_MIN_D`, in `steel.ts`) keeps the slot. Why 82 mm: the tab is welded on the cap all around, with a 6 mm fillet, so the tab and its weld need a circle of 91 mm on the cap. The cap is the tube plus a 5 mm lip on each side, for its own weld on the tube. So d + 10 >= 91.2. In the tables, this gives the cap to the tubes of 88.9 and 101.6 mm, and not to the ones of 76 mm and less.
+
+The diagonals of a truss take the same draw as the braces of an arm: one draw per truss, keyed by the arm (`arm3-webs`), so all the diagonals of a truss have the same kind and the same end. A double angle comes first here too. A diagonal is short, so the smallest round tube that holds is often under 82 mm. When the draw gives end caps, the diagonals take a round tube of 82 mm or more, so they can have the cap. On a low truss, a round tube diagonal has the small gusset and no cap, like a short brace. If one diagonal of the truss finds no section that fits, all of them stay square tubes.
 
 A round tube has 12 sides in the drawings (a rod has 16). With 12, no line runs along the tube, and the width changes by 3 % only with the view. Its long sides have no line of their own: the outline comes from the renderer (`hlr.ts`, and the outline pass of the 3D view, also with one weight).
 
@@ -46,12 +49,19 @@ A short brace goes at 45 degrees, or flatter down to about 30 degrees when the t
 
 On seeds 1 to 40, 13 trees get a short brace with the default values, 30 with `braceP` 1, and 38 with `braceP` 1 and `shortBraceP` 1.
 
-The sizing works in two steps, with public formulas from EC3 (Eurocode 3) and AISC 360-22:
+The sizing works in two steps, with public formulas from EC3 (Eurocode 3) and AISC 360-22. First the load cases:
 
-1. The whole structure: the solver finds the elastic critical load factor `alphaCr`. It is how many times the load the structure takes before it buckles as a whole (a buckling analysis with the geometric stiffness, in `solver.ts`). The moments are then multiplied by `1 / (1 - 1/alphaCr)`, for the sway effects (EC3 5.2.2). This rule needs `alphaCr >= 3`. If it is lower, the solver runs again after one change. First, if the buckling mode is mostly in a cantilever arm and its truss, and the bottom chord is in compression with a shear tab on the column, the chord gets an end plate there (see below). Else the member with the most strain energy in the mode gets a heavier section.
-2. Each member, in `checks.ts`: flexural buckling (AISC E3), flexural-torsional buckling of tees and double angles (E4), lateral torsional buckling of I sections and channels (F2), of tees and double angles (F9) and of one angle (F10), weak axis bending (F6), local buckling of the wall of a round tube (F8, E7), the two together with the axial force (H1-1), and shear (chapter G). The buckling length is the member length, because step 1 already has the sway. The ratio must stay under 0.6. There are no AISC phi factors, the 0.6 is the margin.
+- Gravity: the self weight, the load on the arms, half of it on the secondaries, the point load on a post top.
+- Gravity and a side load along +x, -x, +y or -y, so 4 more cases. These are the notional loads, small side loads for the frame imperfections. At each node of a column, the side load is phi times the vertical load that enters the column there (EC3 5.3.2 figure 5.4). The beams get no side load, so a beam does not bend about its weak axis for it.
+- For `aisc`, phi is 0.002 (AISC 360-22 C2.2b).
+- For `eu`, phi is 1/200 × alpha_h × alpha_m (EC3 5.3.2(3)). alpha_h = 2 / sqrt(h), with h the height in m, kept between 2/3 and 1. alpha_m = sqrt(0.5 (1 + 1/m)), with m the columns in one row along the side load that carry at least half of the mean column load. Up to 4 m high, a tree gets 1/200, a portal about 1/231 in its plane and 1/200 across.
 
-Not checked: local buckling of thin plates (E7, F3, F9, F10) except for round tubes, E4 for a channel, one angle in compression (E5), the connectors of a double angle (E6), and notional loads (the small side loads for the frame imperfections). Cb is 1, which is on the safe side for cantilevers. The same AISC formulas size the EU sections too.
+The solver factors the stiffness matrix once. Each side case is one more back substitution (`sideCase()` in `solver.ts`). Specimens get the gravity case only. The log gives phi, for example `notional loads 0.002 of the vertical loads (AISC 360-22 C2.2b)`.
+
+1. The whole structure: the solver finds the elastic critical load factor `alphaCr`. It is how many times the load the structure takes before it buckles as a whole (a buckling analysis with the geometric stiffness, in `solver.ts`). `alphaCr` comes from the gravity case alone. The moments of every case are then multiplied by `1 / (1 - 1/alphaCr)`, for the sway effects (EC3 5.2.2). This rule needs `alphaCr >= 3`. If it is lower, the solver runs again after one change. First, if the buckling mode is mostly in a cantilever arm and its truss, and the bottom chord is in compression with a shear tab on the column, the chord gets an end plate there (see below). Else the member with the most strain energy in the mode gets a heavier section.
+2. Each member, in `checks.ts`: flexural buckling (AISC E3), flexural-torsional buckling of tees and double angles (E4), lateral torsional buckling of I sections and channels (F2), of tees and double angles (F9) and of one angle (F10), weak axis bending (F6), local buckling of the wall of a round tube (F8, E7), the two together with the axial force (H1-1), and shear (chapter G). A member takes the worst of the 5 cases, and the moments of two cases are never mixed. The tooltip of the playground gives that case. The buckling length is the member length, because step 1 already has the sway. The ratio must stay under 0.6. There are no AISC phi factors, the 0.6 is the margin.
+
+Not checked: local buckling of thin plates (E7, F3, F9, F10) except for round tubes, E4 for a channel, one angle in compression (E5), and the connectors of a double angle (E6). Cb is 1, which is on the safe side for cantilevers. The same AISC formulas size the EU sections too.
 
 The bottom chord of a cantilever truss is in compression. With a shear tab on the column, nothing holds it sideways: it swings out of the truss plane like a pendulum, and the arm twists with it (eu tree 19 was at `alphaCr` 2.2). A real structure has a fly brace to a purlin, or a strut to the column. A strut to the column is at 10 to 20° to the chord, and our gussets and clevis don't fit at that angle. So the chord gets a moment end: an end plate on the column (`holdChord()` in `generate.ts`). It adds no part and draws no random number. The log says `arm2-chord shear tab -> end_plate (holds it sideways)`. No structure of the seeds 0 to 600 stays under 3 now (both families, mix and tree).
 
@@ -105,7 +115,7 @@ Then come the small details, from a random draw of their own, so a seed keeps th
 
 Trusses and tension rods also come from a draw of their own, after the fix loop:
 
-- Truss: a beam gets a bottom chord 700 to 900 mm under it, with tube diagonals in a zigzag between the two. In a bay, both ends of the zigzag are on the bottom chord. On an arm, it ends at the tip on the top chord. The truss takes the place of the braces of that beam, but not of a short brace. A box beam gets a truss less often than a portal beam, because a box has 4 to 8 bay beams. A tree arm gets a lower truss, 450 to 650 mm, so it fits above the arm below it on the same face. It ends at the tip, on the top chord. Its diagonals have a small gusset with one row of 2 bolts. On seeds 1 to 40, a truss comes on 4 or 5 trees (it depends on the family), 11 portals and 12 boxes.
+- Truss: a beam gets a bottom chord 700 to 900 mm under it, with diagonals in a zigzag between the two. In a bay, both ends of the zigzag are on the bottom chord. On an arm, it ends at the tip on the top chord. The truss takes the place of the braces of that beam, but not of a short brace. A box beam gets a truss less often than a portal beam, because a box has 4 to 8 bay beams. A tree arm gets a lower truss, 450 to 650 mm, so it fits above the arm below it on the same face. It ends at the tip, on the top chord. Its tube diagonals have a small gusset with one row of 2 bolts. The diagonals are square tubes, or double angles from `shapeP` (see the shapes above), with the same checks as a brace. On seeds 1 to 40, a truss comes on 4 or 5 trees (it depends on the family), 11 portals and 12 boxes.
 - Tension rod: a round bar from the column down to the top of an arm that sticks out, with a clevis (a fork and a pin) at each end. Only on an arm with no braces, and only when the column has room above it, under the next arm and its braces. A flat rod puts its clevis tab far back on the arm: when the tab goes through the end connection (the top flange plate of `flange_plates`), the rod moves out along the arm, 50 mm at a time, or it is left out when there is no room (`clearRods()` in `generate.ts`).
 
 The solver checks the structure again with them and sizes the chords, the diagonals and the rods. If the structure does not stand up anymore, they are left out.
@@ -228,7 +238,7 @@ Arms, height and load are not the only knobs. These `Params` in `generate.ts` ch
 | `colSpliceP` | 0.6 | `--col-splice` | Details | the chance of a column splice |
 | `connKindsP` | 0.35 | `--conn-kinds` | Details, more connection kinds | the chance that a beam end gets one of the newer kinds (see "Beam end connections") |
 | `skewP` | 0.3 | `--skew` | Details, skewed arms | the chance that a tree arm leaves its column at 30 or 45 degrees (see "Skewed arms"). 0 gives the trees of before. |
-| `roundP` | 0.3 | `--round-tubes` | Details, round tube braces | the chance that the braces of an arm are round tubes |
+| `roundP` | 0.3 | `--round-tubes` | Details, round tubes | the chance that the braces of an arm, or the diagonals of a truss, are round tubes |
 | `shortBraceP` | 0.5 | `--short-braces` | Details, short arm braces | the chance of a short brace on a tree arm with no room for a full one |
 
 ```sh
@@ -238,7 +248,7 @@ node cli.ts --seed 5 --form tree --arm-length 0.5,0.9 --arm-height 0.6,1
 
 A setting can give a mechanism (the status says so), never a clash or a floating part (`params-*.test.ts` and `geometry-*.test.ts`, 25 seeds for each case). One known limit: above a load of 200 kN/m (the top of the slider), a tree with short braces can have clashes.
 
-Parts must not go through each other. A secondary beam is coped (its flanges cut back) where it meets the flanges of its arm, and its plate fits between those flanges. A brace stays above the arms under it on the same face of its column, and is long enough that its two gussets don't touch. `clash.ts` checks this with boxes, and `geometry-*.test.ts` runs it on every form, 240 structures, on 72 more with every member in its other shape (`shapeP` 1), and on 72 more with round tube braces (`roundP` 1).
+Parts must not go through each other. A secondary beam is coped (its flanges cut back) where it meets the flanges of its arm, and its plate fits between those flanges. A brace stays above the arms under it on the same face of its column, and is long enough that its two gussets don't touch. `clash.ts` checks this with boxes, and `geometry-*.test.ts` runs it on every form, 240 structures, on 72 more with every member in its other shape (`shapeP` 1), and on 72 more with round tube braces (`roundP` 1). The round tube diagonals are checked on the 120 structures of each family with `roundP` 1.
 
 It can also draw a real test of RESSLab Hub instead of a seed: a specimen. For now it draws four kinds of test, each one in its test rig:
 
@@ -624,7 +634,7 @@ It needs Node 24 or newer. Node runs the `.ts` files directly. Install the deps 
 
 ```sh
 pnpm install                                          # once
-node --test                                           # solver, member checks and geometry tests
+pnpm test                                             # solver, member checks and geometry tests (3 files at once)
 pnpm run type-check                                   # checks the types (Node only strips them)
 node cli.ts --seed 5 --view iso --frames --out s5.svg # one structure, plus build frames
 pnpm dev                                              # the playground, with live reload
@@ -636,7 +646,7 @@ Files:
 - `vec.ts`: vector helpers.
 - `sections.ts`: section properties (I, tube, rod, round tube, channel, double angle, tee) from the CSV tables. The rods and the tees are made in code. The round tubes (CHS and pipes) are in `Catalog.pipes`, not in `all`, so a specimen finds its section by name as before.
 - `sections/`, `tables.ts`: the CSV tables (see `sections/README.md`), and how Node reads them. `tables.ts` also reads a hub test and its response files for `cli.ts` and `shot.ts`.
-- `solver.ts`: 3D frame solver (6 DOF per node, pinned ends, finds mechanisms), and the buckling analysis (`alphaCr`).
+- `solver.ts`: 3D frame solver (6 DOF per node, pinned ends, finds mechanisms), the buckling analysis (`alphaCr`), and the side load cases on the same factored matrix (`sideCase()`).
 - `checks.ts`: the member checks (AISC 360-22 E3, E4, E7 and F8 for round tubes, F2, F6, F9, F10, H1-1, G for shear). `tubes.test.ts` checks the round tubes, `shear.test.ts` the shear, `open-shapes.test.ts` the channels, tees and angles.
 - `generate.ts`: topology, the fix loop, trusses and rods, posts and beam splices, and the sizing. Also the specimen path (`buildSpecimen`), and it sends a brace test, a column test (also HSS) or a link test to `bench.ts`.
 - `skew.ts`: the end of a skewed arm: the cut end, its clash boxes, the skewed end plate.
