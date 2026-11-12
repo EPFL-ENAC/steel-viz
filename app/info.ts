@@ -52,6 +52,7 @@ export function describe(part: Part, r: Result): Tip {
   if (m) {
     tip.warn = m.ratio > 0.6;
     row('Ratio', `${m.ratio.toFixed(2)} (limit 0.60)`);
+    row('Case', m.case === 'gravity' ? 'gravity' : `gravity + side load ${m.case}`);
     const kN = (x: number) => `${(x / 1000).toFixed(1)} kN`;
     const kNm = (x: number) => `${(x / 1e6).toFixed(1)} kN·m`;
     row('Axial', m.Nc > 1 ? `${kN(m.N)}, compression ${kN(m.Nc)}` : kN(m.N));

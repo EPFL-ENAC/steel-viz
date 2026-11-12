@@ -29,7 +29,8 @@
 // The buckling length is the member length (K = 1). That is right when the
 // global analysis already has the sway effects (EC3 5.2.2(3)b, the same idea
 // as the AISC direct analysis method): generate.ts amplifies the moments with
-// alphaCr from solver.ts for that.
+// alphaCr from solver.ts for that, and adds the notional loads for the frame
+// imperfections (EC3 5.3.2, AISC 360-22 C2.2b).
 //
 // The tables have no Cw, no shear center and no elastic modulus for the open
 // shapes: they come from the dimensions (rects() of sections.ts), see
