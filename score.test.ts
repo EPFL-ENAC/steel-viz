@@ -43,7 +43,7 @@ const asked: [string, Partial<Params>, number?][] = [
   ...X_KINDS.map((k): [string, Partial<Params>] => [`X brace, ${X_LABEL[k]}`, { bracing: 'x', xKind: k, form: 'box', storeys: 2 }]),
   // not a tree: at the default height no arm of a tree gets a brace
   ['round tube brace', { roundP: 1, braceP: 1, form: 'box' }],
-  // rare: most tubes are smaller than CAP_MIN_D and keep the slot. The first one is seed 35.
+  // rare: most tubes are smaller than CAP_MIN_D and keep the slot. The first one is seed 13.
   ['round tube brace, end caps', { roundP: 1, braceP: 1, form: 'box' }, 48],
 ];
 for (const [kind, over, n = 12] of asked)
