@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { loadCatalog } from './sections.ts';
 import { generate } from './generate.ts';
-import { BOLT_MS, buildEnd, COOL_MS, POP_MS, SCREW_MS, seamTimes, shortestBuild, slotEnd, timeline, WELD_PAUSE, type Part } from './steel.ts';
+import { BOLT_MS, buildEnd, COOL_MS, land, LAND_CSS, POP_MS, SCREW_MS, seamTimes, shortestBuild, slotEnd, timeline, WELD_PAUSE, type Part } from './steel.ts';
 import type { V } from './vec.ts';
 import { readTables } from './tables.ts';
 
@@ -99,7 +99,7 @@ test('the bolts: after their member lands, one after the other, and fast', () =>
     }
   // a plate with 8 bolts: a bit longer than a pop of 8, far from 8 screws one after the other
   const eight = (one: number) => one + BOLT_MS * 7;
-  assert.ok(eight(SCREW_MS) < 1.25 * eight(POP_MS), `${eight(SCREW_MS)} ms for 8 bolts, ${eight(POP_MS)} before`);
+  assert.ok(eight(SCREW_MS) < 1.5 * eight(POP_MS), `${eight(SCREW_MS)} ms for 8 bolts, ${eight(POP_MS)} before`);
   assert.ok(eight(SCREW_MS) < (8 * SCREW_MS) / 3, 'far from 8 screws one after the other');
 });
 
@@ -151,6 +151,22 @@ test('the anchor nuts: they screw down after their base plate lands, in the buil
       if ('duration' in o) assert.ok(buildEnd(slots) <= Math.max(o.duration!, shortestBuild(parts, o.speed)) + 1e-6, 'the nuts end in the build time');
     }
   assert.ok(bases > 0, 'no base plate with anchor rods in the test structures');
+});
+
+test('the landing curve: the SVG one stays close to land(), it never stops before the end', () => {
+  const [x1, y1, x2, y2] = LAND_CSS.match(/[\d.]+/g)!.map(Number);
+  const at = (m: number, a: number, b: number) => 3 * (1 - m) ** 2 * m * a + 3 * (1 - m) * m * m * b + m ** 3;
+  for (let i = 0; i <= 100; i++) {
+    const x = i / 100;
+    let [lo, hi] = [0, 1];
+    for (let j = 0; j < 40; j++) [lo, hi] = at((lo + hi) / 2, x1, x2) < x ? [(lo + hi) / 2, hi] : [lo, (lo + hi) / 2];
+    assert.ok(Math.abs(at((lo + hi) / 2, y1, y2) - land(x)) < 0.02, `at ${x}: ${at((lo + hi) / 2, y1, y2)} in CSS, ${land(x)}`);
+  }
+  assert.equal(land(0), 0);
+  assert.ok(Math.abs(land(1) - 1) < 1e-12);
+  // the speed at the end: not 0 (no crawl), but small (a soft touch)
+  const end = (land(1) - land(0.99)) / 0.01;
+  assert.ok(end > 0.1 && end < 0.25, `speed at the end ${end}`);
 });
 
 test('no part starts before the parts it stands on land (no duration)', () => {

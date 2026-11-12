@@ -145,11 +145,15 @@ export type Slot = {
 };
 export const BOLT_MS = 60; // between two bolts of one connection
 export const POP_MS = 220; // one bolt pops in (no effects)
-export const SCREW_MS = 320; // one bolt goes in and turns, then its nut (effects)
-// Set down (effects): a member or a column stops HOVER of its way short at
-// SET_AT of its time, then it is lowered into place in the rest of it
-export const HOVER = 0.05;
-export const SET_AT = 0.55;
+export const SCREW_MS = 520; // one bolt goes in and turns, then its nut (effects)
+export const BOLT_IN = 0.45; // its head takes this part of the time of a bolt, its nut the rest
+// How a part comes in (effects): its speed goes with the way it has left, so
+// it slows down as on a log scale, never crawls, and touches down with a small
+// speed. LAND_K: how much it slows. LAND_CSS is the same curve for the SVG (a
+// test checks that they stay close).
+export const LAND_K = 3;
+export const land = (t: number) => (1 - Math.exp(-LAND_K * t)) / (1 - Math.exp(-LAND_K));
+export const LAND_CSS = 'cubic-bezier(.13,.45,.43,.97)';
 export const WELD_PAUSE = 80;
 export const COOL_MS = 350;
 // the time to weld a seam of this length, mm

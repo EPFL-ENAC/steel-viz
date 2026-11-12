@@ -34,7 +34,7 @@
 // where every bolt of it is. All the seams of the structure are one buffer and
 // one draw call (WELD_VS), made at build().
 import { add, cross, dot, mul, norm, sub, type V } from './vec.ts';
-import { buildEnd, camera, COOL_MS, HOVER, seamTimes, SET_AT, timeline, type Part } from './steel.ts';
+import { BOLT_IN, buildEnd, camera, COOL_MS, land, seamTimes, timeline, type Part } from './steel.ts';
 import { triangles } from './triangles.ts';
 import { I4, MAX_KNOTS, MAX_ZONES, movePoint, type DeformState, type Move } from './deform.ts';
 
@@ -55,7 +55,11 @@ const FADE = 0.55; // with marks: how far the parts with no mark go toward bg
 const MARKED = 1.5; // with marks: the lines of a marked part are this much wider
 // the build effects
 const TRAVEL = 55; // mm: how far out a head or a nut starts
-const TURN = (4 * Math.PI) / 3; // it turns this much on its way in: a hex and a 12 side bar end as they start
+// how much a head and a nut turn on their way in. A hex turned 60 degrees
+// looks the same, so a turn faster than about 30 degrees a frame looks still,
+// or backward. With SCREW_MS, these stay under 16 degrees a frame at 60 fps.
+const HEAD_TURN = (2 * Math.PI) / 3;
+const NUT_TURN = Math.PI;
 const SPARK = 4; // CSS px: the radius of the welding spark
 const BEAD = 0.35; // the hot bead, in spark radii
 const LIFT = 8; // mm: a seam sits in the corner of two faces, it draws this much toward the eye
@@ -112,8 +116,10 @@ export type Viewer = {
 // role (bn).
 type Geo = { tri: number[]; seg: number[]; rad: number[]; ta: number[]; sa: number[] };
 // the roles: a head moves in, then the nut (after a head, or alone on an anchor
-// rod), and the bolt end past the nut shows with the nut. 0: not a bolt.
+// rod), and the bolt end past the nut shows with the nut. 0: not a bolt. A
+// mark has the role of its piece plus MARK.
 const ROLE = { head: 1, nut: 2, alone: 3, end: 4 };
+const MARK = 4;
 const BAR = 12; // the faces of a round bar. LINE_VS needs tan(pi / BAR)
 function frame(nn: V) {
   const ref: V = Math.abs(nn[2]) > 0.9 ? [1, 0, 0] : [0, 0, 1];
@@ -140,9 +146,24 @@ function prism(b: V, nn: V, h: number, r: number, k: number, { tri, seg, rad, ta
   for (let i = 0; i < 3 * k; i++) sa.push(...at);
 }
 // i: the index of the bolt in its part
-const head = (b: V, nn: V, g: Geo, i: number) => prism(b, nn, HEAD, R, 6, g, i, ROLE.head);
+// A line on the outer face of a head or a nut, from r0 to a corner. It turns
+// with it and shows only while it turns, so the turn reads even on a hex (as
+// the match mark a fitter draws on a nut, to see how far it turned).
+function mark(b: V, nn: V, h: number, r0: number, { seg, rad, sa }: Geo, bolt: number, role: number) {
+  const top = add(b, mul(nn, h));
+  const [a1] = frame(nn);
+  seg.push(...add(top, mul(a1, r0)), ...add(top, mul(a1, R)));
+  rad.push(0, 0, 0);
+  sa.push(...b, bolt, ...nn, role + MARK);
+}
+function head(b: V, nn: V, g: Geo, i: number) {
+  prism(b, nn, HEAD, R, 6, g, i, ROLE.head);
+  mark(b, nn, HEAD, 0, g, i, ROLE.head);
+}
 function nut(b: V, nn: V, g: Geo, i: number, alone = false) {
   prism(b, nn, NUT, R, 6, g, i, alone ? ROLE.alone : ROLE.nut);
+  // from the bolt end past the nut
+  mark(b, nn, NUT, SHANK, g, i, alone ? ROLE.alone : ROLE.nut);
   // the end of an anchor rod is there before its nut
   prism(add(b, mul(nn, NUT)), nn, TIP, SHANK, BAR, g, i, alone ? 0 : ROLE.end);
 }
@@ -194,11 +215,14 @@ vec3 move(vec3 p) {
 }`;
 
 // A bolt screws in: its head comes in along its axis and turns, then its nut
-// comes on from the other side and turns too. bolt: the ms since the bolts of
-// this part started, the ms between two bolts, the ms of one (REST: all of them
-// are in). Bolt i starts at i times the gap. Its head moves from 0 to 0.6 of
-// its time, its nut from 0.6 to 1 (a nut alone, from 0 to 1). Before that it is
-// hidden (sHide). The pieces that are not a bolt (role 0) never move.
+// comes on from the other side and is turned tight. bolt: the ms since the
+// bolts of this part started, the ms between two bolts, the ms of one (REST:
+// all of them are in). Bolt i starts at i times the gap. Its head moves from 0
+// to BOLT_IN of its time, its nut from BOLT_IN to 1 (a nut alone, from 0 to 1).
+// Before that it is hidden (sHide), and a mark is hidden after it too. A piece
+// slides in fast (k^3 of its way left) but turns at a steadier speed (k^1.5),
+// so it still turns once it is in place. The pieces that are not a bolt (role
+// 0) never move.
 const SCREW = `
 uniform vec3 bolt;
 layout(location = 4) in vec4 bb;
@@ -212,17 +236,19 @@ void screwAt() {
   sHide = false;
   float role = bn.w;
   if (role < 0.5) return;
+  bool mark = role > ${MARK}.5;
+  if (mark) role -= ${MARK}.0;
   float s = (bolt.x - bb.w * bolt.y) / bolt.z;
-  vec2 span = role < 1.5 ? vec2(0.0, 0.6) : role < 2.5 ? vec2(0.6, 1.0) : role < 3.5 ? vec2(0.0, 1.0) : vec2(0.6, 0.6);
-  if (s < span.x) {
+  float a = ${BOLT_IN.toFixed(3)};
+  vec2 span = role < 1.5 ? vec2(0.0, a) : role < 2.5 ? vec2(a, 1.0) : role < 3.5 ? vec2(0.0, 1.0) : vec2(a, a);
+  if (s < span.x || (mark && s >= span.y)) {
     sHide = true;
     return;
   }
   if (span.y <= span.x) return;
-  float k = 1.0 - clamp((s - span.x) / (span.y - span.x), 0.0, 1.0);
-  k = k * k * k; // what is left of the way: an ease out
-  sOff = bn.xyz * (${TRAVEL.toFixed(1)} * k);
-  sTurn = ${TURN.toFixed(5)} * k;
+  float k = 1.0 - clamp((s - span.x) / (span.y - span.x), 0.0, 1.0); // what is left of its time
+  sOff = bn.xyz * (${TRAVEL.toFixed(1)} * k * k * k);
+  sTurn = (role < 1.5 ? ${HEAD_TURN.toFixed(5)} : ${NUT_TURN.toFixed(5)}) * k * sqrt(k);
 }
 // v turned about the axis of the bolt
 vec3 spin(vec3 v) {
@@ -970,9 +996,6 @@ export function createViewer(
   let clock: number | null = null; // seek(): the build stays at this time
   let played: [number, number | undefined, boolean] | null = null; // the last build(), for seek()
   const ease = (t: number) => 1 - (1 - t) ** 3;
-  // set down (effects): fast in, it stops a bit short, then it is lowered
-  const setDown = (t: number) => (t < SET_AT ? (1 - HOVER) * ease(t / SET_AT) : 1 - HOVER + HOVER * smooth((t - SET_AT) / (1 - SET_AT)));
-  const smooth = (t: number) => t * t * (3 - 2 * t);
   const animate = (now: number): boolean => {
     if (!anim) return false;
     const t = (anim.t = clock ?? now - anim.t0);
@@ -995,7 +1018,8 @@ export function createViewer(
         p.fade = ease(u);
         return;
       }
-      const k = anim!.effects && (p.part.kind === 'member' || p.part.kind === 'column') ? setDown(u) : ease(u);
+      // with the effects, it slows down as on a log scale (land())
+      const k = anim!.effects ? land(u) : ease(u);
       const far = p.part.kind === 'plate' || p.part.kind === 'base' || p.part.kind === 'slab' ? 0.12 * radius : 2.6 * radius;
       p.off = mul(anim!.dirs[i], far * (1 - k));
       // the anchor nuts of a base plate screw down after it lands
