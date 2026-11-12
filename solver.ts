@@ -1,7 +1,8 @@
 // A small 3D frame solver: direct stiffness method, dense Gauss elimination.
 // Units: N, mm, MPa. 6 DOF per node: ux uy uz rx ry rz (global).
 // alphaCr() gives the elastic critical load factor of the whole structure
-// (linear buckling with the geometric stiffness, EC3 5.2.1).
+// (linear buckling with the geometric stiffness, EC3 5.2.1). sideCase() solves
+// one more load case on the same factored matrix (the notional loads).
 //
 // Local frame of an element: x along it (u), z along the section depth (w),
 // y = w x u (v). Same rule as the renderer: a vertical member has its depth
@@ -109,29 +110,40 @@ function invert(a: M): M {
   return m.map((r) => r.slice(n));
 }
 
-type Prepared = { k: M; f0: number[]; R: V[]; rel: number[]; kFull: M; f0Full: number[]; ql: V; L: number };
+type Prepared = { k: M; f0: number[]; R: V[]; rel: number[]; kFull: M; f0Full: number[]; ql: V; L: number; kcc?: M };
 
-// Element matrix after releases (static condensation), in local coordinates.
+// Element matrix after releases (static condensation), in local coordinates,
+// and the fixed end forces of its load (q, or q plus a side part, see loadOf).
 function prepare(nodes: FNode[], e: Elem): Prepared {
   const { u, v, w, L } = localFrame(nodes[e.i].x, nodes[e.j].x);
   const R = [u, v, w];
   const kFull = localK(e.p, L);
-  const qg = e.q ?? [0, 0, 0];
-  const ql: V = [dot(qg, u), dot(qg, v), dot(qg, w)];
-  const f0Full = localF0(ql, L);
   const rel = [...(e.pinI ? [4, 5] : []), ...(e.pinJ ? [10, 11] : [])];
-  if (!rel.length) return { k: kFull, f0: f0Full, R, rel, kFull, f0Full, ql, L };
+  if (!rel.length) return { k: kFull, R, rel, kFull, L, ...loadOf(e.q ?? [0, 0, 0], R, L, kFull, rel) };
   const keep = [...Array(12).keys()].filter((i) => !rel.includes(i));
   const kcc = invert(rel.map((i) => rel.map((j) => kFull[i][j])));
   const k = zeros(12, 12);
-  const f0 = new Array(12).fill(0);
   for (const a of keep) {
     // row a of K_rc * Kcc^-1
     const t = rel.map((_, c) => rel.reduce((s, ci, x) => s + kFull[a][ci] * kcc[x][c], 0));
     for (const b of keep) k[a][b] = kFull[a][b] - rel.reduce((s, cj, c) => s + t[c] * kFull[cj][b], 0);
+  }
+  return { k, R, rel, kFull, L, kcc, ...loadOf(e.q ?? [0, 0, 0], R, L, kFull, rel, kcc) };
+}
+
+// the load part of an element: its local load and fixed end forces, condensed
+function loadOf(qg: V, R: V[], L: number, kFull: M, rel: number[], kcc?: M) {
+  const [u, v, w] = R;
+  const ql: V = [dot(qg, u), dot(qg, v), dot(qg, w)];
+  const f0Full = localF0(ql, L);
+  if (!kcc) return { ql, f0Full, f0: f0Full };
+  const f0 = new Array(12).fill(0);
+  for (let a = 0; a < 12; a++) {
+    if (rel.includes(a)) continue;
+    const t = rel.map((_, c) => rel.reduce((s, ci, x) => s + kFull[a][ci] * kcc[x][c], 0));
     f0[a] = f0Full[a] - rel.reduce((s, cj, c) => s + t[c] * f0Full[cj], 0);
   }
-  return { k, f0, R, rel, kFull, f0Full, ql, L };
+  return { ql, f0Full, f0 };
 }
 
 // global = T^T local, T = blockdiag(R, R, R, R)
@@ -204,27 +216,70 @@ function assemble(K: M, k: M, R: V[], idx: number[]) {
 
 const dofs = (e: Elem) => [...[0, 1, 2, 3, 4, 5].map((x) => e.i * 6 + x), ...[0, 1, 2, 3, 4, 5].map((x) => e.j * 6 + x)];
 
+// the load vector: equivalent nodal loads of the elements, then the node loads
+function loads(nodes: FNode[], elems: Elem[], prep: Prepared[]): number[] {
+  const F = new Array(nodes.length * 6).fill(0);
+  elems.forEach((e, ei) => {
+    const { f0, R } = prep[ei];
+    const idx = dofs(e);
+    for (let a = 0; a < 4; a++)
+      for (let r = 0; r < 3; r++) {
+        let t = 0;
+        for (let x = 0; x < 3; x++) t += R[x][r] * f0[3 * a + x];
+        F[idx[3 * a + r]] -= t; // equivalent nodal load
+      }
+  });
+  nodes.forEach((nd, i) => {
+    if (!nd.f) return;
+    for (let x = 0; x < 6; x++) F[i * 6 + x] += nd.f[x] ?? 0;
+  });
+  return F;
+}
+
+// the forces of one element from the moves d (f[] are forces on the element)
+function elemForces(e: Elem, p: Prepared, d: Float64Array): { f: number[]; forces: ElemForces } {
+  const { R, rel, kFull, f0Full, ql, L } = p;
+  const dg = [...d.slice(e.i * 6, e.i * 6 + 6), ...d.slice(e.j * 6, e.j * 6 + 6)];
+  const dl = toLocal(R, dg);
+  if (rel.length) {
+    // released rotations: the element end turns freely, its end moment is 0
+    const keep = [...Array(12).keys()].filter((i) => !rel.includes(i));
+    const kcc = p.kcc!;
+    const rhs = rel.map((i) => -(f0Full[i] + keep.reduce((s, j) => s + kFull[i][j] * dl[j], 0)));
+    rel.forEach((i, a) => (dl[i] = rel.reduce((s, _, b) => s + kcc[a][b] * rhs[b], 0)));
+  }
+  const f = kFull.map((row, i) => row.reduce((s, kij, j) => s + kij * dl[j], 0) + f0Full[i]);
+  // moments along the element, sampled
+  let My = 0;
+  let Mz = 0;
+  for (let s = 0; s <= 10; s++) {
+    const x = (L * s) / 10;
+    Mz = Math.max(Mz, Math.abs(-f[5] + x * f[1] + (ql[1] * x * x) / 2));
+    My = Math.max(My, Math.abs(f[4] + x * f[2] + (ql[2] * x * x) / 2));
+  }
+  const Vy = Math.max(Math.abs(f[1]), Math.abs(f[7]));
+  const Vz = Math.max(Math.abs(f[2]), Math.abs(f[8]));
+  return { f, forces: { N: Math.max(Math.abs(f[0]), Math.abs(f[6])), Nc: Math.max(0, f[0], -f[6]), My, Mz, Vy, Vz } };
+}
+
+const backsubAll = (r: { sys: System }, F: number[], n: number) => {
+  const { free, lu } = r.sys;
+  const x = backsub(lu, free.map((g) => F[g]));
+  const d = new Float64Array(n);
+  free.forEach((g, i) => (d[g] = x[i]));
+  return d;
+};
+
 export function solve(nodes: FNode[], elems: Elem[], pivotTol = 1e-9): Solved {
   const n = nodes.length * 6;
   const K = zeros(n, n);
-  const F = new Array(n).fill(0);
   const prep = elems.map((e) => prepare(nodes, e));
-  elems.forEach((e, ei) => {
-    const { k, f0, R } = prep[ei];
-    const idx = dofs(e);
-    assemble(K, k, R, idx);
-    for (let a = 0; a < 4; a++)
-      for (let r = 0; r < 3; r++) {
-        let s = 0;
-        for (let x = 0; x < 3; x++) s += R[x][r] * f0[3 * a + x];
-        F[idx[3 * a + r]] -= s; // equivalent nodal load
-      }
-  });
+  elems.forEach((e, ei) => assemble(K, prep[ei].k, prep[ei].R, dofs(e)));
+  const F = loads(nodes, elems, prep);
 
   const free: number[] = [];
   nodes.forEach((nd, i) => {
     for (let x = 0; x < 6; x++) {
-      if (nd.f) F[i * 6 + x] += nd.f[x] ?? 0;
       const fx = Array.isArray(nd.fixed) ? nd.fixed[x] : nd.fixed;
       if (!fx) free.push(i * 6 + x);
     }
@@ -235,38 +290,26 @@ export function solve(nodes: FNode[], elems: Elem[], pivotTol = 1e-9): Solved {
     const g = free[lu.bad];
     return { ok: false, node: Math.floor(g / 6), dof: g % 6, dofName: DOF_NAMES[g % 6] };
   }
-  const x = backsub(lu, free.map((g) => F[g]));
-  const d = new Float64Array(n);
-  free.forEach((g, i) => (d[g] = x[i]));
-
+  const sys = { free, Kff, lu, prep };
+  const d = backsubAll({ sys }, F, n);
   const axial = new Float64Array(elems.length);
   const forces = elems.map((e, ei) => {
-    const { R, rel, kFull, f0Full, ql, L } = prep[ei];
-    const dg = [...d.slice(e.i * 6, e.i * 6 + 6), ...d.slice(e.j * 6, e.j * 6 + 6)];
-    const dl = toLocal(R, dg);
-    if (rel.length) {
-      // released rotations: the element end turns freely, its end moment is 0
-      const keep = [...Array(12).keys()].filter((i) => !rel.includes(i));
-      const kcc = invert(rel.map((i) => rel.map((j) => kFull[i][j])));
-      const rhs = rel.map((i) => -(f0Full[i] + keep.reduce((s, j) => s + kFull[i][j] * dl[j], 0)));
-      rel.forEach((i, a) => (dl[i] = rel.reduce((s, _, b) => s + kcc[a][b] * rhs[b], 0)));
-    }
-    const f = kFull.map((row, i) => row.reduce((s, kij, j) => s + kij * dl[j], 0) + f0Full[i]);
-    // moments along the element, sampled; f[] are forces on the element
-    let My = 0;
-    let Mz = 0;
-    for (let s = 0; s <= 10; s++) {
-      const x = (L * s) / 10;
-      Mz = Math.max(Mz, Math.abs(-f[5] + x * f[1] + (ql[1] * x * x) / 2));
-      My = Math.max(My, Math.abs(f[4] + x * f[2] + (ql[2] * x * x) / 2));
-    }
+    const { f, forces } = elemForces(e, prep[ei], d);
     // f[6] > 0 (f[0] < 0) pulls the element: tension
     axial[ei] = (f[6] - f[0]) / 2;
-    const Vy = Math.max(Math.abs(f[1]), Math.abs(f[7]));
-    const Vz = Math.max(Math.abs(f[2]), Math.abs(f[8]));
-    return { N: Math.max(Math.abs(f[0]), Math.abs(f[6])), Nc: Math.max(0, f[0], -f[6]), My, Mz, Vy, Vz };
+    return forces;
   });
-  return { ok: true, d, forces, axial, sys: { free, Kff, lu, prep } };
+  return { ok: true, d, forces, axial, sys };
+}
+
+// One more load case on a solved structure, with the same factored matrix
+// (one back substitution): all the loads of the structure, plus the forces
+// `extra` on some nodes (the notional loads of generate.ts).
+export function sideCase(nodes: FNode[], elems: Elem[], r: Extract<Solved, { ok: true }>, extra: { node: number; f: V }[]): ElemForces[] {
+  const F = loads(nodes, elems, r.sys.prep);
+  for (const { node, f } of extra) for (let x = 0; x < 3; x++) F[node * 6 + x] += f[x];
+  const d = backsubAll(r, F, nodes.length * 6);
+  return elems.map((e, ei) => elemForces(e, r.sys.prep[ei], d).forces);
 }
 
 // Geometric stiffness of an element under the axial force N (tension > 0),

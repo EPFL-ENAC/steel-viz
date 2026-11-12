@@ -1,8 +1,9 @@
 // node --test
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { alphaCr, E, solve, type Elem, type FNode } from './solver.ts';
+import { alphaCr, E, sideCase, solve, type Elem, type FNode } from './solver.ts';
 import { iSection, rhsSection } from './sections.ts';
+import type { V } from './vec.ts';
 
 const ipe = iSection('IPE 300', 300, 150, 10.7, 7.1);
 const hss = rhsSection('SHS 100', 100, 100, 6);
@@ -117,3 +118,48 @@ test('nothing in compression: no buckling', () => {
   const nodes: FNode[] = [{ x: [0, 0, 3000], fixed: true }, { x: [0, 0, 0], f: [0, 0, -1e5] }];
   assert.equal(alpha(nodes, [{ i: 0, j: 1, p: hss }]), Infinity);
 });
+
+// ---------------------------------------------------------- side cases
+// A two storey portal: two columns fixed at the base, 6000 mm high, levels
+// at 3000 and 6000, beams 6000 mm pinned at both ends, no self weight.
+// q1 = 20 N/mm at level 1, q2 = 10 N/mm at level 2: each column gets
+// 60 kN at level 1 and 30 kN at level 2. The side load of generate.ts goes
+// on the column nodes, phi times that.
+function twoStoreys() {
+  const nodes: FNode[] = [];
+  for (const x of [0, 6000]) nodes.push({ x: [x, 0, 0], fixed: true }, { x: [x, 0, 3000] }, { x: [x, 0, 6000] });
+  const col = (i: number, j: number): Elem => ({ i, j, p: ipe });
+  const beam = (i: number, j: number, q: number): Elem => ({ i, j, p: ipe, pinI: true, pinJ: true, q: [0, 0, -q] });
+  const elems = [col(0, 1), col(1, 2), col(3, 4), col(4, 5), beam(1, 4, 20), beam(2, 5, 10)];
+  const r = solve(nodes, elems);
+  assert.ok(r.ok);
+  return { nodes, elems, r };
+}
+const bend = (f: { My: number; Mz: number }) => Math.max(f.My, f.Mz);
+const shear = (f: { Vy: number; Vz: number }) => Math.max(f.Vy, f.Vz);
+
+test('side case: no extra force gives the gravity forces', () => {
+  const { nodes, elems, r } = twoStoreys();
+  assert.deepEqual(sideCase(nodes, elems, r, []), r.forces);
+});
+
+for (const [phi, rule] of [[1 / 200, 'EC3, m = 1'], [0.002, 'AISC']] as const)
+  test(`side case, phi ${phi} (${rule}): each storey of a column takes the side load above it`, () => {
+    const { nodes, elems, r } = twoStoreys();
+    // gravity alone: the columns stand straight, no shear, no moment
+    for (const k of [0, 1, 2, 3]) assert.ok(bend(r.forces[k]) < 1 && shear(r.forces[k]) < 1e-3, `column element ${k}`);
+    for (const sign of [1, -1]) {
+      // per column: phi 60 kN at level 1, phi 30 kN at level 2
+      const H1 = phi * 60000;
+      const H2 = phi * 30000;
+      const at = (H: number) => (node: number) => ({ node, f: [sign * H, 0, 0] as V });
+      const f = sideCase(nodes, elems, r, [...[1, 4].map(at(H1)), ...[2, 5].map(at(H2))]);
+      for (const [bottom, top] of [[0, 1], [2, 3]]) {
+        near(shear(f[top]), H2); // 150 N for phi 1/200
+        near(shear(f[bottom]), H1 + H2); // 450 N
+        near(bend(f[top]), H2 * 3000);
+        near(bend(f[bottom]), H2 * 6000 + H1 * 3000); // 1.8 kN·m for phi 1/200
+        near(f[bottom].N, 90000); // the weight is still there
+      }
+    }
+  });
