@@ -7,7 +7,7 @@
 // of the column). The member is first made with square ends, then the points
 // of its first ring slide along its axis onto that plane.
 import { add, cross, dot, mul, norm, sub, type V } from './vec.ts';
-import { box3, boxOf, EDGE, PITCH, SETBACK, type Box, type ConnType, type Face, type Geo, type Hardware } from './steel.ts';
+import { box3, boxOf, EDGE, PITCH, profileSeam, SETBACK, type Box, type ConnType, type Face, type Geo, type Hardware } from './steel.ts';
 
 // How far a point `a` mm across the member (along g.v) slides along g.u to
 // reach the cut plane. The depth (g.w) is vertical and n is level, so the
@@ -80,6 +80,7 @@ function skewEndPlate(g: Geo, n: V, t: number, S: Geo, hw: Hardware) {
 export function skewHardware(g: Geo, conn: ConnType, n: V, S: Geo): Hardware {
   const hw: Hardware = { faces: [], dots: [], reach: [], boxes: [] };
   if (conn === 'end_plate') skewEndPlate(g, n, SETBACK.end_plate, S, hw);
+  else if (conn === 'welded') hw.seams = profileSeam(g, 'from', false, (a) => slide(g, n, a));
   hw.reach.push(skewReach(g, n));
   return hw;
 }

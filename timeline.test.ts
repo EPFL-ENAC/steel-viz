@@ -121,7 +121,7 @@ test('the welds: after their part lands, and in the build time', () => {
         const t = seamTimes(p.welds, w);
         assert.deepEqual(t[0][0], w.start);
         assert.ok(Math.abs(t.at(-1)![1] - (w.start + w.dur)) < 1e-9);
-        assert.ok(Math.abs((t[0][1] - t[0][0]) / (t[1][1] - t[1][0]) - 200 / 300) < 1e-9);
+        if (p.welds === seam) assert.ok(Math.abs((t[0][1] - t[0][0]) / (t[1][1] - t[1][0]) - 200 / 300) < 1e-9);
       }
       if ('duration' in o) assert.ok(buildEnd(slots) <= Math.max(o.duration!, shortestBuild(parts, o.speed)) + 1e-6, 'the welds end in the build time');
     }
