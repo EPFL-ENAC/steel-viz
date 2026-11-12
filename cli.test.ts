@@ -22,6 +22,8 @@ test('the commands of the brief', () => {
   assert.deepEqual([b.animate, b.speed, b.duration, b.step], [true, 2, 8, undefined]);
   const c = parseCliArgs(['--seed', '5', '--animate', '--speed', '0.25']);
   assert.deepEqual([c.speed, c.duration], [0.25, undefined], 'no --duration: the build keeps its own length');
+  assert.equal(parseCliArgs(['--seed', '5', '--animate', '--plain']).plain, true);
+  assert.equal(c.plain, undefined, 'bolts and welds by default');
 });
 
 test('the old commands still pass', () => {
@@ -42,6 +44,8 @@ test('what it refuses', () => {
     [['--specimen', CR1, '--step', '4', '--painter'], /not with --painter/],
     [['--seed', '5', '--speed', '2'], /--speed is for --animate/],
     [['--seed', '5', '--duration', '8'], /--duration is for --animate/],
+    [['--seed', '5', '--plain'], /--plain is for --animate/],
+    [['--seed', '5', '--animate', '--painter', '--plain'], /exact renderer, not --painter/],
     [['--seed', '5', '--animate', '--painter', '--speed', '2'], /exact renderer, not --painter/],
     [['--seed', '5', '--animate', '--painter', '--duration', '8'], /exact renderer, not --painter/],
     [['--seed', '5', '--animate', '--speed', '0'], /--speed needs a number above 0/],

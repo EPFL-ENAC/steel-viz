@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { toSpecimen } from './hub.ts';
-import { findChrome, parseShotArgs, peakStep, shotHash } from './shot.ts';
+import { findChrome, frameFile, parseShotArgs, peakStep, shotHash } from './shot.ts';
 import { loadCurves, loadRows, rowId } from './tables.ts';
 
 const CR1 = 'connections/Lee_et_al_2002_CR1';
@@ -128,6 +128,34 @@ test('the zoom', () => {
     [[CR1, '--zoom', '2', '--at', '0.5,', '--out', 'a.png'], /--at needs/],
     [[CR1, '--zoom', '2', '--at', '1.5,0.5', '--out', 'a.png'], /--at needs/],
     [[CR1, '--zoom', '2', '--at', '0.1,0.2,0.3', '--out', 'a.png'], /--at needs/],
+  ];
+  for (const [argv, message] of refused) assert.throws(() => parseShotArgs(argv), message, argv.join(' '));
+});
+
+test('frames of the build', () => {
+  const a = parseShotArgs(['--seed', '5', '--at-ms', '300,900,1500', '--out', 'b.png']);
+  assert.deepEqual([a.atMs, a.duration, a.speed], [[300, 900, 1500], 8, 1], 'the build time of the review links by default');
+  const b = parseShotArgs([CR1, '--at-ms', '0', '--duration', '4.5', '--speed', '2', '--out', 'b.png']);
+  assert.deepEqual([b.atMs, b.duration, b.speed], [[0], 4.5, 2]);
+  assert.equal(shotHash(b), 'specimen=connections%2FLee_et_al_2002_CR1&duration=4.5&speed=2');
+  assert.equal(b.plain, undefined, 'bolts and welds by default');
+  const c = parseShotArgs(['--seed', '5', '--at-ms', '300', '--plain', '--out', 'b.png']);
+  assert.equal(shotHash(c), 'seed=5&duration=8&speed=1&effects=0');
+  assert.equal(parseShotArgs([CR1, '--out', 'a.png']).duration, undefined, 'no frames: the page as it is, at rest');
+  assert.equal(frameFile('out/b.png', 300, true), 'out/b-300.png');
+  assert.equal(frameFile('out/b.png', 300, false), 'out/b.png');
+  assert.equal(frameFile('out.v2/b', 40, true), 'out.v2/b-40');
+  const refused: [string[], RegExp][] = [
+    [[CR1, '--duration', '8', '--out', 'a.png'], /are for --at-ms/],
+    [[CR1, '--speed', '2', '--out', 'a.png'], /are for --at-ms/],
+    [[CR1, '--plain', '--out', 'a.png'], /are for --at-ms/],
+    [[CR1, '--at-ms', '300', '--step', '4', '--out', 'a.png'], /not with --step/],
+    [[CR1, '--at-ms', '300', '--peak', '--out', 'a.png'], /not with --step/],
+    [[CR1, '--at-ms', '300', '--compare', '2', '--out', 'a.png'], /not for --compare/],
+    [[CR1, '--at-ms', 'x', '--out', 'a.png'], /--at-ms needs/],
+    [[CR1, '--at-ms', '300,', '--out', 'a.png'], /--at-ms needs/],
+    [[CR1, '--at-ms', '300', '--duration', '0', '--out', 'a.png'], /--duration needs/],
+    [[CR1, '--at-ms', '300', '--speed', '-1', '--out', 'a.png'], /--speed needs|ambiguous/],
   ];
   for (const [argv, message] of refused) assert.throws(() => parseShotArgs(argv), message, argv.join(' '));
 });

@@ -50,3 +50,10 @@ test('overlayParts with no change has no mark', () => {
   assert.deepEqual(o.marks, {});
   assert.equal(o.parts.length, here.parts.length);
 });
+
+// the welds only show in the build: a part that gets them is the same part
+test('diffParts: a part with welds is the same part', () => {
+  const welds: Part['welds'] = [[[0, 0, 0], [1, 0, 0]]];
+  const d = diffParts(result([part('col'), part('b1')]), result([part('col', 0, { welds }), part('b1')]));
+  assert.deepEqual(d, { added: [], gone: [], changed: [], notes: [] });
+});

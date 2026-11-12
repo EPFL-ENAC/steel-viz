@@ -34,6 +34,7 @@ node shot.ts --seed 5 --out s5.png                                   # a seed. A
 node shot.ts --seed 140 --form tree --family eu --out t.png            # a seed with a form and a family, as in the playground (default mix, aisc)
 node shot.ts --seed 5 --zoom 8 --at 0.6,0.4 --out z.png             # 8x closer, toward a point of the canvas (0,0 top left, default the middle)
 node shot.ts columns/Popov_Bertero_Chandramouli_C-1 --compare 2 --base 07e3602~1 --out c.png   # compare in one view (green new, red gone), --compare 1 side by side, --theme dark
+node shot.ts --seed 5 --at-ms 300,900,1500 --out b.png              # frames of the build (b-300.png ...), also --duration s (default 8) and --speed
 ```
 
 To look at what you change in the 3D view, you must use `shot.ts` and read the PNG (the Read tool shows images). `curl` can't reach the playground pane from the sandbox, and `shot.ts` doesn't need it: it starts its own Vite and its own headless Chrome and stops them at the end. It prints the notes of the rail and the page errors, and it exits 1 on a page error or when there is no canvas. It needs `google-chrome` on the PATH, or the env `CHROME`. A reaction wall can hide an actuator, so try another angle before you say a part is missing.

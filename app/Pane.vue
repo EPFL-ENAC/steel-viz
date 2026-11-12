@@ -98,7 +98,7 @@ function draw(animate = false, fast = false) {
     }
     viewer.setWeights(two(true));
     if (!fromViewer || fromViewer[0] !== s.az || fromViewer[1] !== s.el) viewer.view(s.az, s.el);
-    if (animate) viewer.build(a.speed, a.duration);
+    if (animate) viewer.build(a.speed, a.duration, a.effects);
   }
   if (m === '3d') {
     lastSvg = ''; // made on copy
@@ -109,7 +109,7 @@ function draw(animate = false, fast = false) {
     }
     return;
   }
-  const opts: RenderOpts = { az: s.az, el: s.el, animate, speed: a.speed, duration: a.duration, stepMs: 70, weights: two(false), size: s.size || undefined };
+  const opts: RenderOpts = { az: s.az, el: s.el, animate, speed: a.speed, duration: a.duration, effects: a.effects, stepMs: 70, weights: two(false), size: s.size || undefined };
   const out = (fast ? E.render : E.renderHLR)(b.r.parts, opts);
   lastSvg = out.svg;
   svgEl.value!.innerHTML = out.svg; // not v-html: the same string must play the build again
@@ -171,6 +171,8 @@ onMounted(() => {
   } catch {
     hasGL.value = false; // no WebGL: only the SVG
   }
+  // shot.ts calls seek() on it, to take a frame at one time of the build
+  if (import.meta.env.DEV && props.main) (window as any).__steel = viewer;
   paint();
   nextTick(() => draw(props.built?.animate));
 });

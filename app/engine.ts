@@ -45,11 +45,13 @@ export const loadBase = () =>
     };
   }));
 
-// the build time and the part speed, as this engine takes them. An old
-// timeline() has no duration: one speed for all, that makes it last as long.
-export function anim(E: Engine, parts: steel.Part[]): { speed: number; duration?: number } {
+// the build time, the part speed and the bolts and welds, as this engine
+// takes them. An old timeline() has no duration: one speed for all, that
+// makes it last as long. An old engine doesn't read effects.
+export function anim(E: Engine, parts: steel.Part[]): { speed: number; duration?: number; effects: boolean } {
   const duration = s.duration * 1000;
-  if (E.steel.shortestBuild) return { speed: s.speed, duration };
+  const effects = !!s.effects;
+  if (E.steel.shortestBuild) return { speed: s.speed, duration, effects };
   const end = E.steel.buildEnd(E.steel.timeline(parts));
-  return { speed: end > 0 && duration > 0 ? end / duration : 1 };
+  return { speed: end > 0 && duration > 0 ? end / duration : 1, effects };
 }

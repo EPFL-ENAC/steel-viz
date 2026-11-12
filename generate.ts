@@ -15,8 +15,8 @@ import { memberRatio, tooThin } from './checks.ts';
 import type { Catalog, Section } from './sections.ts';
 import { ANGLE_GAP, centroidDepth, rodSection } from './sections.ts';
 import {
-  box3, boxOf, flat, geo, grips, hardware, isRound, memberBoxes, memberFaces, resolve, splicePlates, stiffener, supportFace, BEARING_T, BEAM_CONN_KINDS, CAP_MIN_D, CONNS, EDGE, PINNED, SETBACK, SPLICE_HALF,
-  type BeamConn, type ConnType, type Fit, type Geo, type Haunch, type P2, type Part, type PartInfo, type Plate, type Rbs,
+  box3, boxOf, flat, geo, grips, hardware, isRound, memberBoxes, memberFaces, profileSeam, resolve, splicePlates, stiffener, supportFace, BEARING_T, BEAM_CONN_KINDS, CAP_MIN_D, CONNS, EDGE, PINNED, SETBACK, SPLICE_HALF,
+  type BeamConn, type ConnType, type Fit, type Geo, type Haunch, type P2, type Part, type PartInfo, type Plate, type Rbs, type Seam,
 } from './steel.ts';
 import { overlap, own } from './clash.ts';
 import { BEAM_CONNS, findSection, type BraceSpecimen, type ColumnSpecimen, type ConnSpecimen, type LinkSpecimen, type Specimen } from './specimen.ts';
@@ -1621,7 +1621,8 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
   const extras: { after: string; part: Part }[] = [];
   const extra = (id: string, on: string, ps: Plate[], from: V, type: string) => {
     const info: PartInfo = { type, of: on };
-    if (plates && ps.length) extras.push({ after: on, part: { id, step: 0, supports: [on], kind: 'plate', from, faces: ps.flatMap((q) => q.faces), boxes: ps.map((q) => q.box), dots: [], info } });
+    const welds = ps.flatMap((q) => q.seams ?? []);
+    if (plates && ps.length) extras.push({ after: on, part: { id, step: 0, supports: [on], kind: 'plate', from, faces: ps.flatMap((q) => q.faces), boxes: ps.map((q) => q.box), dots: [], info, ...(welds.length && { welds }) } });
   };
   // a specimen stands in its test rig, not on a base plate
   const rig = st.form === 'specimen' && !st.frame ? specimenRig(st) : undefined;
@@ -1636,16 +1637,17 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
       // the rig under the column, then the column with an end plate on each end
       out.push(...rig.below);
       const tp = endT(st.col);
-      const end = (id: string, z: number, on: string): Part => {
+      // the cap is welded on the column, the column on the foot
+      const end = (id: string, z: number, on: string, welds?: Seam[]): Part => {
         const f = flat(at(z), [1, 0, 0], [0, 1, 0], tp, rect(st.col.bf + 30, st.col.d + 30));
-        return { id, step: step++, supports: [on], kind: 'plate', from: [0, 0, -1], faces: f.faces, boxes: [f.box], dots: [], info: { type: 'End plate', of: lo.id } };
+        return { id, step: step++, supports: [on], kind: 'plate', from: [0, 0, -1], faces: f.faces, boxes: [f.box], dots: [], info: { type: 'End plate', of: lo.id }, ...(welds && { welds }) };
       };
       out.push(end(`${lo.id}-foot`, -tp / 2, 'foot-pin'));
       // cut at the panel zone, so the deformed shape bends where the model does
       const pz = st.arms.length ? panelZone(st) : undefined;
       const cuts = pz ? [pz.z0 - pz.ramp, pz.z0, pz.z1, pz.z1 + pz.ramp] : [];
-      out.push({ id: lo.id, step: step++, supports: [`${lo.id}-foot`], kind: 'column', from: [0, 0, 1], faces: memberFaces(lo, seg, cuts), boxes: memberBoxes(lo), dots: [], info: col(lo, 'Column', 'column'), round: isRound(lo.sec) });
-      out.push(end(`${lo.id}-cap`, st.H + tp / 2, lo.id));
+      out.push({ id: lo.id, step: step++, supports: [`${lo.id}-foot`], kind: 'column', from: [0, 0, 1], faces: memberFaces(lo, seg, cuts), boxes: memberBoxes(lo), dots: [], info: col(lo, 'Column', 'column'), round: isRound(lo.sec), welds: profileSeam(lo, 'from') });
+      out.push(end(`${lo.id}-cap`, st.H + tp / 2, lo.id, profileSeam(lo, 'to')));
       return { lo, hi: lo };
     }
     const centre = add(c.x, [0, 0, -tb / 2]);
@@ -1661,7 +1663,7 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
       // the end plate on the cap, under the clevis of the link member
       const tp = endT(st.col);
       const f = flat(at(st.H + tp / 2), [1, 0, 0], [0, 1, 0], tp, rect(st.col.bf + 30, st.col.d + 30));
-      out.push({ id: `${lo.id}-cap`, step: step++, supports: [lo.id], kind: 'plate', from: [0, 0, -1], faces: f.faces, boxes: [f.box], dots: [], info: { type: 'End plate', of: lo.id } });
+      out.push({ id: `${lo.id}-cap`, step: step++, supports: [lo.id], kind: 'plate', from: [0, 0, -1], faces: f.faces, boxes: [f.box], dots: [], info: { type: 'End plate', of: lo.id }, welds: profileSeam(lo, 'to') });
     }
     if (!sp) return { lo, hi: lo };
     const hi = geo(`${colId(ci)}-top`, sp.sec, at(sp.z + (sp.kind === 'bearing' ? BEARING_T : 0)), at(st.H), false);
@@ -1695,7 +1697,7 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
     const supports: string[] = [];
     for (const { e, hw } of hws) {
       if (plates && hw.faces.length) {
-        out.push({ id: `${g.id}-${e.at}-conn`, step: step++, supports: [e.sId], kind: 'plate', from, faces: hw.faces, boxes: hw.boxes, dots: [], info: { type: 'Connection', of: g.id, conn: [e.conn] } });
+        out.push({ id: `${g.id}-${e.at}-conn`, step: step++, supports: [e.sId], kind: 'plate', from, faces: hw.faces, boxes: hw.boxes, dots: [], info: { type: 'Connection', of: g.id, conn: [e.conn] }, ...(hw.plateSeams && { welds: hw.plateSeams }) });
         supports.push(`${g.id}-${e.at}-conn`);
       } else supports.push(e.sId);
     }
@@ -1705,9 +1707,11 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
     const n = ends.find((e) => e.skew)?.skew;
     const [faces, boxes] = [memberFaces(g, seg, cuts), memberBoxes(g)];
     const welded = plates ? hws.flatMap(({ hw }) => hw.welded ?? []) : [];
-    out.push({ id: g.id, step: step++, supports, kind: 'member', from, faces: [...(n ? cutEnd(faces, g, n) : faces), ...welded], boxes: n ? cutBoxes(boxes, g, n) : boxes, dots: [], info, round: isRound(g.sec) });
+    // the site welds at its ends: only with the plates, like the other details
+    const welds = plates ? hws.flatMap(({ hw }) => hw.seams ?? []) : [];
+    out.push({ id: g.id, step: step++, supports, kind: 'member', from, faces: [...(n ? cutEnd(faces, g, n) : faces), ...welded], boxes: n ? cutBoxes(boxes, g, n) : boxes, dots: [], info, round: isRound(g.sec), ...(welds.length && { welds }) });
     for (const { e, hw } of hws)
-      if (plates && hw.after) out.push({ id: `${g.id}-${e.at}-haunch`, step: step++, supports: [g.id, e.sId], kind: 'plate', from: g.w, faces: hw.after.faces, boxes: hw.after.boxes, dots: [], info: { type: 'Connection', of: g.id, conn: [e.conn] } });
+      if (plates && hw.after) out.push({ id: `${g.id}-${e.at}-haunch`, step: step++, supports: [g.id, e.sId], kind: 'plate', from: g.w, faces: hw.after.faces, boxes: hw.after.boxes, dots: [], info: { type: 'Connection', of: g.id, conn: [e.conn] }, ...(hw.after.seams && { welds: hw.after.seams }) });
     const dots = hws.flatMap(({ hw }) => hw.dots);
     if (bolts && dots.length) out.push({ id: `${g.id}-bolts`, step: step++, supports: [g.id, ...supports], kind: 'bolts', faces: [], dots, info: { type: 'Bolts', of: g.id, conn: ends.map((e) => e.conn) } });
   };
@@ -1730,7 +1734,7 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
     const info: PartInfo = { type: 'Post', sec, L: len(sub(pg.p1, pg.p0)), member: postId(a) };
     out.push({ id: pg.id, step: step++, supports: [plates ? bid : P.id], kind: 'member', from: up, faces: memberFaces(pg, seg), boxes: memberBoxes(pg), dots: [], info, round: isRound(pg.sec) });
     const cc = add(T, [0, 0, h - 8]);
-    if (plates) out.push({ id: `${postId(a)}-cap`, step: step++, supports: [pg.id], kind: 'plate', from: up, faces: box3(cc, up, u, sec.bf + 20, 16, sec.d + 20), boxes: [boxOf(cc, up, u, sec.bf + 20, 16, sec.d + 20)], dots: [], info: { type: 'Post cap plate', of: postId(a) } });
+    if (plates) out.push({ id: `${postId(a)}-cap`, step: step++, supports: [pg.id], kind: 'plate', from: up, faces: box3(cc, up, u, sec.bf + 20, 16, sec.d + 20), boxes: [boxOf(cc, up, u, sec.bf + 20, 16, sec.d + 20)], dots: [], info: { type: 'Post cap plate', of: postId(a) }, welds: profileSeam(pg, 'to') });
     const gauge = Math.max(50, P.sec.bf - 2 * EDGE);
     const v = cross(up, u);
     const dots = [-1, 1].flatMap((su) => [-1, 1].map((sv) => ({ p: add(add(add(T, mul(u, su * (sec.d / 2 + EDGE))), mul(v, (sv * gauge) / 2)), [0, 0, 21]), n: up })));
@@ -1922,7 +1926,7 @@ function details(
     const id = colId(ci);
     // cap plate (a specimen has an end plate there, see parts)
     const cap = add(hi.p1, [0, 0, 10]);
-    if (st.form !== 'specimen') extra(`${id}-cap`, hi.id, [flat(cap, X, Y, 20, rect(hi.sec.bf + 2 * CAP_OVER, hi.sec.d + 2 * CAP_OVER))], down, 'Cap plate');
+    if (st.form !== 'specimen') extra(`${id}-cap`, hi.id, [{ ...flat(cap, X, Y, 20, rect(hi.sec.bf + 2 * CAP_OVER, hi.sec.d + 2 * CAP_OVER)), seams: profileSeam(hi, 'to') }], down, 'Cap plate');
     // continuity plates, at the flange levels of each moment beam on a flange face
     const levels: number[] = [];
     // each beam end on a column: column, connection, bearing, top of steel,

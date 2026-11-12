@@ -16,7 +16,10 @@
 // So for each hidden piece we find the part in front of it (the grid again),
 // and draw the piece from its own step until that part lands.
 // Parts fly in from outside the frame (members along their axis, the
-// column from above), then their bolts pop in one by one.
+// column from above), then their bolts push in one by one, along their axis.
+// A site weld is a line drawn along its seam (only the pieces we see, as for
+// any line), with a spark at its tip, then the hot line cools and goes. With
+// `effects: false` the bolts pop in, and there are no welds.
 //
 // Two line weights, as in a technical drawing: outlines thick, inner edges
 // thin. We look just beside each line, on both sides. It is an outline when
@@ -30,7 +33,7 @@
 // Line widths are in mm at the drawing scale, or in px when `size` says
 // how many px wide the drawing will be shown (a logo, a favicon).
 import { add, cross, dot, mul, norm, sub, type V } from './vec.ts';
-import { BOLT_MS, camera, forSize, timeline, type Face, type Part, type RenderOpts } from './steel.ts';
+import { BOLT_IN, camera, forSize, LAND_CSS, SEAT_AT, seamTimes, timeline, type Face, type Part, type RenderOpts } from './steel.ts';
 import { triangles } from './triangles.ts';
 
 const HEAD = 13; // bolt head height, mm (M20)
@@ -38,6 +41,7 @@ const SOLID = 400; // px: up to this drawing size, bolt heads are solid
 const DEEP = 50; // mm: a jump in depth bigger than this makes an outline
 const SIDE = 1.5; // mm: how far beside (or past the end of) a line we look
 const FRONT = 5; // mm: a surface this much in front of a line end hides it
+const LIFT = 8; // mm: a weld is drawn this much toward the camera, so the face it lies on doesn't hide it
 const FOLD = 50; // degrees: a fold this sharp or more makes a line
 const EPS = 1e-3; // mm: a surface must be this much in front of a line to hide it
 
@@ -316,7 +320,7 @@ export function renderHLR(parts: Part[], o: RenderOpts): { svg: string; faces: n
   // less detail when the drawing is small
   const shown = forSize(parts, o.size).filter((p) => o.maxStep === undefined || p.step <= o.maxStep);
   const whole = shown.map((p) => p.joint?.of ?? p.id); // a pin joint is one part here
-  const heads: { part: number; corners: V[] }[] = [];
+  const heads: { part: number; corners: V[]; n: V }[] = [];
   let nFaces = 0;
   const per: number[][] = shown.map((part, pi) => {
     const faces = [...part.faces];
@@ -331,7 +335,7 @@ export function renderHLR(parts: Part[], o: RenderOpts): { svg: string; faces: n
         if (dot(nn, c) < 0.05) continue; // on a face we can't see
         const h = hexHead(b, nn, R);
         faces.push(...h.faces);
-        heads.push({ part: pi, corners: h.corners.map(toView) });
+        heads.push({ part: pi, corners: h.corners.map(toView), n: nn });
       }
     const tri: number[] = [];
     for (const fc of faces) triangles(fc.pts.map(toView), tri);
@@ -507,18 +511,39 @@ export function renderHLR(parts: Part[], o: RenderOpts): { svg: string; faces: n
   const sw = f(thinMm * scale);
   const ow = f(thickMm * scale);
   const ms = (x: number) => `${Math.round(x)}ms`;
+  const effects = !!o.animate && o.effects !== false;
+  const slots = timeline(shown, { speed: o.speed, duration: o.duration, effects });
+  const landAt = (step: number) => slots.get(step)?.land ?? 0;
+  // a bolt goes in for the first BOLT_IN of its time (the nut comes next, in 3D)
+  const push = BOLT_IN * ([...slots.values()].find((s) => s.bolt)?.bolt?.dur ?? 0);
   const css =
     `.steel path{fill:none;stroke:currentColor;stroke-width:${sw};stroke-linecap:round;stroke-linejoin:round}` +
     `.steel .o{stroke-width:${ow}}.steel .b{fill:currentColor;stroke:none}.steel .r{fill:none}.steel .a{color:var(--accent,#e30713)}` +
     // the test rig: grey, and its outline no heavier than its other lines
     `.steel .g{color:var(--rig,#9e9e9e)}.steel .g path{stroke-width:${sw}}` +
     (o.animate
-      ? `.steel .f{animation:fly .6s cubic-bezier(.2,.7,.25,1) both}` +
+      ? // with the effects, a part slows down as on a log scale (LAND_CSS)
+        `.steel .f{animation:fly .6s ${effects ? LAND_CSS : 'cubic-bezier(.2,.7,.25,1)'} both}` +
         `@keyframes fly{from{opacity:0;transform:translate(var(--dx),var(--dy))}15%{opacity:1}}` +
-        `.steel .k{animation:pop .25s cubic-bezier(.3,1.5,.5,1) both;transform-box:fill-box;transform-origin:center}` +
-        `@keyframes pop{from{opacity:0;transform:scale(2.5)}}` +
-        `.steel .h{animation:sh .2s ease-in both}@keyframes sh{to{opacity:0}}` +
-        `@media (prefers-reduced-motion:reduce){.steel .f,.steel .k{animation:none}.steel .h{display:none}}`
+        (effects
+          ? // the slab is poured (.p): it shows in place
+            `.steel .f.p{animation-name:pour}@keyframes pour{from{opacity:0}}` +
+            // a bolt comes in along its axis (--dx, --dy), and from the camera side (--s): it
+            // fades in, glides close (smooth at both ends), then goes in slowly, as it screws in (in 3D it also turns)
+            `.steel .k{animation:push ${ms(push)} linear both;transform-box:fill-box;transform-origin:center}` +
+            `@keyframes push{from{opacity:0;transform:translate(var(--dx,0px),var(--dy,0px)) scale(var(--s,1));animation-timing-function:cubic-bezier(.45,0,.55,1)}` +
+            `${Math.round(SEAT_AT * 100)}%{opacity:1;transform:translate(calc(var(--dx,0px)*.06),calc(var(--dy,0px)*.06)) scale(calc(.94 + var(--s,1)*.06));animation-timing-function:cubic-bezier(.33,.43,.6,1)}}` +
+            // a weld: the hot line is drawn (wd), then it cools and goes (wc). The spark (.z) runs at its tip
+            `.steel .w{stroke:var(--weld,#ffa21a);stroke-width:${f(thickMm * scale * 1.5)};stroke-dasharray:1 2;animation-name:wd,wc;animation-timing-function:linear,ease-in;animation-fill-mode:both}` +
+            `@keyframes wd{from{stroke-dashoffset:1}to{stroke-dashoffset:0}}@keyframes wc{to{stroke:#c8460a;opacity:0}}` +
+            `.steel .z{stroke:#ffe14d;stroke-width:${f(thickMm * scale * 3)};stroke-dasharray:.001 2;opacity:0;animation:zs linear;filter:drop-shadow(0 0 ${ow}px #ff6a00)}` +
+            `@keyframes zs{from{opacity:1;stroke-dashoffset:0}to{opacity:1;stroke-dashoffset:-1}}` +
+            `.steel .h{animation:sh .2s ease-in both}@keyframes sh{to{opacity:0}}` +
+            `@media (prefers-reduced-motion:reduce){.steel .f,.steel .f.p,.steel .k{animation:none}.steel .h,.steel .w,.steel .z{display:none}}`
+          : `.steel .k{animation:pop .25s cubic-bezier(.3,1.5,.5,1) both;transform-box:fill-box;transform-origin:center}` +
+            `@keyframes pop{from{opacity:0;transform:scale(2.5)}}` +
+            `.steel .h{animation:sh .2s ease-in both}@keyframes sh{to{opacity:0}}` +
+            `@media (prefers-reduced-motion:reduce){.steel .f,.steel .k{animation:none}.steel .h{display:none}}`)
       : '');
   const out = [
     `<svg xmlns="http://www.w3.org/2000/svg" class="steel" viewBox="${f(x0)} ${f(y0)} ${f(x1 - x0)} ${f(y1 - y0)}">`,
@@ -526,8 +551,6 @@ export function renderHLR(parts: Part[], o: RenderOpts): { svg: string; faces: n
   ];
 
   // the build animation: when each part moves, and from where
-  const slots = timeline(shown, { speed: o.speed, duration: o.duration });
-  const landAt = (step: number) => slots.get(step)?.land ?? 0;
   // how far to move a part along the 2D direction (ux, uy) so it is out of the frame
   const away = (pi: number, ux: number, uy: number) => {
     const all = [...merged[pi].vis, ...merged[pi].edge];
@@ -563,6 +586,59 @@ export function renderHLR(parts: Part[], o: RenderOpts): { svg: string; faces: n
     return fl.until === Infinity ? `<path class="${k}" d="${fl.d}"/>` : o.animate ? `<path class="${k} h" style="animation-delay:${ms(landAt(fl.until))}" d="${fl.d}"/>` : '';
   };
 
+  // where a bolt comes from (effects): 12 head sizes out along its axis (far
+  // enough to see it come, as TRAVEL in webgl.ts), and
+  // bigger when its axis points at the camera (it comes toward us)
+  const from = (hi: number) => {
+    if (!effects) return '';
+    const n = heads[hi].n;
+    const go = 12 * R * scale;
+    return `--dx:${f(dot(n, r) * go)}px;--dy:${f(-dot(n, up) * go)}px;--s:${f(1 + 0.6 * dot(n, c))};`;
+  };
+
+  // the site welds (effects): the pieces of each seam segment we see, and
+  // when the welder is at each end of a piece. A piece hidden in the end can
+  // still be seen while it is made: we keep it when what hides it comes later.
+  const beads: { d: string; t0: number; t1: number; cool: number }[] = [];
+  if (effects) {
+    const stamp = new Int32Array(sc.dmax.length).fill(-1);
+    let mark = 0;
+    const lift = (p: V): V => {
+      const v = toView(p);
+      return [v[0], v[1] + LIFT, v[2]];
+    };
+    const xy = (x: number, y: number) => `${f(x * scale)} ${f(y * scale)}`;
+    for (const p of shown) {
+      const w = slots.get(p.step)?.weld;
+      if (!w || !p.welds || p.joint) continue;
+      seamTimes(p.welds, w).forEach(([t0, t1], i) => {
+        const [a, b] = p.welds![i].map(lift);
+        const q = [...a, ...b];
+        const keep: [number, number][] = [];
+        const add = (u0: number, u1: number) => {
+          if (u1 <= u0) return;
+          const last = keep[keep.length - 1];
+          if (last && last[1] >= u0) last[1] = u1;
+          else keep.push([u0, u1]);
+        };
+        let u = 0;
+        for (const [h0, h1] of hide(sc, a, b, stamp, mark++)) {
+          add(u, h0);
+          const m = part(q, (h0 + h1) / 2, (h0 + h1) / 2);
+          const s = occluder(m);
+          if (s !== Infinity && landAt(s) > t0 + (t1 - t0) * h1) add(h0, h1);
+          u = Math.max(u, h1);
+        }
+        add(u, 1);
+        for (const [u0, u1] of keep) {
+          const pc = part(q, u0, u1);
+          if (short(pc)) continue;
+          beads.push({ d: `M${xy(pc[0], pc[2])}L${xy(pc[3], pc[5])}`, t0: t0 + (t1 - t0) * u0, t1: t0 + (t1 - t0) * u1, cool: w.cool });
+        }
+      });
+    }
+  }
+
   // in step order, so a later part paints over an earlier one (only the bolt fills care)
   const order = shown.map((_, i) => i).sort((i, j) => shown[i].step - shown[j].step);
   let nDots = 0;
@@ -575,7 +651,8 @@ export function renderHLR(parts: Part[], o: RenderOpts): { svg: string; faces: n
     const acc = p.accent ? 'a' : p.kind === 'rig' || p.kind === 'slab' ? 'g' : '';
     if (o.animate && p.kind === 'bolts') {
       // one group per bolt, each line goes with the nearest head
-      const start = slots.get(p.step)!.start;
+      const sl = slots.get(p.step)!;
+      const start = sl.start;
       const ids = [...new Set(fills.map((fl) => fl.head))];
       const ctr = ids.map((hi) => {
         const cs = heads[hi].corners;
@@ -591,7 +668,7 @@ export function renderHLR(parts: Part[], o: RenderOpts): { svg: string; faces: n
       ids.forEach((hi, k) => {
         const v = merged[pi].vis.filter((g) => near(g) === k);
         const e = merged[pi].edge.filter((g) => near(g) === k);
-        out.push(`<g class="k" style="animation-delay:${ms(start + k * BOLT_MS / (o.speed ?? 1))}">`);
+        out.push(`<g class="k" style="${from(hi)}animation-delay:${ms(start + k * (sl.bolt?.gap ?? 0))}">`);
         if (v.length) out.push(`<path d="${d(v)}"/>`);
         if (e.length) out.push(`<path class="o" d="${d(e)}"/>`);
         for (const fl of fills) if (fl.head === hi) out.push(fill(fl));
@@ -602,7 +679,7 @@ export function renderHLR(parts: Part[], o: RenderOpts): { svg: string; faces: n
       out.push('</g>');
       continue;
     }
-    const cls = [acc, o.animate ? 'f' : ''].filter(Boolean).join(' ');
+    const cls = [acc, o.animate ? 'f' : '', effects && p.kind === 'slab' ? 'p' : ''].filter(Boolean).join(' ');
     out.push(`<g${cls ? ` class="${cls}"` : ''}${o.animate ? ` style="${fly(pi)}"` : ''}>`);
     if (vis) out.push(`<path d="${vis}"/>`);
     if (edge) out.push(`<path class="o" d="${edge}"/>`);
@@ -610,6 +687,12 @@ export function renderHLR(parts: Part[], o: RenderOpts): { svg: string; faces: n
     for (const fl of fills) out.push(fill(fl));
     out.push('</g>');
   }
+  // the welds, on top of all
+  for (const b of beads)
+    out.push(
+      `<path class="w" pathLength="1" style="animation-delay:${ms(b.t0)},${ms(b.t1)};animation-duration:${ms(b.t1 - b.t0)},${ms(b.cool)}" d="${b.d}"/>`,
+      `<path class="z" pathLength="1" style="animation-delay:${ms(b.t0)};animation-duration:${ms(b.t1 - b.t0)}" d="${b.d}"/>`,
+    );
   out.push('</svg>');
   return { svg: out.join('\n'), faces: nFaces, dots: nDots, ms: performance.now() - t0 };
 }

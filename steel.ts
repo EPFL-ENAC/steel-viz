@@ -44,9 +44,12 @@ export type PartInfo = { type: string; of?: string; sec?: Section; L?: number; c
 // tongue end. A joint draws, arrives and is picked as one part: a mount has the
 // step of `of`, and the renderers don't see an edge between the two.
 export type Joint = { of: string; pin: V; end: V };
+// welds: the site welds this part gets when it is put in place, as 3D
+// segments in mm, in the order the welder goes. Only the build animation
+// draws them: at rest a part looks the same with or without them.
 export type Part = {
   id: string; step: number; faces: Face[]; dots: Dot[]; supports: string[]; boxes?: Box[]; accent?: boolean; kind?: Kind; from?: V; info?: PartInfo;
-  round?: boolean; joint?: Joint;
+  round?: boolean; joint?: Joint; welds?: Seam[];
 };
 
 // Less detail when the drawing is small: at 160 px or less bolts are only
@@ -128,24 +131,97 @@ export function gripAt(p: V, n: V, boxes: Box[]): number | undefined {
 // crane (there are CRANES), and two of them never start closer than GAP, so
 // a few beams come in at once, one a bit after the other. Plates are put on
 // by hand: no crane. Bolts start when their member lands.
-export type Slot = { start: number; dur: number; land: number };
-export const BOLT_MS = 60; // between two bolts of one connection
+// bolt, on a bolts part: bolt k starts at start + k * gap and takes dur.
+// weld, on a part with welds (with the effects only): the welder starts
+// WELD_PAUSE after it lands and goes along Part.welds in dur, then the hot
+// trail takes cool to fade. nuts, on a base plate with anchor rods (with the
+// effects only): nut k screws down at start + k * gap, takes dur, and the last
+// one is on at end. Nothing waits for a bolt, a weld or a nut.
+export type Slot = {
+  start: number; dur: number; land: number;
+  bolt?: { gap: number; dur: number };
+  weld?: { start: number; dur: number; cool: number };
+  nuts?: { start: number; gap: number; dur: number; end: number };
+};
+export const BOLT_MS = 60; // between two bolts of one connection (no effects)
+export const POP_MS = 220; // one bolt pops in (no effects)
+// With the effects, one bolt takes SCREW_MS, SCREW_GAP after the one before.
+// Its head takes the first BOLT_IN of that time, its nut the rest. A head or
+// a nut comes close in the first SEAT_AT of its own time, then it screws in:
+// it turns by HEAD_TURN or NUT_TURN (rad) and moves in with the turn, like on
+// a thread. Its turn slows down as (1 - u)^SCREW_EXP, so it stops tight. A hex
+// turned by 60 degrees looks the same: faster than about 15 degrees a frame,
+// the eye can't follow the turn (a test keeps it under 12 at speed 1).
+export const SCREW_MS = 2300;
+export const SCREW_GAP = 100;
+export const BOLT_IN = 0.45;
+export const SEAT_AT = 0.45; // long enough to see it come from far
+export const HEAD_TURN = (4 * Math.PI) / 3;
+export const NUT_TURN = 2 * Math.PI;
+export const SCREW_EXP = 1.3;
+// How a part comes in (effects): its speed goes with the way it has left, so
+// it slows down as on a log scale, never crawls, and touches down with a small
+// speed. LAND_K: how much it slows. LAND_CSS is the same curve for the SVG (a
+// test checks that they stay close).
+export const LAND_K = 3;
+export const land = (t: number) => (1 - Math.exp(-LAND_K * t)) / (1 - Math.exp(-LAND_K));
+export const LAND_CSS = 'cubic-bezier(.13,.45,.43,.97)';
+export const WELD_PAUSE = 80;
+export const COOL_MS = 350;
+// the time to weld a seam of this length, mm
+export const weldMs = (mm: number) => Math.min(900, 250 + mm / 2);
+export const seamLength = (welds: [V, V][]) => welds.reduce((s, [a, b]) => s + Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]), 0);
+// when each segment of the seam is made: [from, to] in ms
+export function seamTimes(welds: [V, V][], w: { start: number; dur: number }): [number, number][] {
+  const len = seamLength(welds) || 1;
+  let at = 0;
+  return welds.map(([a, b]) => {
+    const t0 = w.start + (at / len) * w.dur;
+    at += Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
+    return [t0, w.start + (at / len) * w.dur];
+  });
+}
 export const CRANES = 3;
+// The time of each kind of part, and the shortest time between two starts.
+// With the effects, the big parts come in slower, so the eye can follow them.
 const MS: Record<Kind, number> = { base: 350, column: 600, plate: 220, member: 550, bolts: 0, rig: 300, slab: 300 };
 const GAP = { big: 150, plate: 50 };
-// when the last part lands, in ms
-export const buildEnd = (slots: Map<number, Slot>) => Math.max(0, ...[...slots.values()].map((s) => s.land));
+const FX_MS: Record<Kind, number> = { base: 700, column: 1100, plate: 450, member: 1000, bolts: 0, rig: 600, slab: 900 };
+const FX_GAP = { big: 300, plate: 120 };
+// when nothing of this part moves anymore: it landed, its weld cooled, its nuts are on
+export const slotEnd = (s: Slot) => Math.max(s.land, s.weld ? s.weld.start + s.weld.dur + s.weld.cool : 0, s.nuts?.end ?? 0);
+// when the build is over, in ms
+export const buildEnd = (slots: Map<number, Slot>) => Math.max(0, ...[...slots.values()].map(slotEnd));
 
 // speed: how fast one part comes in (2: twice as fast). duration: the whole
-// build lasts this long, in ms. Then the start times are stretched or pressed
-// to fit, and each part keeps its own time to come in: a short build with slow
-// parts has many parts in the air at once. The order stays the same, but a part
-// can start before the part it stands on has landed.
-export type TimelineOpts = { speed?: number; duration?: number };
+// build lasts this long, in ms. If the build is longer, the start times are
+// pressed to fit, and each part keeps its own time to come in: a short build
+// with slow parts has many parts in the air at once. The order stays the same,
+// but a part can start before the part it stands on has landed. If the build
+// is shorter, with the effects all of it slows down to fill the time, so there
+// is never a pause (speed has no effect then). With no effects, the start
+// times are stretched, as before, and there are pauses. effects: bolts screw
+// in and site welds are made (default). false: bolts pop in, no welds, as before.
+export type TimelineOpts = { speed?: number; duration?: number; effects?: boolean };
 export function timeline(parts: Part[], o: number | TimelineOpts = 1): Map<number, Slot> {
-  const { speed = 1, duration } = typeof o === 'number' ? { speed: o } : o;
-  const out = sequence(parts, speed);
-  return duration === undefined ? out : fit(parts, out, duration);
+  const { speed = 1, duration, effects = true } = typeof o === 'number' ? { speed: o } : o;
+  const out = sequence(parts, speed, effects);
+  if (duration === undefined) return out;
+  const end = buildEnd(out);
+  return effects && end > 0 && end <= duration ? slower(out, duration / end) : fit(parts, out, duration);
+}
+
+// every time of the build times f: the same build, f times slower
+function slower(slots: Map<number, Slot>, f: number): Map<number, Slot> {
+  const out = new Map<number, Slot>();
+  for (const [step, sl] of slots) {
+    const s: Slot = { start: sl.start * f, dur: sl.dur * f, land: sl.land * f };
+    if (sl.bolt) s.bolt = { gap: sl.bolt.gap * f, dur: sl.bolt.dur * f };
+    if (sl.weld) s.weld = { start: sl.weld.start * f, dur: sl.weld.dur * f, cool: sl.weld.cool * f };
+    if (sl.nuts) s.nuts = { start: sl.nuts.start * f, gap: sl.nuts.gap * f, dur: sl.nuts.dur * f, end: sl.nuts.end * f };
+    out.set(step, s);
+  }
+  return out;
 }
 
 // Fit the slots in `duration`. Each part has an anchor: its own start, or for
@@ -159,7 +235,7 @@ function fit(parts: Part[], slots: Map<number, Slot>, duration: number): Map<num
   let f = Infinity;
   for (const [step, sl] of slots) {
     const a = anchor.get(step)!;
-    if (a > 0) f = Math.min(f, (duration - (sl.land - a)) / a);
+    if (a > 0) f = Math.min(f, (duration - (slotEnd(sl) - a)) / a);
   }
   if (f === Infinity) return slots; // everything starts at 0
   f = Math.max(0, f);
@@ -167,7 +243,11 @@ function fit(parts: Part[], slots: Map<number, Slot>, duration: number): Map<num
   for (const [step, sl] of slots) {
     const a = anchor.get(step)!;
     const start = a * f + (sl.start - a);
-    out.set(step, { start, dur: sl.dur, land: start + sl.dur });
+    // the weld and the nuts move with their part
+    const by = start - sl.start;
+    const weld = sl.weld && { ...sl.weld, start: sl.weld.start + by };
+    const nuts = sl.nuts && { ...sl.nuts, start: sl.nuts.start + by, end: sl.nuts.end + by };
+    out.set(step, { ...sl, start, land: start + sl.dur, ...(weld && { weld }), ...(nuts && { nuts }) });
   }
   return out;
 }
@@ -185,17 +265,18 @@ function anchors(parts: Part[], slots: Map<number, Slot>): Map<number, number> {
 }
 
 // the shortest build at this speed, in ms: every part starts at once, and
-// the slowest one (with its bolts) sets the end
-export function shortestBuild(parts: Part[], speed = 1): number {
-  const slots = sequence(parts, speed);
+// the slowest one (with its bolts and its weld) sets the end
+export function shortestBuild(parts: Part[], speed = 1, effects = true): number {
+  const slots = sequence(parts, speed, effects);
   const anchor = anchors(parts, slots);
-  return Math.max(0, ...[...slots].map(([step, sl]) => sl.land - anchor.get(step)!));
+  return Math.max(0, ...[...slots].map(([step, sl]) => slotEnd(sl) - anchor.get(step)!));
 }
 
-function sequence(parts: Part[], speed: number): Map<number, Slot> {
+function sequence(parts: Part[], speed: number, effects: boolean): Map<number, Slot> {
   const out = new Map<number, Slot>();
   const byId = new Map(parts.map((p) => [p.id, p]));
   const k = 1 / speed;
+  const [ms, gap] = effects ? [FX_MS, FX_GAP] : [MS, GAP];
   const cranes: number[] = Array(CRANES).fill(0);
   let [lastBig, lastPlate] = [-Infinity, -Infinity];
   const landOf = (id: string) => {
@@ -209,19 +290,23 @@ function sequence(parts: Part[], speed: number): Map<number, Slot> {
     let slot: Slot;
     if (kind === 'bolts') {
       const start = landOf(p.supports[0]);
-      const dur = (220 + BOLT_MS * Math.max(0, p.dots.length - 1)) * k;
-      slot = { start, dur, land: start + dur };
+      const [one, g] = effects ? [SCREW_MS, SCREW_GAP] : [POP_MS, BOLT_MS];
+      const dur = (one + g * Math.max(0, p.dots.length - 1)) * k;
+      slot = { start, dur, land: start + dur, bolt: { gap: g * k, dur: one * k } };
     } else if (kind === 'column' || kind === 'member') {
       const c = cranes.indexOf(Math.min(...cranes));
-      const start = Math.max(ready, cranes[c], lastBig + GAP.big * k);
-      slot = { start, dur: MS[kind] * k, land: start + MS[kind] * k };
+      const start = Math.max(ready, cranes[c], lastBig + gap.big * k);
+      slot = { start, dur: ms[kind] * k, land: start + ms[kind] * k };
       cranes[c] = slot.land;
       lastBig = start;
     } else {
-      const start = Math.max(ready, lastPlate + GAP.plate * k);
-      slot = { start, dur: MS[kind] * k, land: start + MS[kind] * k };
+      const start = Math.max(ready, lastPlate + gap.plate * k);
+      slot = { start, dur: ms[kind] * k, land: start + ms[kind] * k };
       lastPlate = start;
     }
+    if (effects && p.welds?.length) slot.weld = { start: slot.land + WELD_PAUSE * k, dur: weldMs(seamLength(p.welds)) * k, cool: COOL_MS * k };
+    const nuts = kind === 'bolts' ? 0 : p.dots.filter((d) => d.anchor).length;
+    if (effects && nuts) slot.nuts = { start: slot.land, gap: SCREW_GAP * k, dur: SCREW_MS * k, end: slot.land + (SCREW_MS + SCREW_GAP * (nuts - 1)) * k };
     out.set(p.step, slot);
   }
   return out;
@@ -652,6 +737,29 @@ export function supportFace(S: Geo, direc: V): number {
   return m;
 }
 
+// A site weld: a 3D segment in mm (Part.welds).
+export type Seam = [V, V];
+
+// The weld all around the end of a member: the outline of its section at that
+// end, in order. `flanges`: only the edges of the flanges, not the web (a beam
+// end with a bolted web). A cope at that end cuts it like the section.
+// `shift`: how far a point `a` mm across (along v) slides along u (a skewed
+// cut end, skew.ts).
+export function profileSeam(g: Geo, end: 'from' | 'to', flanges = false, shift?: (a: number) => number): Seam[] {
+  const o = end === 'from' ? g.p0 : g.p1;
+  const h = g.d / 2;
+  const cope = g.copes.find((c) => c.at === end);
+  const [lo, hi] = cope ? [-h + cope.top, h - cope.bot] : [-h, h];
+  const web = h - g.sec.tf - 0.5;
+  const P = ([a, b]: P2): V => add(add(add(o, mul(g.v, a)), mul(g.w, Math.min(hi, Math.max(lo, b)) + g.sh)), mul(g.u, shift?.(a) ?? 0));
+  return g.polys.flatMap((poly) => poly.flatMap((a, i): Seam[] => {
+    const b = poly[(i + 1) % poly.length];
+    const m = (a[1] + b[1]) / 2;
+    if ((flanges && Math.abs(m) < web) || m < lo || m > hi) return [];
+    return [[P(a), P(b)]];
+  }));
+}
+
 // `room`: when the member lands on the web of an I beam, the depths (from
 // the top of the member) between the flanges of that beam. `cope`: the cut
 // that keeps the member clear of those flanges. `stem`: the member lands on
@@ -774,7 +882,8 @@ function slab(poly: V[], n: V, t: number): Face[] {
 // A flat plate of thickness t, centred on the plane through o that holds
 // the unit axes ax and ay (at right angles). `pts` is its outline in that
 // plane, in any winding. Also its box, for the clash check.
-export type Plate = { faces: Face[]; box: Box };
+// seams: its site welds (Part.welds), when it goes on after what it is welded to
+export type Plate = { faces: Face[]; box: Box; seams?: Seam[] };
 export function flat(o: V, ax: V, ay: V, t: number, pts: P2[]): Plate {
   const n = cross(ax, ay);
   let s = 0;
@@ -797,9 +906,13 @@ export function flat(o: V, ax: V, ay: V, t: number, pts: P2[]): Plate {
 // the web runs through there). o: on the web axis, half way between the
 // flanges. side: from the web toward the flange tips. depth: across, from
 // one flange to the other.
+// Its seams: the edges on the two flanges and on the web, on both faces.
 export function stiffener(sec: Section, o: V, side: V, depth: V, t: number): Plate {
   const [x0, x1, h, c] = [sec.tw / 2, sec.bf / 2 - 5, sec.d / 2 - sec.tf, 15];
-  return flat(o, side, depth, t, [[x0, -h + c], [x0 + c, -h], [x1, -h], [x1, h], [x0 + c, h], [x0, h - c]]);
+  const n = cross(side, depth);
+  const at = (x: number, y: number, s: number) => add(add(add(o, mul(side, x)), mul(depth, y)), mul(n, (s * t) / 2));
+  const seams = [-1, 1].flatMap((s): Seam[] => [[at(x1, -h, s), at(x0 + c, -h, s)], [at(x0, -h + c, s), at(x0, h - c, s)], [at(x0 + c, h, s), at(x1, h, s)]]);
+  return { ...flat(o, side, depth, t, [[x0, -h + c], [x0 + c, -h], [x1, -h], [x1, h], [x0 + c, h], [x0, h - c]]), seams };
 }
 
 // A splice between two pieces of a member, lo and hi, their axes on one
@@ -872,7 +985,13 @@ export type Fit = 'flange' | 'web' | 'beam';
 // tube). They go in the member part, so they arrive with it, and the 3D view
 // outlines them with the tube (they are smooth, like it). Their box stays in
 // `boxes`, with the connection, so the splice checks still see it.
-export type Hardware = { faces: Face[]; dots: Dot[]; reach: number[]; boxes: Box[]; after?: { faces: Face[]; boxes: Box[] }; welded?: Face[] };
+// `seams`: the site welds of the member at this end (Part.welds), made when
+// it lands. `plateSeams`: those of the plates (welded to the support face).
+// after.seams: those of the `after` plates. A shop weld has none.
+export type Hardware = {
+  faces: Face[]; dots: Dot[]; reach: number[]; boxes: Box[]; after?: { faces: Face[]; boxes: Box[]; seams?: Seam[] }; welded?: Face[];
+  seams?: Seam[]; plateSeams?: Seam[];
+};
 // One kind of connection.
 // - pinned: the solver takes the end as a pin (else it holds the moment).
 // - setback: the gap the member leaves at its end. For a gusset it leaves
@@ -1093,7 +1212,15 @@ function flangePlates(g: Geo, r: Resolved, hw: Hardware, t = 16, bolted = true) 
     plate(hw, add(add(p, mul(inward, L / 2 - gap)), mul(g.w, dw)), g.w, inward, wp, t, L);
     const lin = L - gap;
     if (top) hw.reach.push(lin);
-    if (!bolted) continue;
+    if (!bolted) {
+      // welded: the plate on the face (both sides), the flange tips on the plate
+      const out = top ? -t : g.d + t;
+      const inn = top ? 0 : g.d;
+      const at = (x: number, y: number, depth: number) => add(add(add(p, mul(inward, x)), mul(g.v, y)), mul(g.w, wAt(g, depth)));
+      (hw.plateSeams ??= []).push([at(-gap, -wp / 2, out), at(-gap, wp / 2, out)], [at(-gap, wp / 2, inn), at(-gap, -wp / 2, inn)]);
+      (hw.seams ??= []).push(...[-1, 1].map((s): Seam => [at(0, (s * g.sec.bf) / 2, inn), at(lin, (s * g.sec.bf) / 2, inn)]));
+      continue;
+    }
     const rows = Math.max(1, Math.floor((lin - 2 * EDGE) / PITCH) + 1);
     for (let rr = 0; rr < rows; rr++)
       for (const s of [-1, 1]) {
@@ -1126,10 +1253,21 @@ function weldedHaunch(g: Geo, r: Resolved, hw: Hardware) {
     plates.push([bf, [[0, D], [L, 0], [x, 0], [0, D - tv]]]);
     plates.push([g.tw, [[0, 0], [x, 0], [0, D - tv]]]);
   }
+  // its welds: the web on the beam flange (both sides), the tip across the
+  // flange, then on the column face the flange and the web (both sides)
+  const at = (x: number, y: number, z: number) => add(add(add(o, mul(r.inward, x)), mul(g.w, y)), mul(g.v, z));
+  const [tip, top] = straight ? [L - tf, D - tf] : [L - (tf * Math.hypot(L, D)) / D, D - (tf * Math.hypot(L, D)) / L];
+  const x = g.tw / 2;
+  const seams: Seam[] = [
+    [at(0, 0, x), at(tip, 0, x)], [at(tip, 0, -x), at(0, 0, -x)], [at(L, 0, -bf / 2), at(L, 0, bf / 2)],
+    [at(0, D, bf / 2), at(0, D, -bf / 2)], [at(0, 0, x), at(0, top, x)], [at(0, 0, -x), at(0, top, -x)],
+  ];
   hw.after = {
     faces: plates.flatMap(([t, pts]) => flat(o, r.inward, g.w, t, pts).faces),
     boxes: [flat(o, r.inward, g.w, bf, [[0, 0], [L, 0], [L, D], [0, D]]).box],
+    seams,
   };
+  hw.seams = profileSeam(g, r.at, true);
   hw.reach.push(L); // the beam gets a vertex at the tip
 }
 
@@ -1294,7 +1432,7 @@ export const CONNS: Record<ConnType, ConnSpec> = {
   shear_tab: { label: 'shear tab', pinned: true, setback: 13, fits: ['flange', 'web', 'beam'], draw: shearTab },
   end_plate: { label: 'end plate', pinned: false, setback: 25, fits: ['flange', 'web', 'beam'], past: [90, 90], draw: endPlate },
   flange_plates: { label: 'flange plates', pinned: false, setback: 13, fits: ['flange', 'web'], draw: flangePlates },
-  welded: { label: 'welded', pinned: false, setback: 0, fits: ['flange', 'web', 'beam'], draw: () => {} },
+  welded: { label: 'welded', pinned: false, setback: 0, fits: ['flange', 'web', 'beam'], draw: (g, r, hw) => void (hw.seams = profileSeam(g, r.at)) },
   clip_angles: { label: 'clip angles', pinned: true, setback: 13, fits: ['flange', 'web', 'beam'], replaces: 'shear_tab', draw: clipAngles },
   tee: { label: 'tee', pinned: true, setback: 13, fits: ['flange', 'web', 'beam'], replaces: 'shear_tab', draw: tee },
   end_plate_stiffened: { label: 'stiffened end plate', pinned: false, setback: 25, fits: ['flange', 'web'], past: [90, 90], replaces: 'end_plate', draw: endPlateStiffened },
@@ -1302,7 +1440,7 @@ export const CONNS: Record<ConnType, ConnSpec> = {
   stiffened_seat: { label: 'stiffened seat', pinned: true, setback: 13, fits: ['flange', 'web'], past: [SEAT.plate + SEAT.H, TOP.B], replaces: 'shear_tab', draw: stiffenedSeat },
   // WUF-B (hub tests): the flanges welded like `welded`, a shear tab bolted to the web.
   // No `replaces` and not in BEAM_CONN: no random draw ever picks it.
-  welded_tab: { label: 'welded flanges, bolted web', pinned: false, setback: 0, fits: ['flange', 'web'], draw: shearTab },
+  welded_tab: { label: 'welded flanges, bolted web', pinned: false, setback: 0, fits: ['flange', 'web'], draw: (g, r, hw) => { shearTab(g, r, hw); hw.seams = profileSeam(g, r.at, true); } },
   // WFP (hub tests): the plates of flange_plates, as thick as the record says, welded.
   welded_plates: { label: 'welded flange plates', pinned: false, setback: 13, fits: ['flange', 'web'], specimenOnly: true, draw: (g, r, hw) => flangePlates(g, r, hw, g.tPlate ?? 16, false) },
   // KBB (hub tests, see haunch.ts): the flanges welded, a haunch under the beam.
@@ -1360,6 +1498,7 @@ export type RenderOpts = {
   stepMs?: number; // painter only: ms between two steps
   speed?: number; // exact renderer: how fast one part comes in (default 1)
   duration?: number; // exact renderer: the whole build lasts this long, ms (see timeline)
+  effects?: boolean; // exact renderer: bolts push in and site welds are made (default true). false: bolts pop in, no welds
   bolts?: boolean;
 };
 

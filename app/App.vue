@@ -78,9 +78,9 @@ const hub = computed(() => !!s.specimen);
 const mode = computed({ get: () => (hub.value ? 'hub' : 'seed'), set: (v) => setMode(v === 'hub') });
 
 const replay = ref(0);
-// play again when the build time or the speed stops moving (not when it goes to 0)
+// play again when the build time, the speed or the effects stop moving (not when the time goes to 0)
 let again = 0;
-watch(() => [s.duration, s.speed], () => {
+watch(() => [s.duration, s.speed, s.effects], () => {
   clearTimeout(again);
   if (plays.value) again = window.setTimeout(() => replay.value++, 300);
 });
@@ -252,6 +252,8 @@ async function copy(what: 'svg' | 'link') {
           <p v-if="!plays" class="note">Off: a change draws the structure at once. Set a build time to see it built on each change.</p>
           <template v-else>
             <Slider id="speed" v-model="speedLog" label="Part speed" :min="-2" :max="2" :step="0.25" :out="`× ${s.speed.toFixed(2)}`" />
+            <Seg v-model="s.effects" label="Bolts and welds" :options="[[1, 'On'], [0, 'Off']]" />
+            <p class="note">On: the bolts screw in and the site welds are made. Off: the parts only fly in, and the bolts pop in.</p>
             <p class="note">About {{ inAir }} {{ inAir === 1 ? 'part' : 'parts' }} in the air at once. A short build with slow parts brings many parts at the same time.</p>
             <div class="actions">
               <button type="button" class="epfl-btn epfl-btn-primary epfl-btn-sm" @click="replay++">Play again</button>

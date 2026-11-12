@@ -102,6 +102,8 @@ Play the measured response of a hub test in the 3D view. `deform.ts` is the base
 - [x] A rail of sections you can fold, on the EPFL design tokens.
 - [x] Compare in one 3D view: both structures on top of each other, the new parts in one color and the gone parts in another.
 - [x] The animation knobs in the CLI (`--speed`, `--duration`). Done: with `--animate`, duration in s like the playground.
+- [x] A build like a real site: the bolts screw in, the site welds are made, the anchor nuts screw down, the parts slow down as on a log scale, the slab is poured. Each kind has its own pace, a bolt shows its shank and its thread while it goes in, and a long build slows down instead of making pauses. One switch turns it all off (`effects`, `--plain`, "Bolts and welds").
+- [ ] The turnbuckle of an X rod turns and pulls its rods in. Not done: the turnbuckle is a plain round bar, so a turn doesn't show. It needs flats first.
 
 ## Repo
 
