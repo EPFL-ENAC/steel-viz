@@ -281,7 +281,10 @@ void screwAt() {
     sTurn = turn;
     return;
   }
-  float r = pow(1.0 - (u - seat) / (1.0 - seat), ${SCREW_EXP.toFixed(3)}); // what is left of the turn
+  // done: exactly in place. pow() of a number under 0 is NaN, and on a GPU
+  // the division is not exact, so 1 - (u - seat) / (1 - seat) can be -1e-7
+  if (u >= 1.0) return;
+  float r = pow(max(0.0, 1.0 - (u - seat) / (1.0 - seat)), ${SCREW_EXP.toFixed(3)}); // what is left of the turn
   sOff = bn.xyz * (${SEAT.toFixed(1)} * r);
   sTurn = turn * r;
 }
