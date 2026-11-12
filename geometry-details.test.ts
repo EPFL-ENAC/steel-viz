@@ -41,7 +41,7 @@ test('round tube braces', () => {
 // Under it a tube keeps its slot, even when its arm drew the cap.
 test('the end of a round tube: slot, small cap or wide cap', () => {
   assert.equal(CAP_MIN_D, 82);
-  const end = (d: number) => braceConn({ a: 0, zb: 0, end: 0, cap: true, sec: { id: `CHS ${d}`, kind: 'CHS', d } as Section });
+  const end = (d: number) => braceConn({ cap: true, sec: { id: `CHS ${d}`, kind: 'CHS', d } as Section });
   assert.equal(end(76.2), 'gusset');
   assert.equal(end(88.9), 'gusset_cap');
   assert.equal(end(114.3), 'gusset_cap');
