@@ -19,8 +19,11 @@ import { cross, dot, mul, sub, type V } from './vec.ts';
 
 export type Slab = NonNullable<ConnSpecimen['slab']>;
 // a beam under the slab. o: on the column axis, h: along the beam, z: the top
-// of steel, end: where the slab stops, from the column axis.
-export type SlabBeam = { id: string; z: number; o: V; h: V; end: number };
+// of steel, end: where the slab stops, from the column axis. A frame test
+// (frame.ts) also gives from: where the slab starts (default: the column axis
+// for an interior slab, past the back flange for an exterior one), and holes:
+// the column axes along the beam, an opening at each (default [0]).
+export type SlabBeam = { id: string; z: number; o: V; h: V; end: number; from?: number; holes?: number[] };
 
 export const SLAB_GAP = 25; // free around the column
 export const TIP_GAP = 100; // between the slab end and the pin plate at the beam tip
@@ -90,35 +93,39 @@ function solid(ss: number[], xs: number[], z0: number, z1: number, at: (s: numbe
 // One part per beam, after the beams in `res`. across: where `right` is.
 export function slabParts(slab: Slab, col: { d: number; bf: number }, beams: SlabBeam[], across: V, res: Part[]): Part[] {
   const [openS, openX] = [col.d / 2 + SLAB_GAP, col.bf / 2 + SLAB_GAP];
-  return beams.map(({ id, z, o, h, end }) => {
-    if (end <= openS + SLAB_GAP) throw new Error(`${id}: the beam is too short for a slab, it would stop ${end} mm from the column axis`);
+  return beams.map(({ id, z, o, h, end, holes = [0], ...b }) => {
+    if (end - holes[0] <= openS + SLAB_GAP) throw new Error(`${id}: the beam is too short for a slab, it would stop ${end} mm from the column axis`);
     const beam = res.find((p) => p.id === id)!;
     const along = (p: V) => dot(sub(p, o), h);
     const at = (s: number, x: number, zz: number): V => [o[0] + h[0] * s + across[0] * x, o[1] + h[1] * s + across[1] * x, zz];
     const [zr, zc] = [z + slab.rib, z + slab.rib + slab.concrete];
     const interior = beams.some((b) => dot(b.h, h) < -0.5);
-    const from = interior ? 0 : -(col.d / 2 + BACK);
+    const from = b.from ?? (interior ? 0 : -(col.d / 2 + BACK));
 
     // the ribs start past the opening and the connection plates: only the
-    // concrete is above a flange plate
-    const conn = res.find((p) => p.id === `${id}-from-conn`)?.boxes ?? [];
-    const s0 = Math.max(openS, ...conn.map((b) => along(b.c) + b.ax.reduce((t, ax, k) => t + Math.abs(dot(ax, h)) * b.h[k], 0))) + SLAB_GAP;
+    // concrete is above a flange plate. They stop before the next opening and
+    // the plates there.
+    const reach = (q: Box) => q.ax.reduce((t, ax, k) => t + Math.abs(dot(ax, h)) * q.h[k], 0);
+    const conn = (at: string) => res.find((p) => p.id === `${id}-${at}-conn`)?.boxes ?? [];
+    const s0 = Math.max(holes[0] + openS, ...conn('from').map((q) => along(q.c) + reach(q))) + SLAB_GAP;
+    const s1 = Math.min(end, ...[...holes.filter((c) => c > s0).map((c) => c - openS), ...conn('to').map((q) => along(q.c) - reach(q))].map((s) => s - SLAB_GAP));
     const half = slab.ribWidth / 2;
     const ribs: [number, number, number, number][] = []; // s0, s1, x0, x1
     if (slab.ribs === 'parallel') {
-      if (s0 < end)
+      if (s0 < s1)
         for (const side of [0, -1, 1])
           for (let k = side ? 1 : 0, x = side * k * RIB_PITCH; side ? x - half >= -slab.left && x + half <= slab.right : k < 1; k++, x = side * k * RIB_PITCH)
-            ribs.push([s0, end, x - half, x + half]);
+            ribs.push([s0, s1, x - half, x + half]);
     } else {
-      for (let s = s0; s + slab.ribWidth <= end; s += RIB_PITCH) ribs.push([s, s + slab.ribWidth, -slab.left, slab.right]);
+      for (let s = s0; s + slab.ribWidth <= s1; s += RIB_PITCH) ribs.push([s, s + slab.ribWidth, -slab.left, slab.right]);
     }
 
     // the stations: all those of the beam, so the slab bends like it
-    const must = [from, ...(interior ? [] : [-openS]), openS, end, ...ribs.flatMap(([a, b]) => [a, b])];
+    const edges = holes.flatMap((c) => [c - openS, c + openS]).filter((s) => s > from && s < end);
+    const must = [from, ...edges, end, ...ribs.flatMap(([a, b]) => [a, b])];
     const ss = stations(must, beam.faces.flatMap((f) => f.pts.map(along)), from, end);
     const xs = [-slab.left, -openX, openX, slab.right];
-    const inOpening = (i: number, j: number) => j === 1 && ss[i] >= -openS - NEAR && ss[i + 1] <= openS + NEAR;
+    const inOpening = (i: number, j: number) => j === 1 && holes.some((c) => ss[i] >= c - openS - NEAR && ss[i + 1] <= c + openS + NEAR);
     const faces = solid(ss, xs, zr, zc, at, (i, j) => !inOpening(i, j), true);
     for (const [a, b, x0, x1] of ribs)
       faces.push(...solid(ss.filter((s) => s >= a && s <= b), [x0, x1], z, zr, at, () => true, false));
@@ -126,12 +133,19 @@ export function slabParts(slab: Slab, col: { d: number; bf: number }, beams: Sla
     // boxes: strips around the opening (one box would swallow the column), and the ribs
     const box = (a: number, b: number, x0: number, x1: number, z0: number, z1: number): Box =>
       boxOf(at((a + b) / 2, (x0 + x1) / 2, (z0 + z1) / 2), across, Z, b - a, x1 - x0, z1 - z0);
+    // the middle, between the openings: first past the first opening, then before it
+    const cuts = [from, ...edges, end].sort((a, c) => a - c);
+    const middle: [number, number][] = [];
+    for (let k = 0; k + 1 < cuts.length; k++) {
+      const [a, c] = [cuts[k], cuts[k + 1]];
+      if (c - a > NEAR && !holes.some((x) => a >= x - openS - NEAR && c <= x + openS + NEAR)) middle.push([a, c]);
+    }
+    middle.sort(([a], [c]) => Number(a < holes[0]) - Number(c < holes[0]) || a - c);
     const boxes = [
       box(from, end, -slab.left, -openX, zr, zc),
       box(from, end, openX, slab.right, zr, zc),
-      box(openS, end, -openX, openX, zr, zc),
-      ...(interior ? [] : [box(from, -openS, -openX, openX, zr, zc)]),
-      ...ribs.map(([a, b, x0, x1]) => box(a, b, x0, x1, z, zr)),
+      ...middle.map(([a, c]) => box(a, c, -openX, openX, zr, zc)),
+      ...ribs.map(([a, c, x0, x1]) => box(a, c, x0, x1, z, zr)),
     ];
     return { id: `${id}-slab`, step: 0, supports: [id], kind: 'slab', from: Z, faces, boxes, dots: [], info: { type: 'Concrete slab', of: id } };
   });

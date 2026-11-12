@@ -10,6 +10,7 @@
 // No three.js and no Node API here: index.ts exports it.
 import type { ConnType } from './steel.ts';
 import { HAUNCH_NOTE, hubHaunch } from './haunch.ts';
+import { FRAME_TESTS } from './frame.ts';
 import { hubRbs } from './rbs.ts';
 import { SLAB_NOTE } from './slab.ts';
 import { LINK_CONFIGS, type BraceSpecimen, type ColumnSpecimen, type ConnSpecimen, type LinkSpecimen, type SectionRef, type Specimen, type SpecimenBeam } from './specimen.ts';
@@ -69,6 +70,7 @@ export function fromHubConnection(rec: HubRecord): ConnSpecimen {
   const { text, value, num, unsupported } = fields(rec, id);
   const type = text('specimen_type');
   if (!type) throw new Error(`${id}: specimen_type is missing`);
+  if (/^(Exterior|Interior) - Frame$/i.test(type)) return fromHubFrame(rec, id);
   // "Interior - Column Loaded - Subassembly": the column top is pushed, the beam tips held
   const sub = /^(Exterior|Interior)\b.*\b(Beam|Column) Loaded\b.*\bSubassembly$/i.exec(type);
   if (!sub) throw unsupported('specimen_type');
@@ -108,6 +110,39 @@ export function fromHubConnection(rec: HubRecord): ConnSpecimen {
     section: beam, bearing, length: interior ? lb / 2 : exterior, connection, ...(cut?.rbs ? { rbs: cut.rbs } : {}), ...plates, ...haunch,
   }));
   return { id, column: { section: column, height }, beams, ...continuity, load, notes, ...(doubler ? { doubler } : {}), ...(slab ? { slab } : {}) };
+}
+
+// A frame test: the row gives the joint at the first column, FRAME_TESTS
+// (frame.ts) the rest, from the report of the test. l_b is the bay, between
+// the column axes.
+function fromHubFrame(rec: HubRecord, id: string): ConnSpecimen {
+  const { text, value, num, unsupported } = fields(rec, id);
+  const ft = FRAME_TESTS[id];
+  if (!ft) throw unsupported('specimen_type');
+  const notes: string[] = [];
+  const column = sectionOf(rec.section_c, num('d_c'), num('b_cf'), num('t_cf'), num('t_cw'));
+  const beam = sectionOf(rec.section_b, num('d_b'), num('b_bf'), num('t_bf'), num('t_bw'));
+  const ct = text('connection_type');
+  const [connection, note] = HUB_CONN[ct] ?? ['welded', `connection type "${ct}" is not known, drawn welded`];
+  if (note) notes.push(note);
+  const cut = ct === 'RBS' ? hubRbs(num('b_bf'), num('d_b'), value('b_bf_rbs'), value('rbs_cut')) : undefined;
+  if (cut) notes.push(cut.note);
+  if (ct === 'WFP' || ct === 'KBB') throw unsupported('connection_type');
+  const ndp = value('n_dp');
+  if (ndp > 0 && ndp !== 1 && ndp !== 2) throw unsupported('n_dp');
+  const doubler = ndp > 0 ? { n: ndp as 1 | 2, t: num('t_dp'), ...(Number.isFinite(value('wd')) ? { w: num('wd') } : {}) } : undefined;
+  const slab = hubSlab(rec, id, notes);
+  const tcp = value('t_cp');
+  if (!Number.isFinite(tcp)) notes.push('t_cp is not reported, the continuity plates are as thick as the column flange');
+  const continuity = tcp > 0 ? { continuity: true, tContinuity: mm(tcp) } : { continuity: !(tcp <= 0) };
+  // the girder top of steel is under the slab, the beam axis under it
+  const at = mm(ft.top - (slab ? slab.concrete + slab.rib : 0) - num('d_b') / 2);
+  const one = { section: beam, bearing: 0 as const, at, connection, ...(cut?.rbs ? { rbs: cut.rbs } : {}) };
+  const beams: SpecimenBeam[] = [{ ...one, length: num('l_b') }, ...(ft.overhang > 0 ? [{ ...one, length: ft.overhang }] : [])];
+  return {
+    id, column: { section: column, height: ft.height }, beams, ...continuity, notes: [...notes, ...ft.notes],
+    ...(doubler ? { doubler } : {}), ...(slab ? { slab } : {}), frame: ft.frame,
+  };
 }
 
 // The concrete slab of a connection record. The data writes "perpenticular".
