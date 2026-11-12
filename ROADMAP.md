@@ -38,7 +38,8 @@ What we plan to do next. A checked item is done.
 - [x] D / t of a round tube (local buckling): F8 in bending, E7 in compression, a tube past 0.45 E / Fy is refused.
 - [x] Checks for the channels, double angles and tees: lateral torsional buckling (F2 for a channel, F9 for a tee and a double angle, F10 for one angle) and flexural-torsional buckling (E4). Cw and the shear center come from the dimensions.
 - [ ] EC3 member checks for the `eu` family. Today the AISC formulas size both.
-- [ ] A lateral brace for the bottom chord of a cantilever truss. Without it, eu tree 19 stays under `alphaCr` 3 (and eu tree 7 with `--shapes 0`).
+- [x] The bottom chord of a cantilever truss sways sideways (eu tree 19 was under `alphaCr` 3, and eu tree 7 with `--shapes 0`). It now gets an end plate on the column when `alphaCr` is under 3.
+- [ ] A real lateral brace for that chord: a strut from the chord to the column, or a fly brace to a purlin. It needs a gusset or a clevis at 10 to 20° to the chord.
 
 ## Use in RESSLab Hub
 

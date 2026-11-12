@@ -1130,7 +1130,8 @@ function worstOf(m: Model, res: Forces[]) {
 // rule needs alphaCr >= 3: below, stiffen() makes a member heavier, and the
 // factor stays at its value for 3 (1.5).
 const ALPHA_MIN = 3;
-type Stability = { alpha: number; amp: number; forces: Forces[]; energy: Map<string, number> };
+// compressed: the members with an element in compression
+type Stability = { alpha: number; amp: number; forces: Forces[]; energy: Map<string, number>; compressed: Set<string> };
 // Not the posts: their top is held by what they carry, which we don't draw.
 // Free, a short post with its load sways and twists the beam (alphaCr < 1).
 // The member check covers the buckling of the post itself.
@@ -1141,7 +1142,8 @@ function stability(m: Model, r: Extract<Solved, { ok: true }>): Stability {
   const forces = r.forces.map((f) => ({ ...f, My: f.My * amp, Mz: f.Mz * amp, Vy: f.Vy * amp, Vz: f.Vz * amp }));
   const energy = new Map<string, number>();
   m.owner.forEach((who, i) => energy.set(who, (energy.get(who) ?? 0) + b.energy[i]));
-  return { alpha: b.alpha, amp, forces, energy };
+  const compressed = new Set(m.owner.filter((_, i) => axial[i] < 0));
+  return { alpha: b.alpha, amp, forces, energy, compressed };
 }
 
 // the section of a member, by its owner id
@@ -1161,16 +1163,38 @@ function sectionOf(st: Structure, who: string): Section | undefined {
   return st.secs.find((s) => s.id === who)?.sec;
 }
 
-// alphaCr too low: the member with the most strain energy in the buckling
-// mode gets a heavier section (a sizing pass with a minimum area, so the
-// other sizing rules still hold). If the rules leave it as it is, the next one.
-// A member with a small share of the energy can't raise alphaCr much (about
-// its share), so only members with 10 % or more. generate.ts has no lateral
-// bracing: the usual case is the bottom chord of a cantilever truss, which
-// sways out of the truss plane.
+// The bottom chord of a cantilever truss is in compression, and nothing holds
+// it sideways: with a shear tab on the column it swings out of the truss plane
+// like a pendulum, and the arm twists with it. A real structure has a fly brace
+// to a purlin, or a strut to the column. We give the chord a moment end (an end
+// plate on the column), like fix() does for a mechanism: no new part, and no
+// random draw. Only when the arm and its chord hold half of the energy of the
+// mode or more. One chord per call, the one with the most energy.
+const CHORD_SHARE = 0.5;
+function holdChord(st: Structure, stab: Stability, total: number, log: string[]): boolean {
+  let best: Arm | undefined;
+  let most = 0;
+  for (const a of st.arms) {
+    const tr = a.truss;
+    if (!tr || a.to !== undefined || !PINNED.includes(tr.conn) || !stab.compressed.has(chordId(a))) continue;
+    const share = ((stab.energy.get(a.id) ?? 0) + (stab.energy.get(chordId(a)) ?? 0)) / total;
+    if (share >= CHORD_SHARE && share > most) [best, most] = [a, share];
+  }
+  if (!best?.truss) return false;
+  log.push(`alphaCr ${stab.alpha.toFixed(1)} below ${ALPHA_MIN}: ${chordId(best)} ${CONNS[best.truss.conn].label} -> end_plate (holds it sideways)`);
+  best.truss.conn = 'end_plate';
+  return true;
+}
+
+// alphaCr too low: first holdChord(). Else the member with the most strain
+// energy in the buckling mode gets a heavier section (a sizing pass with a
+// minimum area, so the other sizing rules still hold). If the rules leave it as
+// it is, the next one. A member with a small share of the energy can't raise
+// alphaCr much (about its share), so only members with 10 % or more.
 const SHARE_MIN = 0.1;
 function stiffen(st: Structure, m: Model, stab: Stability, cat: Catalog, p: Params, log: string[]): boolean {
   const total = [...stab.energy.values()].reduce((a, e) => a + Math.max(e, 0), 0);
+  if (holdChord(st, stab, total, log)) return true;
   const order = [...stab.energy].filter(([, e]) => e >= SHARE_MIN * total).sort((a, b) => b[1] - a[1]);
   for (const [who] of order) {
     const cur = sectionOf(st, who);
