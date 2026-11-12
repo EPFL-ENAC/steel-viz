@@ -33,7 +33,7 @@
 // Line widths are in mm at the drawing scale, or in px when `size` says
 // how many px wide the drawing will be shown (a logo, a favicon).
 import { add, cross, dot, mul, norm, sub, type V } from './vec.ts';
-import { camera, forSize, seamTimes, timeline, type Face, type Part, type RenderOpts } from './steel.ts';
+import { camera, forSize, HOVER, SET_AT, seamTimes, timeline, type Face, type Part, type RenderOpts } from './steel.ts';
 import { triangles } from './triangles.ts';
 
 const HEAD = 13; // bolt head height, mm (M20)
@@ -525,7 +525,10 @@ export function renderHLR(parts: Part[], o: RenderOpts): { svg: string; faces: n
       ? `.steel .f{animation:fly .6s cubic-bezier(.2,.7,.25,1) both}` +
         `@keyframes fly{from{opacity:0;transform:translate(var(--dx),var(--dy))}15%{opacity:1}}` +
         (effects
-          ? // a bolt comes in along its axis (--dx, --dy), and from the camera side (--s)
+          ? // a member or a column is set down (.s): it stops a bit short, then it is lowered into place
+            `.steel .f.s{animation-name:set}@keyframes set{from{opacity:0;transform:translate(var(--dx),var(--dy))}15%{opacity:1}` +
+            `${f(SET_AT * 100)}%{transform:translate(calc(var(--dx)*${HOVER}),calc(var(--dy)*${HOVER}));animation-timing-function:ease-in-out}}` +
+            // a bolt comes in along its axis (--dx, --dy), and from the camera side (--s)
             `.steel .k{animation:push ${ms(push)} cubic-bezier(.33,1,.68,1) both;transform-box:fill-box;transform-origin:center}` +
             `@keyframes push{from{opacity:0;transform:translate(var(--dx,0px),var(--dy,0px)) scale(var(--s,1))}40%{opacity:1}}` +
             // a weld: the hot line is drawn (wd), then it cools and goes (wc). The spark (.z) runs at its tip
@@ -534,7 +537,7 @@ export function renderHLR(parts: Part[], o: RenderOpts): { svg: string; faces: n
             `.steel .z{stroke:#ffe14d;stroke-width:${f(thickMm * scale * 3)};stroke-dasharray:.001 2;opacity:0;animation:zs linear;filter:drop-shadow(0 0 ${ow}px #ff6a00)}` +
             `@keyframes zs{from{opacity:1;stroke-dashoffset:0}to{opacity:1;stroke-dashoffset:-1}}` +
             `.steel .h{animation:sh .2s ease-in both}@keyframes sh{to{opacity:0}}` +
-            `@media (prefers-reduced-motion:reduce){.steel .f,.steel .k{animation:none}.steel .h,.steel .w,.steel .z{display:none}}`
+            `@media (prefers-reduced-motion:reduce){.steel .f,.steel .f.s,.steel .k{animation:none}.steel .h,.steel .w,.steel .z{display:none}}`
           : `.steel .k{animation:pop .25s cubic-bezier(.3,1.5,.5,1) both;transform-box:fill-box;transform-origin:center}` +
             `@keyframes pop{from{opacity:0;transform:scale(2.5)}}` +
             `.steel .h{animation:sh .2s ease-in both}@keyframes sh{to{opacity:0}}` +
@@ -673,7 +676,7 @@ export function renderHLR(parts: Part[], o: RenderOpts): { svg: string; faces: n
       out.push('</g>');
       continue;
     }
-    const cls = [acc, o.animate ? 'f' : ''].filter(Boolean).join(' ');
+    const cls = [acc, o.animate ? 'f' : '', effects && (p.kind === 'member' || p.kind === 'column') ? 's' : ''].filter(Boolean).join(' ');
     out.push(`<g${cls ? ` class="${cls}"` : ''}${o.animate ? ` style="${fly(pi)}"` : ''}>`);
     if (vis) out.push(`<path d="${vis}"/>`);
     if (edge) out.push(`<path class="o" d="${edge}"/>`);

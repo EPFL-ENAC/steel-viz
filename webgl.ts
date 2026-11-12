@@ -34,7 +34,7 @@
 // where every bolt of it is. All the seams of the structure are one buffer and
 // one draw call (WELD_VS), made at build().
 import { add, cross, dot, mul, norm, sub, type V } from './vec.ts';
-import { buildEnd, camera, COOL_MS, seamTimes, timeline, type Part } from './steel.ts';
+import { buildEnd, camera, COOL_MS, HOVER, seamTimes, SET_AT, timeline, type Part } from './steel.ts';
 import { triangles } from './triangles.ts';
 import { I4, MAX_KNOTS, MAX_ZONES, movePoint, type DeformState, type Move } from './deform.ts';
 
@@ -969,6 +969,9 @@ export function createViewer(
   let clock: number | null = null; // seek(): the build stays at this time
   let played: [number, number | undefined, boolean] | null = null; // the last build(), for seek()
   const ease = (t: number) => 1 - (1 - t) ** 3;
+  // set down (effects): fast in, it stops a bit short, then it is lowered
+  const setDown = (t: number) => (t < SET_AT ? (1 - HOVER) * ease(t / SET_AT) : 1 - HOVER + HOVER * smooth((t - SET_AT) / (1 - SET_AT)));
+  const smooth = (t: number) => t * t * (3 - 2 * t);
   const animate = (now: number): boolean => {
     if (!anim) return false;
     const t = (anim.t = clock ?? now - anim.t0);
@@ -984,7 +987,8 @@ export function createViewer(
         if (p.lines) p.lines.draw = p.ends[n][1] / 6;
         return;
       }
-      const k = ease(Math.min(1, Math.max(0, (t - sl.start) / sl.dur)));
+      const u = Math.min(1, Math.max(0, (t - sl.start) / sl.dur));
+      const k = anim!.effects && (p.part.kind === 'member' || p.part.kind === 'column') ? setDown(u) : ease(u);
       const far = p.part.kind === 'plate' || p.part.kind === 'base' || p.part.kind === 'slab' ? 0.12 * radius : 2.6 * radius;
       p.off = mul(anim!.dirs[i], far * (1 - k));
       // the anchor nuts of a base plate screw down after it lands
