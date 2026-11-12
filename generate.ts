@@ -1065,20 +1065,22 @@ function fix(st: Structure, m: Model, nodeIdx: number, cat: Catalog, rng: () => 
 
 // ------------------------------------------------------------- sizing
 const LIMIT = 0.6;
-type Forces = { N: number; Nc: number; My: number; Mz: number };
+type Forces = { N: number; Nc: number; My: number; Mz: number; Vy: number; Vz: number };
 // L: the member length, its buckling length (K = 1, see checks.ts)
 const ratioOf = (s: Section, f: Forces, fy: number, L: number) => memberRatio(s, f, L, fy);
 function worstOf(m: Model, res: Forces[]) {
   const worst = new Map<string, Forces>();
   m.owner.forEach((who, i) => {
-    const w = worst.get(who) ?? { N: 0, Nc: 0, My: 0, Mz: 0 };
-    worst.set(who, { N: Math.max(w.N, res[i].N), Nc: Math.max(w.Nc, res[i].Nc), My: Math.max(w.My, res[i].My), Mz: Math.max(w.Mz, res[i].Mz) });
+    const w = worst.get(who) ?? { N: 0, Nc: 0, My: 0, Mz: 0, Vy: 0, Vz: 0 };
+    const r = res[i];
+    worst.set(who, { N: Math.max(w.N, r.N), Nc: Math.max(w.Nc, r.Nc), My: Math.max(w.My, r.My), Mz: Math.max(w.Mz, r.Mz), Vy: Math.max(w.Vy, r.Vy), Vz: Math.max(w.Vz, r.Vz) });
   });
   for (const who of m.tension) worst.set(who, tensionOnly(worst.get(who)!));
   return worst;
 }
 
-// Sway effects (EC3 5.2.2(5)B): the moments times 1 / (1 - 1/alphaCr). The
+// Sway effects (EC3 5.2.2(5)B): the moments times 1 / (1 - 1/alphaCr), and
+// the shears too (the shear of a column comes from its sway moments). The
 // rule needs alphaCr >= 3: below, stiffen() makes a member heavier, and the
 // factor stays at its value for 3 (1.5).
 const ALPHA_MIN = 3;
@@ -1090,7 +1092,7 @@ function stability(m: Model, r: Extract<Solved, { ok: true }>): Stability {
   const axial = r.axial.map((n, i) => (m.owner[i].endsWith('-post') || m.tension.has(m.owner[i]) ? 0 : n));
   const b = buckling(m.nodes, m.elems, { ...r, axial });
   const amp = 1 / (1 - 1 / Math.max(b.alpha, ALPHA_MIN));
-  const forces = r.forces.map((f) => ({ ...f, My: f.My * amp, Mz: f.Mz * amp }));
+  const forces = r.forces.map((f) => ({ ...f, My: f.My * amp, Mz: f.Mz * amp, Vy: f.Vy * amp, Vz: f.Vz * amp }));
   const energy = new Map<string, number>();
   m.owner.forEach((who, i) => energy.set(who, (energy.get(who) ?? 0) + b.energy[i]));
   return { alpha: b.alpha, amp, forces, energy };
@@ -1179,7 +1181,10 @@ function size(st: Structure, m: Model, res: Forces[], cat: Catalog, p: Params, c
     const tr = a.truss;
     if (tr) {
       const chords = shaped(p, chordId(a)) ? orOld(cat.tees, cat.beams) : cat.beams;
-      tr.chord = choose(chords, chordId(a), tr.chord, (s) => s.d >= 150 && s.d <= (tr.low ? LOW.chord : Math.max(a.sec.d, 360)));
+      // like the rafter above: a chord on a column web must fit between the
+      // flanges (a long tee chord gets wide since F9 in checks.ts)
+      const onWeb = faceOf(a) % 180 === 90;
+      tr.chord = choose(chords, chordId(a), tr.chord, (s) => s.d >= 150 && s.d <= (tr.low ? LOW.chord : Math.max(a.sec.d, 360)) && (!onWeb || s.bf + 40 <= webRoom(cat)));
       tr.webs.forEach((wb, k) => {
         const L = Math.hypot(wb.t - wb.b, tr.D - a.sec.d);
         wb.sec = choose(cat.tubes, webId(a, k), wb.sec, (s) => L / s.rmin < 200);
@@ -1950,9 +1955,9 @@ export function floating(ps: Part[]): string[] {
 }
 
 // The check of one member in the final structure: its worst forces (N and
-// N·mm, the moments with the sway factor), its ratio (limit LIMIT) and its
-// length in the solver model.
-export type MemberCheck = { ratio: number; N: number; Nc: number; My: number; Mz: number; L: number };
+// N·mm, the moments and shears with the sway factor), its ratio (limit
+// LIMIT) and its length in the solver model.
+export type MemberCheck = { ratio: number; N: number; Nc: number; My: number; Mz: number; Vy: number; Vz: number; L: number };
 
 // One more solve of the final structure, for Result.members. Nothing changes
 // in the structure: no fix, no sizing, no random draw.
