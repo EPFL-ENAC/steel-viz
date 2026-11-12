@@ -138,6 +138,9 @@ test('frames of the build', () => {
   const b = parseShotArgs([CR1, '--at-ms', '0', '--duration', '4.5', '--speed', '2', '--out', 'b.png']);
   assert.deepEqual([b.atMs, b.duration, b.speed], [[0], 4.5, 2]);
   assert.equal(shotHash(b), 'specimen=connections%2FLee_et_al_2002_CR1&duration=4.5&speed=2');
+  assert.equal(b.plain, undefined, 'bolts and welds by default');
+  const c = parseShotArgs(['--seed', '5', '--at-ms', '300', '--plain', '--out', 'b.png']);
+  assert.equal(shotHash(c), 'seed=5&duration=8&speed=1&effects=0');
   assert.equal(parseShotArgs([CR1, '--out', 'a.png']).duration, undefined, 'no frames: the page as it is, at rest');
   assert.equal(frameFile('out/b.png', 300, true), 'out/b-300.png');
   assert.equal(frameFile('out/b.png', 300, false), 'out/b.png');
@@ -145,6 +148,7 @@ test('frames of the build', () => {
   const refused: [string[], RegExp][] = [
     [[CR1, '--duration', '8', '--out', 'a.png'], /are for --at-ms/],
     [[CR1, '--speed', '2', '--out', 'a.png'], /are for --at-ms/],
+    [[CR1, '--plain', '--out', 'a.png'], /are for --at-ms/],
     [[CR1, '--at-ms', '300', '--step', '4', '--out', 'a.png'], /not with --step/],
     [[CR1, '--at-ms', '300', '--peak', '--out', 'a.png'], /not with --step/],
     [[CR1, '--at-ms', '300', '--compare', '2', '--out', 'a.png'], /not for --compare/],

@@ -3,6 +3,7 @@
 //   [--form mix|tree|portal|box] [--animate] [--frames] [--painter] [--flat] [--size px]
 //   [--speed 1] (with --animate: how fast each part comes, as "Part speed" in the playground, default 1)
 //   [--duration 8] (with --animate: the build lasts this many seconds, as "Build time"; none: its own length at this speed)
+//   [--plain] (with --animate: bolts pop in and no welds, as "Bolts and welds" off in the playground)
 //   [--shapes 0.35] (the chance of a channel, double angle or tee member, 0 for none)
 //   [--round-tubes 0.3] (the chance of round tube braces on an arm, 0 for none)
 //   [--short-braces 0.5] (the chance of a short brace on a tree arm with no room for a full one, 0 for none)
@@ -42,6 +43,7 @@ export type CliArgs = {
   animate: boolean;
   speed?: number;
   duration?: number; // s
+  plain?: boolean; // bolts pop in, no welds
   frames: boolean;
   painter: boolean;
 };
@@ -61,6 +63,11 @@ export function parseCliArgs(argv: string[]): CliArgs {
     if (a.specimen === undefined) throw new Error('--step is for a test (--specimen), a seed has no steps');
     a.step = number('--step', value('step'), (n) => Number.isInteger(n) && n >= 0, 'a whole number from 0');
     for (const k of ['animate', 'frames', 'painter'] as const) if (a[k]) throw new Error(`--step draws one deformed frame, not with --${k}`);
+  }
+  if (has('plain')) {
+    if (!a.animate) throw new Error('--plain is for --animate');
+    if (a.painter) throw new Error('--plain is for the exact renderer, not --painter');
+    a.plain = true;
   }
   for (const k of ['speed', 'duration'] as const) {
     if (!has(k)) continue;
@@ -141,7 +148,7 @@ export function main(argv: string[]) {
   const weights = !argv.includes('--flat');
   const size = opt('size', '') ? +opt('size', '') : undefined;
   // the knobs of the playground: speed as "Part speed", duration in s as "Build time"
-  const anim = { speed: a.speed, duration: a.duration === undefined ? undefined : a.duration * 1000 };
+  const anim = { speed: a.speed, duration: a.duration === undefined ? undefined : a.duration * 1000, ...(a.plain && { effects: false }) };
   const shape = a.step !== undefined ? readStep(test!.record, spec!, r, a.step, hubData) : undefined;
   const svg = shape
     ? shapeSvg(r.parts, shape.state, { az, el, weights, size })
@@ -184,7 +191,7 @@ export function main(argv: string[]) {
   }
   if (a.animate && !a.painter) {
     const end = buildEnd(timeline(r.parts, anim));
-    console.log(`  animation: speed ×${a.speed ?? 1}, the build lasts ${(end / 1000).toFixed(1)} s${a.duration === undefined ? ' (its own length)' : ''}`);
+    console.log(`  animation: speed ×${a.speed ?? 1}, the build lasts ${(end / 1000).toFixed(1)} s${a.duration === undefined ? ' (its own length)' : ''}${a.plain ? ', plain' : ', bolts and welds'}`);
   }
 
   if (a.frames) {
