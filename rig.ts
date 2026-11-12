@@ -190,6 +190,13 @@ export function crosshead(id: string, at: V, across: V, span: number, floor: num
   return rigPart(id, join(...posts, beam), o, 'Crosshead');
 }
 
+// Some straight bars as one part, like the bracing of a rig frame. lines: the
+// two ends of each bar. The bars can cross: they are one part, so they don't
+// clash with each other.
+export function rigBars(id: string, sec: Section, lines: [V, V][], o: RigOpts): Part {
+  return rigPart(id, join(...lines.map(([a, b]) => bar(sec, a, b))), o, 'Bracing');
+}
+
 // The lightest I of the catalog at least minDepth deep and minWidth wide, for
 // the members of a rig frame (the deepest one when none is big enough).
 export function rigSection(cat: Catalog, minDepth: number, minWidth = 0): Section {
