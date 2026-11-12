@@ -152,10 +152,10 @@ export const POP_MS = 220; // one bolt pops in (no effects)
 // a thread. Its turn slows down as (1 - u)^SCREW_EXP, so it stops tight. A hex
 // turned by 60 degrees looks the same: faster than about 15 degrees a frame,
 // the eye can't follow the turn (a test keeps it under 12 at speed 1).
-export const SCREW_MS = 1800;
+export const SCREW_MS = 2300;
 export const SCREW_GAP = 100;
 export const BOLT_IN = 0.45;
-export const SEAT_AT = 0.3;
+export const SEAT_AT = 0.45; // long enough to see it come from far
 export const HEAD_TURN = (4 * Math.PI) / 3;
 export const NUT_TURN = 2 * Math.PI;
 export const SCREW_EXP = 1.3;

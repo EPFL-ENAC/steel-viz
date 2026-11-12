@@ -528,11 +528,11 @@ export function renderHLR(parts: Part[], o: RenderOpts): { svg: string; faces: n
         (effects
           ? // the slab is poured (.p): it shows in place
             `.steel .f.p{animation-name:pour}@keyframes pour{from{opacity:0}}` +
-            // a bolt comes in along its axis (--dx, --dy), and from the camera side (--s): fast
-            // up to a quarter of its way, then slowly, as it screws in (in 3D it also turns)
+            // a bolt comes in along its axis (--dx, --dy), and from the camera side (--s): it
+            // fades in, glides close (smooth at both ends), then goes in slowly, as it screws in (in 3D it also turns)
             `.steel .k{animation:push ${ms(push)} linear both;transform-box:fill-box;transform-origin:center}` +
-            `@keyframes push{from{opacity:0;transform:translate(var(--dx,0px),var(--dy,0px)) scale(var(--s,1));animation-timing-function:cubic-bezier(.33,1,.68,1)}` +
-            `${Math.round(SEAT_AT * 100)}%{opacity:1;transform:translate(calc(var(--dx,0px)*.25),calc(var(--dy,0px)*.25)) scale(calc(.75 + var(--s,1)*.25));animation-timing-function:cubic-bezier(.33,.43,.6,1)}}` +
+            `@keyframes push{from{opacity:0;transform:translate(var(--dx,0px),var(--dy,0px)) scale(var(--s,1));animation-timing-function:cubic-bezier(.45,0,.55,1)}` +
+            `${Math.round(SEAT_AT * 100)}%{opacity:1;transform:translate(calc(var(--dx,0px)*.06),calc(var(--dy,0px)*.06)) scale(calc(.94 + var(--s,1)*.06));animation-timing-function:cubic-bezier(.33,.43,.6,1)}}` +
             // a weld: the hot line is drawn (wd), then it cools and goes (wc). The spark (.z) runs at its tip
             `.steel .w{stroke:var(--weld,#ffa21a);stroke-width:${f(thickMm * scale * 1.5)};stroke-dasharray:1 2;animation-name:wd,wc;animation-timing-function:linear,ease-in;animation-fill-mode:both}` +
             `@keyframes wd{from{stroke-dashoffset:1}to{stroke-dashoffset:0}}@keyframes wc{to{stroke:#c8460a;opacity:0}}` +
@@ -586,12 +586,13 @@ export function renderHLR(parts: Part[], o: RenderOpts): { svg: string; faces: n
     return fl.until === Infinity ? `<path class="${k}" d="${fl.d}"/>` : o.animate ? `<path class="${k} h" style="animation-delay:${ms(landAt(fl.until))}" d="${fl.d}"/>` : '';
   };
 
-  // where a bolt comes from (effects): 3 head sizes out along its axis, and
+  // where a bolt comes from (effects): 12 head sizes out along its axis (far
+  // enough to see it come, as TRAVEL in webgl.ts), and
   // bigger when its axis points at the camera (it comes toward us)
   const from = (hi: number) => {
     if (!effects) return '';
     const n = heads[hi].n;
-    const go = 3 * R * scale;
+    const go = 12 * R * scale;
     return `--dx:${f(dot(n, r) * go)}px;--dy:${f(-dot(n, up) * go)}px;--s:${f(1 + 0.6 * dot(n, c))};`;
   };
 

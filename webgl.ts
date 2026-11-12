@@ -54,7 +54,7 @@ const VEIL = 0.3; // how far the slab goes toward the rig color
 const FADE = 0.55; // with marks: how far the parts with no mark go toward bg
 const MARKED = 1.5; // with marks: the lines of a marked part are this much wider
 // the build effects
-const TRAVEL = 55; // mm: how far out a head or a nut starts
+const TRAVEL = 250; // mm: how far out a head or a nut starts, far enough to see it come
 const SEAT = 14; // mm: how far out it starts to screw in (the turns are in steel.ts)
 const SPARK = 4; // CSS px: the radius of the welding spark
 const BEAD = 0.35; // the hot bead, in spark radii
@@ -227,7 +227,8 @@ vec3 move(vec3 p) {
 // all of them are in). Bolt i starts at i times the gap. Its head moves from 0
 // to BOLT_IN of its time, its nut from BOLT_IN to 1 (a nut alone, from 0 to 1).
 // Before that it is hidden (sHide). A piece
-// first comes from TRAVEL to SEAT with no turn (k^3 of its way left), up to
+// first comes from TRAVEL to SEAT with no turn (a smoothstep: it starts still,
+// so we see where it comes from, and slows down at the end), up to
 // SEAT_AT of its time. Then it turns, and moves in with the turn, like on a
 // thread: what is left of both is (1 - u)^SCREW_EXP. The pieces that are not a
 // bolt (role 0) never move.
@@ -260,7 +261,7 @@ void screwAt() {
   float seat = ${SEAT_AT.toFixed(3)};
   if (u < seat) {
     float k = 1.0 - u / seat;
-    sOff = bn.xyz * (${SEAT.toFixed(1)} + ${(TRAVEL - SEAT).toFixed(1)} * k * k * k);
+    sOff = bn.xyz * (${SEAT.toFixed(1)} + ${(TRAVEL - SEAT).toFixed(1)} * k * k * (3.0 - 2.0 * k));
     sTurn = turn;
     return;
   }
