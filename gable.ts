@@ -11,6 +11,9 @@
 // - A moment end plate on the column at each eave, as deep as the rafter and
 //   the haunch, and a bolted end plate splice at the ridge (two plates face
 //   to face).
+// - Purlins (a chance of their own): short channels across each rafter, on
+//   its top flange, turned to the pitch. Each one is bolted to a cleat, a
+//   plate welded on the rafter on the down slope side of the channel web.
 //
 // generate.ts calls this file from small hooks: the draw (drawGable), the
 // solver model (gableModel), the parts (gableParts) and the thrust for the
@@ -25,7 +28,10 @@ import type { Elem, FNode } from './solver.ts';
 // span from the eave plate (mm), k its depth at the eave, times the depth of
 // the rafter (so it follows the sizing), and how it is made.
 export type Haunch = { L: number; k: number; kind: 'cut' | 'plates' };
-export type Gable = { slope: number; haunch: Haunch };
+// The purlins: about `spacing` mm apart along each rafter, each one L mm
+// long, centred on the rafter. sec: set after the sizing (purlinSec).
+export type Purlins = { spacing: number; L: number; sec?: Section };
+export type Gable = { slope: number; haunch: Haunch; purlins?: Purlins };
 // what this file reads of an Arm (generate.ts)
 type GArm = { id: string; z: number; L: number; sec: Section; gable?: Gable };
 
@@ -48,6 +54,26 @@ export function drawGable(rng: () => number, span: number, P: number): Gable | u
   const k = Math.round((0.6 + 0.4 * rng()) * 20) / 20;
   const kind = rng() < 0.5 ? 'cut' : 'plates';
   return yes ? { slope, haunch: { L, k, kind } } : undefined;
+}
+
+// The purlin draws, from their own stream, always all of them and in this
+// order: yes or no, the spacing (800 to 1400 mm) and the length (600 to 1200
+// mm), by 50 mm.
+export function drawPurlins(rng: () => number, P: number): Purlins | undefined {
+  const yes = rng() < P;
+  const spacing = r50(800 + 600 * rng());
+  const L = r50(600 + 600 * rng());
+  return yes ? { spacing, L } : undefined;
+}
+
+// The purlin section: the deepest channel up to 0.6 times the rafter depth,
+// the lightest of those, else the smallest channel. A rule, not the solver:
+// the purlins are not in the model (the line load on the rafter is the roof
+// they carry, and their own weight is about 0.1 % of it).
+export function purlinSec(channels: Section[], rafter: Section): Section | undefined {
+  const ok = channels.filter((c) => c.d <= 0.6 * rafter.d);
+  if (!ok.length) return channels.reduce<Section | undefined>((m, c) => (!m || c.d < m.d ? c : m), undefined);
+  return ok.reduce((m, c) => (c.d > m.d || (c.d === m.d && c.A < m.A) ? c : m));
 }
 
 // the haunch depth at the eave, under the rafter, flange included
@@ -125,15 +151,18 @@ export function thrust(a: GArm, nodes: FNode[], elems: Elem[], owner: string[], 
 
 // the log line: the rise, the haunch and the thrust (N) at the eaves
 export function gableLog(a: GArm, f: number, H: number): string {
-  const hn = a.gable!.haunch;
-  return `${a.id}: gable, rise ${Math.round(rise(a, f))} mm, haunch ${hn.L} x ${haunchDepth(a)} mm, thrust at the eaves ${(H / 1000).toFixed(1)} kN`;
+  const { haunch: hn, purlins: pu } = a.gable!;
+  const purlins = pu?.sec ? `, purlins ${pu.sec.id} about ${pu.spacing} mm apart` : '';
+  return `${a.id}: gable, rise ${Math.round(rise(a, f))} mm, haunch ${hn.L} x ${haunchDepth(a)} mm${purlins}, thrust at the eaves ${(H / 1000).toFixed(1)} kN`;
 }
 
 // ------------------------------------------------------------- parts
 // o0, o1: the axes of the near and far columns at z = 0, h: from the near
 // column to the far one, f: the column face from its axis, s0 and s1: the
-// ids of the column shafts the eaves land on.
-export type GableCtx = { o0: V; o1: V; h: V; f: number; s0: string; s1: string; seg: number; plates: boolean; bolts: boolean };
+// ids of the column shafts the eaves land on. reach: how far the column goes
+// toward the ridge from its axis, its cap plate included (on a web face, its
+// flange tips): the column rises above the eave, so the purlins keep clear.
+export type GableCtx = { o0: V; o1: V; h: V; f: number; reach: number; s0: string; s1: string; seg: number; plates: boolean; bolts: boolean };
 
 // the plate thicknesses we weld a haunch from
 const PLATES = [8, 10, 12, 15, 20, 25, 30, 35, 40, 50];
@@ -175,6 +204,7 @@ export function gableParts(a: GArm, c: GableCtx): { parts: Part[]; near: Geo } {
   const [twH, tfH, bfH] = hn.kind === 'cut' ? [sec.tw, sec.tf, sec.bf] : [plateT(sec.tw), plateT(sec.tf), sec.bf];
   const ids = [a.id, `${a.id}-rafter2`];
   const ridge: { id: string; dots: Dot[] }[] = [];
+  const roofs: { g: Geo; hs: V; across: V }[] = [];
   let near: Geo | undefined;
   [0, 1].forEach((side) => {
     const [o, hs, sId, id] = side ? [c.o1, mul(c.h, -1), c.s1, ids[1]] : [c.o0, c.h, c.s0, ids[0]];
@@ -194,6 +224,7 @@ export function gableParts(a: GArm, c: GableCtx): { parts: Part[]; near: Geo } {
     // the rafter, eave to ridge
     const g = geo(id, sec, P(x0, a.z), P(x1, zr), true);
     if (!side) near = g;
+    roofs.push({ g, hs, across });
     const r = rafter(g, c.seg, tan);
     const Lg = len(sub(g.p1, g.p0));
     push({
@@ -259,7 +290,73 @@ export function gableParts(a: GArm, c: GableCtx): { parts: Part[]; near: Geo } {
   });
   if (c.bolts && ridge.length === 2)
     push({ id: `${a.id}-ridge-bolts`, supports: ridge.map((q) => q.id), kind: 'bolts', faces: [], dots: ridge.flatMap((q) => q.dots), info: { type: 'Bolts', of: `${a.id}-ridge`, conn: ['end_plate'] } });
+  // the roof goes on last: the purlins of both rafters
+  const pu = a.gable!.purlins;
+  // the column, as a distance along the rafter top from its eave end
+  const col = (c.reach - x0) / cos;
+  if (pu?.sec) for (const r of roofs) out.push(...purlinParts(r.g, r.hs, r.across, a.gable!, pu, c, sec, col));
   return { parts: out, near: near! };
+}
+
+const CLEAT_T = 10; // mm
+
+// Where the purlins go on a rafter: s, along its top from the eave end (mm).
+// The first one keeps 100 mm clear of the eave plate (it stands 90 mm above
+// the rafter, and the top of the purlin leans toward it by d tan), and 30 mm
+// clear of the column at `col` (the column reach, along the rafter top). The
+// last one 60 mm clear of the ridge plate. About `spacing` apart, at least
+// two, or one in the middle when two don't fit.
+export function purlinAt(Lg: number, c: Section, tan: number, spacing: number, col = 0): number[] {
+  const s0 = Math.max(100, col + 30) + c.tw / 2 + CLEAT_T + c.d * tan;
+  const s1 = Lg - (c.bf - c.tw / 2) - 60;
+  if (s1 < s0) return [];
+  if (s1 - s0 < 2 * (c.bf + CLEAT_T)) return [(s0 + s1) / 2];
+  const n = Math.max(2, Math.round((s1 - s0) / spacing) + 1);
+  return Array.from({ length: n }, (_, k) => s0 + ((s1 - s0) * k) / (n - 1));
+}
+
+// The purlins of one rafter g (its top of steel line, from the eave up), in
+// build order: for each one the cleat, the channel, the bolts. hs: from the
+// column to the ridge, across: out of the frame plane. The channel web is
+// square to the roof, its flanges toward the ridge, and its cleat on the
+// other side of the web.
+function purlinParts(g: Geo, hs: V, across: V, gb: Gable, pu: Purlins, c: GableCtx, rafter: Section, col: number): Part[] {
+  const ch = pu.sec!;
+  const [sin, cos, tan] = [Math.sin(rad(gb)), Math.cos(rad(gb)), Math.tan(rad(gb))];
+  const up = add(mul(hs, cos), mul(Z, sin)); // up the slope, along the rafter
+  const n = add(mul(hs, -sin), mul(Z, cos)); // the roof normal
+  const Lg = len(sub(g.p1, g.p0));
+  const out: Part[] = [];
+  // the cleat: as wide as two bolts need, but not wider than the rafter flange
+  const wc = Math.min(rafter.bf, PITCH + 2 * EDGE);
+  const offs = wc >= PITCH + 2 * EDGE ? [-PITCH / 2, PITCH / 2] : [0];
+  const hc = Math.min(ch.d, ch.d / 2 + EDGE);
+  purlinAt(Lg, ch, tan, pu.spacing, col).forEach((s, k) => {
+    const id = `${g.id}-purlin${k + 1}`;
+    const T = add(g.p0, mul(g.u, s)); // on the rafter top, on its axis
+    const top = add(T, mul(n, ch.d));
+    const pg = geo(id, ch, add(top, mul(across, -pu.L / 2)), add(top, mul(across, pu.L / 2)), true);
+    pg.w = mul(n, -1);
+    pg.v = cross(pg.w, pg.u);
+    if (dot(pg.v, up) < 0) {
+      [pg.p0, pg.p1, pg.u] = [pg.p1, pg.p0, mul(pg.u, -1)];
+      pg.v = cross(pg.w, pg.u);
+    }
+    const cid = `${id}-cleat`;
+    if (c.plates) {
+      const pl = flat(add(add(T, mul(up, -ch.tw / 2 - CLEAT_T / 2)), mul(n, hc / 2)), across, n, CLEAT_T, rect(wc, hc));
+      out.push({ id: cid, step: 0, supports: [g.id], kind: 'plate', from: Z, faces: pl.faces, boxes: [pl.box], dots: [], info: { type: 'Purlin cleat', of: id } });
+    }
+    out.push({
+      id, step: 0, supports: [c.plates ? cid : g.id], kind: 'member', from: Z, faces: memberFaces(pg, c.seg), boxes: memberBoxes(pg), dots: [],
+      info: { type: 'Purlin', sec: ch, L: pu.L }, // not in the solver model, so no member
+    });
+    // through the web and the cleat, half way up the channel
+    const mid = add(add(T, mul(n, ch.d / 2)), mul(up, -CLEAT_T / 2));
+    const dots = offs.map((o): Dot => ({ p: add(mid, mul(across, o)), axis: up, half: (ch.tw + CLEAT_T) / 2 }));
+    if (c.bolts && c.plates) out.push({ id: `${id}-bolts`, step: 0, supports: [id, cid], kind: 'bolts', faces: [], dots, info: { type: 'Bolts', of: id } });
+  });
+  return out;
 }
 
 // bolt rows from z0 down to z1, about 150 mm apart. No room: one in the middle.
