@@ -1330,7 +1330,7 @@ function size(st: Structure, m: Model, res: Forces[][], cat: Catalog, p: Params,
   const works = (list: Section[], who: string, rule: (s: Section) => boolean) => {
     const f = worst.get(who)!;
     const L = m.len.get(who)!;
-    return list.some((s) => rule(s) && !tooThin(s, p.fy) && s.A >= (st.minA?.[who] ?? 0) && ratioOf(s, f, p.fy, L) < LIMIT);
+    return list.some((s) => rule(s) && !tooThin(s, p.fy) && s.A >= (st.minA?.[who] ?? 0) && worstRatio(s, f, p.fy, L) < LIMIT);
   };
   for (const a of st.arms) {
     // a top chord keeps the clear height of its truss
