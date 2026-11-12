@@ -12,10 +12,10 @@ Node 24 or newer runs the `.ts` files directly. Imports keep the `.ts` extension
 
 ```sh
 pnpm install              # once
-node --test               # solver tests, no clash and no floating part on 240 structures, the specimens, the hub tables (about 22 s)
+pnpm test                 # all tests, 3 files at once: solver, no clash and no floating part on 240 structures, the specimens, the hub tables (about 2 min)
 pnpm run type-check       # tsc, strict, no emit (about 0.2 s)
 node --test solver.test.ts                         # one file
-node --test --test-name-pattern "clash|support"    # some tests by name
+pnpm test --test-name-pattern "clash|support"      # some tests by name (it still loads every file)
 pnpm dev                  # the playground (Vue app in app/) with live reload, on PLAYGROUND_PORT or 5180
 pnpm build                # the playground as a static site in dist/ (build output, never commit it)
 pnpm run build:lib        # the package (index.ts, 3d.ts) as JS and .d.ts in lib/ (only a release tag has it, see release.sh)
@@ -39,9 +39,11 @@ node shot.ts --seed 5 --at-ms 300,900,1500 --out b.png              # frames of 
 
 To look at what you change in the 3D view, you must use `shot.ts` and read the PNG (the Read tool shows images). `curl` can't reach the playground pane from the sandbox, and `shot.ts` doesn't need it: it starts its own Vite and its own headless Chrome and stops them at the end. It prints the notes of the rail and the page errors, and it exits 1 on a page error or when there is no canvas. It needs `google-chrome` on the PATH, or the env `CHROME`. A reaction wall can hide an actuator, so try another angle before you say a part is missing.
 
-Run `node --test` after every change to `generate.ts`, `gable.ts`, `frame.ts`, `steel.ts`, `skew.ts`, `slab.ts`, `clash.ts`, `bench.ts`, `rig.ts`, `hub.ts` or `deform*.ts`. `cli.ts` prints the solver log, the part count, `FLOATING` if a part comes before the part it stands on, and `CLASH` if two parts go through each other. It's the fastest way to look at one seed.
+Run `pnpm test` after every change to `generate.ts`, `gable.ts`, `frame.ts`, `steel.ts`, `skew.ts`, `slab.ts`, `clash.ts`, `bench.ts`, `rig.ts`, `hub.ts` or `deform*.ts`. `cli.ts` prints the solver log, the part count, `FLOATING` if a part comes before the part it stands on, and `CLASH` if two parts go through each other. It's the fastest way to look at one seed.
 
 Node only strips the types. `pnpm run type-check` checks them (`tsc` with `tsconfig.json`, no emit). CI runs `node --test`, then the type check, on every push and pull request. `erasableSyntaxOnly` refuses TypeScript that Node can't strip (no `enum`, no `namespace`, no constructor parameter properties). There is no linter.
+
+For the full run, always use `pnpm test`, never bare `node --test`. Bare `node --test` runs up to 15 test files at once, and when several worktrees do it together, the machine freezes. `pnpm test` runs 3 files at once. CI runs bare `node --test` on purpose: the runner is ours alone. One file (`node --test solver.test.ts`) is fine.
 
 ## How it fits together
 
