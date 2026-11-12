@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { loadCatalog } from './sections.ts';
 import { generate } from './generate.ts';
-import { BOLT_MS, buildEnd, COOL_MS, land, LAND_CSS, POP_MS, SCREW_MS, seamTimes, shortestBuild, slotEnd, timeline, WELD_PAUSE, type Part } from './steel.ts';
+import { BOLT_IN, BOLT_MS, buildEnd, COOL_MS, HEAD_TURN, land, LAND_CSS, NUT_TURN, POP_MS, SCREW_EXP, SCREW_GAP, SCREW_MS, SEAT_AT, seamTimes, shortestBuild, slotEnd, timeline, WELD_PAUSE, type Part } from './steel.ts';
 import type { V } from './vec.ts';
 import { readTables } from './tables.ts';
 
@@ -63,7 +63,17 @@ test('a short build with slow parts has many parts in the air at once', () => {
   assert.ok(inAir(timeline(parts, { speed: 0.25, duration: 2000 })) > inAir(timeline(parts, { speed: 4, duration: 20000 })));
 });
 
+// a sum of all the slots of the four structures, with no effects, as main gave it
+const MAIN = [16165900, 22018525.629, 3585080, 4129360, 8492165.993, 1528160, 15181120, 19951162.841, 3349280, 11690770, 12968987.857, 1907480];
 test('effects off: the slots of before, bolts pop in', () => {
+  const sums = structures.flatMap((parts) =>
+    [{}, { duration: 8000 }, { speed: 0.5, duration: 3000 }].map((o) => {
+      let s = 0;
+      for (const [step, x] of timeline(parts, { ...o, effects: false })) s += (step + 1) * (x.start + 2 * x.land);
+      return s;
+    }),
+  );
+  sums.forEach((s, i) => assert.ok(Math.abs(s - MAIN[i]) < 1e-3, `case ${i}: ${s}, ${MAIN[i]} on main`));
   for (const parts of welded) {
     const off = timeline(parts, { effects: false });
     const on = timeline(parts);
@@ -75,9 +85,54 @@ test('effects off: the slots of before, bolts pop in', () => {
         const n = p.dots.length;
         assert.ok(Math.abs(a.dur - (POP_MS + BOLT_MS * (n - 1))) < 1e-9, `${p.id}: not the time of before`);
         assert.deepEqual(a.bolt, { gap: BOLT_MS, dur: POP_MS });
-        assert.deepEqual(b.bolt, { gap: BOLT_MS, dur: SCREW_MS });
-      } else assert.deepEqual([a.start, a.dur, a.land], [b.start, b.dur, b.land], `${p.id}: the effects moved a part`);
+        assert.deepEqual(b.bolt, { gap: SCREW_GAP, dur: SCREW_MS });
+      } else assert.ok(b.dur >= a.dur, `${p.id}: faster with the effects`);
     }
+  }
+});
+
+// the longest time when nothing moves, in ms
+function longestPause(slots: ReturnType<typeof timeline>) {
+  const iv = [...slots.values()].map((s) => [s.start, slotEnd(s)]).sort((a, b) => a[0] - b[0]);
+  let [end, pause] = [0, 0];
+  for (const [a, b] of iv) {
+    pause = Math.max(pause, a - end);
+    end = Math.max(end, b);
+  }
+  return pause;
+}
+
+test('with the effects, there is never a pause: a long build slows down', () => {
+  const more = [0, 2, 3, 7, 9, 20, 33, 40].map((seed) => generate({ seed }, cat).parts);
+  for (const parts of [...structures, ...welded, ...more])
+    for (const o of [{}, { duration: 3000 }, { duration: 8000 }, { duration: 30000 }, { speed: 4, duration: 8000 }, { speed: 0.25, duration: 60000 }]) {
+      const slots = timeline(parts, o);
+      assert.ok(longestPause(slots) < 1e-6, `${JSON.stringify(o)}: a pause of ${longestPause(slots)} ms`);
+    }
+  // longer than the build: all of it slower by the same factor, and it ends on time
+  for (const parts of structures) {
+    const own = timeline(parts);
+    const long = timeline(parts, { duration: 3 * buildEnd(own) });
+    const f = 3;
+    assert.ok(Math.abs(buildEnd(long) - 3 * buildEnd(own)) < 1e-6);
+    for (const [step, a] of own) {
+      const b = long.get(step)!;
+      assert.ok(Math.abs(b.start - f * a.start) < 1e-6 && Math.abs(b.dur - f * a.dur) < 1e-6);
+      if (a.bolt) assert.ok(Math.abs(b.bolt!.dur - f * a.bolt.dur) < 1e-6 && Math.abs(b.bolt!.gap - f * a.bolt.gap) < 1e-6);
+    }
+  }
+});
+
+test('a bolt turns slow enough to see it, and for long enough', () => {
+  // the turn of a piece is fastest when it starts to screw in: SCREW_EXP times its mean
+  const peak = (turn: number, span: number) => {
+    const ms = span * (1 - SEAT_AT) * SCREW_MS;
+    return { perFrame: ((turn * SCREW_EXP) / ms) * (1000 / 60) * (180 / Math.PI), ms };
+  };
+  for (const [name, turn, span] of [['head', HEAD_TURN, BOLT_IN], ['nut', NUT_TURN, 1 - BOLT_IN], ['anchor nut', NUT_TURN, 1]] as const) {
+    const { perFrame, ms } = peak(turn, span);
+    assert.ok(perFrame < 12, `${name}: ${perFrame.toFixed(1)} degrees a frame at 60 fps`);
+    assert.ok(ms >= 500, `${name}: it turns for ${ms} ms only`);
   }
 });
 
@@ -97,10 +152,9 @@ test('the bolts: after their member lands, one after the other, and fast', () =>
         assert.ok(Math.abs(sl.start + (p.dots.length - 1) * gap + dur - sl.land) < 1e-9, `${p.id}: the last bolt ends after its slot`);
       }
     }
-  // a plate with 8 bolts: a bit longer than a pop of 8, far from 8 screws one after the other
-  const eight = (one: number) => one + BOLT_MS * 7;
-  assert.ok(eight(SCREW_MS) < 1.5 * eight(POP_MS), `${eight(SCREW_MS)} ms for 8 bolts, ${eight(POP_MS)} before`);
-  assert.ok(eight(SCREW_MS) < (8 * SCREW_MS) / 3, 'far from 8 screws one after the other');
+  // a plate with 8 bolts: far from 8 screws one after the other
+  const eight = SCREW_MS + SCREW_GAP * 7;
+  assert.ok(eight < (8 * SCREW_MS) / 3, 'far from 8 screws one after the other');
 });
 
 test('the welds: after their part lands, and in the build time', () => {
@@ -144,7 +198,7 @@ test('the anchor nuts: they screw down after their base plate lands, in the buil
         bases++;
         const u = sl.nuts!;
         assert.ok(Math.abs(u.start - sl.land) < 1e-9, `${p.id}: the nuts don't start when the plate lands`);
-        assert.ok(Math.abs(u.gap - BOLT_MS * k) < 1e-9 && Math.abs(u.dur - SCREW_MS * k) < 1e-9);
+        assert.ok(Math.abs(u.gap - SCREW_GAP * k) < 1e-9 && Math.abs(u.dur - SCREW_MS * k) < 1e-9);
         assert.ok(Math.abs(u.end - (u.start + (n - 1) * u.gap + u.dur)) < 1e-9, `${p.id}: the last nut is not on at end`);
         assert.ok(slotEnd(sl) >= u.end);
       }

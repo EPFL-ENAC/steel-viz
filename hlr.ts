@@ -33,7 +33,7 @@
 // Line widths are in mm at the drawing scale, or in px when `size` says
 // how many px wide the drawing will be shown (a logo, a favicon).
 import { add, cross, dot, mul, norm, sub, type V } from './vec.ts';
-import { BOLT_IN, camera, forSize, LAND_CSS, seamTimes, timeline, type Face, type Part, type RenderOpts } from './steel.ts';
+import { BOLT_IN, camera, forSize, LAND_CSS, SEAT_AT, seamTimes, timeline, type Face, type Part, type RenderOpts } from './steel.ts';
 import { triangles } from './triangles.ts';
 
 const HEAD = 13; // bolt head height, mm (M20)
@@ -528,9 +528,11 @@ export function renderHLR(parts: Part[], o: RenderOpts): { svg: string; faces: n
         (effects
           ? // the slab is poured (.p): it shows in place
             `.steel .f.p{animation-name:pour}@keyframes pour{from{opacity:0}}` +
-            // a bolt comes in along its axis (--dx, --dy), and from the camera side (--s)
-            `.steel .k{animation:push ${ms(push)} cubic-bezier(.33,1,.68,1) both;transform-box:fill-box;transform-origin:center}` +
-            `@keyframes push{from{opacity:0;transform:translate(var(--dx,0px),var(--dy,0px)) scale(var(--s,1))}40%{opacity:1}}` +
+            // a bolt comes in along its axis (--dx, --dy), and from the camera side (--s): fast
+            // up to a quarter of its way, then slowly, as it screws in (in 3D it also turns)
+            `.steel .k{animation:push ${ms(push)} linear both;transform-box:fill-box;transform-origin:center}` +
+            `@keyframes push{from{opacity:0;transform:translate(var(--dx,0px),var(--dy,0px)) scale(var(--s,1));animation-timing-function:cubic-bezier(.33,1,.68,1)}` +
+            `${Math.round(SEAT_AT * 100)}%{opacity:1;transform:translate(calc(var(--dx,0px)*.25),calc(var(--dy,0px)*.25)) scale(calc(.75 + var(--s,1)*.25));animation-timing-function:cubic-bezier(.33,.43,.6,1)}}` +
             // a weld: the hot line is drawn (wd), then it cools and goes (wc). The spark (.z) runs at its tip
             `.steel .w{stroke:var(--weld,#ffa21a);stroke-width:${f(thickMm * scale * 1.5)};stroke-dasharray:1 2;animation-name:wd,wc;animation-timing-function:linear,ease-in;animation-fill-mode:both}` +
             `@keyframes wd{from{stroke-dashoffset:1}to{stroke-dashoffset:0}}@keyframes wc{to{stroke:#c8460a;opacity:0}}` +

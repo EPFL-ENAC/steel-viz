@@ -34,7 +34,7 @@
 // where every bolt of it is. All the seams of the structure are one buffer and
 // one draw call (WELD_VS), made at build().
 import { add, cross, dot, mul, norm, sub, type V } from './vec.ts';
-import { BOLT_IN, buildEnd, camera, COOL_MS, land, seamTimes, timeline, type Part } from './steel.ts';
+import { BOLT_IN, buildEnd, camera, COOL_MS, HEAD_TURN, land, NUT_TURN, SCREW_EXP, SEAT_AT, seamTimes, timeline, type Part } from './steel.ts';
 import { triangles } from './triangles.ts';
 import { I4, MAX_KNOTS, MAX_ZONES, movePoint, type DeformState, type Move } from './deform.ts';
 
@@ -55,11 +55,7 @@ const FADE = 0.55; // with marks: how far the parts with no mark go toward bg
 const MARKED = 1.5; // with marks: the lines of a marked part are this much wider
 // the build effects
 const TRAVEL = 55; // mm: how far out a head or a nut starts
-// how much a head and a nut turn on their way in. A hex turned 60 degrees
-// looks the same, so a turn faster than about 30 degrees a frame looks still,
-// or backward. With SCREW_MS, these stay under 16 degrees a frame at 60 fps.
-const HEAD_TURN = (2 * Math.PI) / 3;
-const NUT_TURN = Math.PI;
+const SEAT = 14; // mm: how far out it starts to screw in (the turns are in steel.ts)
 const SPARK = 4; // CSS px: the radius of the welding spark
 const BEAD = 0.35; // the hot bead, in spark radii
 const LIFT = 8; // mm: a seam sits in the corner of two faces, it draws this much toward the eye
@@ -105,7 +101,9 @@ export type Viewer = {
 // along nn: its sides, its top, and its lines (both rings and the corners).
 // The bottom ring is where it sits on the plate. The bolt end past a nut is
 // a short round bar (12 faces) with a ring at each end, and the corners on
-// its outline.
+// its outline. While the bolt goes in, its shank shows too: the same bar from
+// the head to the end, with its thread (a helix). At rest the shank is in the
+// steel and in the nut, and it is hidden, so the drawing stays the same.
 // rad: 3 numbers per line of seg. 0, 0, 0 for a plain line. For a corner of
 // a round bar, the direction from its axis to the corner: the line shader
 // draws the corner only where one of its two faces looks toward the eye and
@@ -116,17 +114,23 @@ export type Viewer = {
 // role (bn).
 type Geo = { tri: number[]; seg: number[]; rad: number[]; ta: number[]; sa: number[] };
 // the roles: a head moves in, then the nut (after a head, or alone on an anchor
-// rod), and the bolt end past the nut shows with the nut. 0: not a bolt. A
-// mark has the role of its piece plus MARK.
-const ROLE = { head: 1, nut: 2, alone: 3, end: 4 };
-const MARK = 4;
+// rod). The shank and the bolt end past the nut move with the head. The shank
+// hides when the bolt is done, a stub (a bolt with no grip: we don't know
+// where its end is) when the head is in. 0: not a bolt. A mark has the role of
+// its piece plus MARK.
+const ROLE = { head: 1, nut: 2, alone: 3, end: 4, shank: 5, stub: 6 };
+const MARK = 8;
+const PITCH = 6; // mm: the thread, much coarser than a real one so it shows
+const NECK = 5; // mm: no thread just under the head
+const STUB = 30; // mm: the shank of a bolt with no grip
 const BAR = 12; // the faces of a round bar. LINE_VS needs tan(pi / BAR)
 function frame(nn: V) {
   const ref: V = Math.abs(nn[2]) > 0.9 ? [1, 0, 0] : [0, 0, 1];
   const a1 = norm(cross(nn, ref));
   return [a1, cross(nn, a1)];
 }
-function prism(b: V, nn: V, h: number, r: number, k: number, { tri, seg, rad, ta, sa }: Geo, bolt: number, role: number) {
+// axis: the way it moves out (SCREW), nn by default
+function prism(b: V, nn: V, h: number, r: number, k: number, { tri, seg, rad, ta, sa }: Geo, bolt: number, role: number, axis = nn) {
   const t0 = tri.length;
   const [a1, a2] = frame(nn);
   // from the axis to corner i
@@ -141,7 +145,7 @@ function prism(b: V, nn: V, h: number, r: number, k: number, { tri, seg, rad, ta
     // a hex shows all its corners
     rad.push(0, 0, 0, 0, 0, 0, ...(k === 6 ? [0, 0, 0] : out[i]));
   }
-  const at = [...b, bolt, ...nn, role];
+  const at = [...b, bolt, ...axis, role];
   for (let i = t0; i < tri.length; i += 3) ta.push(...at);
   for (let i = 0; i < 3 * k; i++) sa.push(...at);
 }
@@ -164,8 +168,26 @@ function nut(b: V, nn: V, g: Geo, i: number, alone = false) {
   prism(b, nn, NUT, R, 6, g, i, alone ? ROLE.alone : ROLE.nut);
   // from the bolt end past the nut
   mark(b, nn, NUT, SHANK, g, i, alone ? ROLE.alone : ROLE.nut);
-  // the end of an anchor rod is there before its nut
-  prism(add(b, mul(nn, NUT)), nn, TIP, SHANK, BAR, g, i, alone ? 0 : ROLE.end);
+  // the end of an anchor rod is there before its nut. The end of a bolt comes
+  // with its head, so it moves out along -nn
+  prism(add(b, mul(nn, NUT)), nn, TIP, SHANK, BAR, g, i, alone ? 0 : ROLE.end, mul(nn, -1));
+}
+// The shank under a head on b (nn out of the plate), l long, and its thread:
+// a right hand helix on its outline, PITCH a turn. Only while it moves.
+function shank(b: V, nn: V, l: number, g: Geo, i: number, role: number) {
+  prism(sub(b, mul(nn, l)), nn, l, SHANK, BAR, g, i, role);
+  const [a1, a2] = frame(nn);
+  const STEPS = 12; // a turn
+  const n = Math.floor(((l - NECK) / PITCH) * STEPS);
+  const at = (k: number) => {
+    const t = (2 * Math.PI * k) / STEPS;
+    return add(sub(b, mul(nn, NECK + (PITCH * k) / STEPS)), add(mul(a1, SHANK * Math.cos(t)), mul(a2, -SHANK * Math.sin(t))));
+  };
+  for (let k = 0; k < n; k++) {
+    g.seg.push(...at(k), ...at(k + 1));
+    g.rad.push(0, 0, 0);
+    g.sa.push(...b, i, ...nn, role);
+  }
 }
 
 // ---- shaders (GLSL ES 3.00). The colours are sRGB from end to end.
@@ -214,15 +236,16 @@ vec3 move(vec3 p) {
   return mix((mA * vec4(q, 1.0)).xyz, (mB * vec4(q, 1.0)).xyz, f);
 }`;
 
-// A bolt screws in: its head comes in along its axis and turns, then its nut
-// comes on from the other side and is turned tight. bolt: the ms since the
+// A bolt screws in: its head comes in along its axis and screws in, then its
+// nut comes on from the other side and is turned tight. bolt: the ms since the
 // bolts of this part started, the ms between two bolts, the ms of one (REST:
 // all of them are in). Bolt i starts at i times the gap. Its head moves from 0
 // to BOLT_IN of its time, its nut from BOLT_IN to 1 (a nut alone, from 0 to 1).
 // Before that it is hidden (sHide), and a mark is hidden after it too. A piece
-// slides in fast (k^3 of its way left) but turns at a steadier speed (k^1.5),
-// so it still turns once it is in place. The pieces that are not a bolt (role
-// 0) never move.
+// first comes from TRAVEL to SEAT with no turn (k^3 of its way left), up to
+// SEAT_AT of its time. Then it turns, and moves in with the turn, like on a
+// thread: what is left of both is (1 - u)^SCREW_EXP. The pieces that are not a
+// bolt (role 0) never move.
 const SCREW = `
 uniform vec3 bolt;
 layout(location = 4) in vec4 bb;
@@ -240,15 +263,27 @@ void screwAt() {
   if (mark) role -= ${MARK}.0;
   float s = (bolt.x - bb.w * bolt.y) / bolt.z;
   float a = ${BOLT_IN.toFixed(3)};
-  vec2 span = role < 1.5 ? vec2(0.0, a) : role < 2.5 ? vec2(a, 1.0) : role < 3.5 ? vec2(0.0, 1.0) : vec2(a, a);
-  if (s < span.x || (mark && s >= span.y)) {
+  // the head, the bolt end, the shank and the stub move together
+  bool head = role < 1.5 || role > 3.5;
+  vec2 span = head ? vec2(0.0, a) : role < 2.5 ? vec2(a, 1.0) : vec2(0.0, 1.0);
+  // when it hides: a mark when its piece stops, the shank when the bolt is done
+  float gone = mark ? span.y : role > 5.5 ? a : role > 4.5 ? 1.0 : 1e30;
+  if (s < span.x || s >= gone) {
     sHide = true;
     return;
   }
-  if (span.y <= span.x) return;
-  float k = 1.0 - clamp((s - span.x) / (span.y - span.x), 0.0, 1.0); // what is left of its time
-  sOff = bn.xyz * (${TRAVEL.toFixed(1)} * k * k * k);
-  sTurn = (role < 1.5 ? ${HEAD_TURN.toFixed(5)} : ${NUT_TURN.toFixed(5)}) * k * sqrt(k);
+  float u = clamp((s - span.x) / (span.y - span.x), 0.0, 1.0);
+  float turn = head ? ${HEAD_TURN.toFixed(5)} : ${NUT_TURN.toFixed(5)};
+  float seat = ${SEAT_AT.toFixed(3)};
+  if (u < seat) {
+    float k = 1.0 - u / seat;
+    sOff = bn.xyz * (${SEAT.toFixed(1)} + ${(TRAVEL - SEAT).toFixed(1)} * k * k * k);
+    sTurn = turn;
+    return;
+  }
+  float r = pow(1.0 - (u - seat) / (1.0 - seat), ${SCREW_EXP.toFixed(3)}); // what is left of the turn
+  sOff = bn.xyz * (${SEAT.toFixed(1)} * r);
+  sTurn = turn * r;
 }
 // v turned about the axis of the bolt
 vec3 spin(vec3 v) {
@@ -1078,11 +1113,16 @@ export function createViewer(
         if (dt.axis) {
           const h = dt.half ?? 0;
           head(add(dt.p, mul(dt.axis, h)), dt.axis, g, i);
+          shank(add(dt.p, mul(dt.axis, h)), dt.axis, 2 * h + NUT, g, i, ROLE.shank);
           nut(sub(dt.p, mul(dt.axis, h)), mul(dt.axis, -1), g, i);
         } else if (dt.n && dt.anchor) nut(dt.p, dt.n, g, i, true);
         else if (dt.n && !dt.far) {
           head(dt.p, dt.n, g, i);
-          if (dt.grip !== undefined) nut(sub(dt.p, mul(dt.n, dt.grip)), mul(dt.n, -1), g, i);
+          if (dt.grip === undefined) shank(dt.p, dt.n, STUB, g, i, ROLE.stub);
+          else {
+            shank(dt.p, dt.n, dt.grip + NUT, g, i, ROLE.shank);
+            nut(sub(dt.p, mul(dt.n, dt.grip)), mul(dt.n, -1), g, i);
+          }
         }
         ends.push([tri.length, seg.length]);
       });

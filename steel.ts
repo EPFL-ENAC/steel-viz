@@ -143,10 +143,22 @@ export type Slot = {
   weld?: { start: number; dur: number; cool: number };
   nuts?: { start: number; gap: number; dur: number; end: number };
 };
-export const BOLT_MS = 60; // between two bolts of one connection
+export const BOLT_MS = 60; // between two bolts of one connection (no effects)
 export const POP_MS = 220; // one bolt pops in (no effects)
-export const SCREW_MS = 520; // one bolt goes in and turns, then its nut (effects)
-export const BOLT_IN = 0.45; // its head takes this part of the time of a bolt, its nut the rest
+// With the effects, one bolt takes SCREW_MS, SCREW_GAP after the one before.
+// Its head takes the first BOLT_IN of that time, its nut the rest. A head or
+// a nut comes close in the first SEAT_AT of its own time, then it screws in:
+// it turns by HEAD_TURN or NUT_TURN (rad) and moves in with the turn, like on
+// a thread. Its turn slows down as (1 - u)^SCREW_EXP, so it stops tight. A hex
+// turned by 60 degrees looks the same: faster than about 15 degrees a frame,
+// the eye can't follow the turn (a test keeps it under 12 at speed 1).
+export const SCREW_MS = 1800;
+export const SCREW_GAP = 100;
+export const BOLT_IN = 0.45;
+export const SEAT_AT = 0.3;
+export const HEAD_TURN = (4 * Math.PI) / 3;
+export const NUT_TURN = 2 * Math.PI;
+export const SCREW_EXP = 1.3;
 // How a part comes in (effects): its speed goes with the way it has left, so
 // it slows down as on a log scale, never crawls, and touches down with a small
 // speed. LAND_K: how much it slows. LAND_CSS is the same curve for the SVG (a
@@ -170,24 +182,46 @@ export function seamTimes(welds: [V, V][], w: { start: number; dur: number }): [
   });
 }
 export const CRANES = 3;
+// The time of each kind of part, and the shortest time between two starts.
+// With the effects, the big parts come in slower, so the eye can follow them.
 const MS: Record<Kind, number> = { base: 350, column: 600, plate: 220, member: 550, bolts: 0, rig: 300, slab: 300 };
 const GAP = { big: 150, plate: 50 };
+const FX_MS: Record<Kind, number> = { base: 700, column: 1100, plate: 450, member: 1000, bolts: 0, rig: 600, slab: 900 };
+const FX_GAP = { big: 300, plate: 120 };
 // when nothing of this part moves anymore: it landed, its weld cooled, its nuts are on
 export const slotEnd = (s: Slot) => Math.max(s.land, s.weld ? s.weld.start + s.weld.dur + s.weld.cool : 0, s.nuts?.end ?? 0);
 // when the build is over, in ms
 export const buildEnd = (slots: Map<number, Slot>) => Math.max(0, ...[...slots.values()].map(slotEnd));
 
 // speed: how fast one part comes in (2: twice as fast). duration: the whole
-// build lasts this long, in ms. Then the start times are stretched or pressed
-// to fit, and each part keeps its own time to come in: a short build with slow
-// parts has many parts in the air at once. The order stays the same, but a part
-// can start before the part it stands on has landed. effects: bolts screw in
-// and site welds are made (default). false: bolts pop in, no welds, as before.
+// build lasts this long, in ms. If the build is longer, the start times are
+// pressed to fit, and each part keeps its own time to come in: a short build
+// with slow parts has many parts in the air at once. The order stays the same,
+// but a part can start before the part it stands on has landed. If the build
+// is shorter, with the effects all of it slows down to fill the time, so there
+// is never a pause (speed has no effect then). With no effects, the start
+// times are stretched, as before, and there are pauses. effects: bolts screw
+// in and site welds are made (default). false: bolts pop in, no welds, as before.
 export type TimelineOpts = { speed?: number; duration?: number; effects?: boolean };
 export function timeline(parts: Part[], o: number | TimelineOpts = 1): Map<number, Slot> {
   const { speed = 1, duration, effects = true } = typeof o === 'number' ? { speed: o } : o;
   const out = sequence(parts, speed, effects);
-  return duration === undefined ? out : fit(parts, out, duration);
+  if (duration === undefined) return out;
+  const end = buildEnd(out);
+  return effects && end > 0 && end <= duration ? slower(out, duration / end) : fit(parts, out, duration);
+}
+
+// every time of the build times f: the same build, f times slower
+function slower(slots: Map<number, Slot>, f: number): Map<number, Slot> {
+  const out = new Map<number, Slot>();
+  for (const [step, sl] of slots) {
+    const s: Slot = { start: sl.start * f, dur: sl.dur * f, land: sl.land * f };
+    if (sl.bolt) s.bolt = { gap: sl.bolt.gap * f, dur: sl.bolt.dur * f };
+    if (sl.weld) s.weld = { start: sl.weld.start * f, dur: sl.weld.dur * f, cool: sl.weld.cool * f };
+    if (sl.nuts) s.nuts = { start: sl.nuts.start * f, gap: sl.nuts.gap * f, dur: sl.nuts.dur * f, end: sl.nuts.end * f };
+    out.set(step, s);
+  }
+  return out;
 }
 
 // Fit the slots in `duration`. Each part has an anchor: its own start, or for
@@ -242,6 +276,7 @@ function sequence(parts: Part[], speed: number, effects: boolean): Map<number, S
   const out = new Map<number, Slot>();
   const byId = new Map(parts.map((p) => [p.id, p]));
   const k = 1 / speed;
+  const [ms, gap] = effects ? [FX_MS, FX_GAP] : [MS, GAP];
   const cranes: number[] = Array(CRANES).fill(0);
   let [lastBig, lastPlate] = [-Infinity, -Infinity];
   const landOf = (id: string) => {
@@ -255,23 +290,23 @@ function sequence(parts: Part[], speed: number, effects: boolean): Map<number, S
     let slot: Slot;
     if (kind === 'bolts') {
       const start = landOf(p.supports[0]);
-      const one = effects ? SCREW_MS : POP_MS;
-      const dur = (one + BOLT_MS * Math.max(0, p.dots.length - 1)) * k;
-      slot = { start, dur, land: start + dur, bolt: { gap: BOLT_MS * k, dur: one * k } };
+      const [one, g] = effects ? [SCREW_MS, SCREW_GAP] : [POP_MS, BOLT_MS];
+      const dur = (one + g * Math.max(0, p.dots.length - 1)) * k;
+      slot = { start, dur, land: start + dur, bolt: { gap: g * k, dur: one * k } };
     } else if (kind === 'column' || kind === 'member') {
       const c = cranes.indexOf(Math.min(...cranes));
-      const start = Math.max(ready, cranes[c], lastBig + GAP.big * k);
-      slot = { start, dur: MS[kind] * k, land: start + MS[kind] * k };
+      const start = Math.max(ready, cranes[c], lastBig + gap.big * k);
+      slot = { start, dur: ms[kind] * k, land: start + ms[kind] * k };
       cranes[c] = slot.land;
       lastBig = start;
     } else {
-      const start = Math.max(ready, lastPlate + GAP.plate * k);
-      slot = { start, dur: MS[kind] * k, land: start + MS[kind] * k };
+      const start = Math.max(ready, lastPlate + gap.plate * k);
+      slot = { start, dur: ms[kind] * k, land: start + ms[kind] * k };
       lastPlate = start;
     }
     if (effects && p.welds?.length) slot.weld = { start: slot.land + WELD_PAUSE * k, dur: weldMs(seamLength(p.welds)) * k, cool: COOL_MS * k };
     const nuts = kind === 'bolts' ? 0 : p.dots.filter((d) => d.anchor).length;
-    if (effects && nuts) slot.nuts = { start: slot.land, gap: BOLT_MS * k, dur: SCREW_MS * k, end: slot.land + (SCREW_MS + BOLT_MS * (nuts - 1)) * k };
+    if (effects && nuts) slot.nuts = { start: slot.land, gap: SCREW_GAP * k, dur: SCREW_MS * k, end: slot.land + (SCREW_MS + SCREW_GAP * (nuts - 1)) * k };
     out.set(p.step, slot);
   }
   return out;
