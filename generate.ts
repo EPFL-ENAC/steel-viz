@@ -1206,13 +1206,19 @@ const alphaLog = (a: number, amp: number) =>
 // the most room between the flanges of a column of the catalog (size() keeps d >= 250)
 const webRoom = (cat: Catalog) => Math.max(...cat.columns.filter((c) => c.d >= 250).map((c) => c.d - 2 * c.tf));
 // beams that frame into the column web (above `z`) must fit between its flanges.
-// One angle brace too: its outstanding leg is on one side only, from the
-// gusset face (ANGLE_GAP / 2) out to bf, so it counts twice that.
-const webClear = (arms: Arm[], z = -Infinity) => Math.max(0, ...arms.filter((a) => faceOf(a) % 180 === 90).flatMap((a) => [
+// One angle brace too (unless `braces` is false): its outstanding leg is on
+// one side only, from the gusset face (ANGLE_GAP / 2) out to bf, so it counts
+// twice that.
+const webClear = (arms: Arm[], z = -Infinity, braces = true) => Math.max(0, ...arms.filter((a) => faceOf(a) % 180 === 90).flatMap((a) => [
   ...(a.z - a.sec.d > z ? [a.sec.bf + 40] : []),
   ...(a.truss && a.z - a.truss.D - a.truss.chord.d > z ? [a.truss.chord.bf + 40] : []),
-  ...a.braces.filter((b) => !b.x && b.sec.kind === 'L' && b.zb > z).map((b) => ANGLE_GAP + 2 * b.sec.bf + 40),
+  ...(braces ? a.braces.filter((b) => !b.x && b.sec.kind === 'L' && b.zb > z).map((b) => angleClear(b.sec)) : []),
 ]));
+const angleClear = (s: Section) => ANGLE_GAP + 2 * s.bf + 40;
+// the room between the flanges that one angle brace on a column web may take:
+// what the beams need already, or the smallest column. So the angle never
+// makes the column heavier, it takes a double angle.
+const angleRoom = (arms: Arm[], cat: Catalog) => Math.max(webClear(arms, -Infinity, false), Math.min(...cat.columns.filter((c) => c.d >= 250).map((c) => c.d - 2 * c.tf)));
 
 function size(st: Structure, m: Model, res: Forces[], cat: Catalog, p: Params, check = false): number {
   const worst = worstOf(m, res);
@@ -1259,14 +1265,14 @@ function size(st: Structure, m: Model, res: Forces[], cat: Catalog, p: Params, c
     }
     // all the braces of an arm get the same kind: one draw for the arm
     const braces = braceList(p, cat, a);
+    const room = angleRoom(st.arms, cat);
     a.braces.forEach((b, k) => {
       const L = Math.hypot(b.a, drop(a, b));
       if (b.x) return void (b.sec = choose(xList(cat, b.x), braceId(a, k), b.sec, xRule(b.x, L)));
       // one angle: E5 (checks.ts), the others L / r under 200. On a column
-      // web, its outstanding leg must fit between the flanges (webClear), or
+      // web, its outstanding leg must fit between the flanges (angleRoom), or
       // it takes a double angle.
-      const room = st.col.d - 2 * st.col.tf;
-      const fitsWeb = (s: Section) => faceOf(a) % 180 !== 90 || ANGLE_GAP + 2 * s.bf + 40 <= room;
+      const fitsWeb = (s: Section) => faceOf(a) % 180 !== 90 || angleClear(s) <= room;
       const slender = (s: Section) => (s.kind === 'L' ? angleFits(s, L, p.fy) && fitsWeb(s) : L / s.rmin < 200);
       // A short brace never takes one angle: E5 makes it big, and its two
       // lapped plates meet on such a short brace.
