@@ -504,6 +504,7 @@ type Buf = { vao: WebGLVertexArrayObject; bufs: WebGLBuffer[]; n: number; draw: 
 type Piece = {
   part: Part; fill: Buf; lines?: Buf; ends: [number, number][];
   id: RGB; off: V; visible: boolean; color: RGB; width: number; move: Packed; screw: [number, number, number];
+  fade: number; // the slab while it is poured (effects): 0 not there yet, 1 all there
 };
 
 // onTurn: the user turned the view (done: the drag is over). onHover: the
@@ -806,7 +807,7 @@ export function createViewer(
     for (const p of pieces) {
       if (!p.visible || !p.lines?.draw || (p.part.kind === 'slab') !== slab) continue;
       gl.uniform3fv(lineP.u.off, p.off);
-      gl.uniform4f(lineP.u.color, ...p.color, 1);
+      gl.uniform4f(lineP.u.color, ...(p.fade < 1 ? mix(bg, p.color, p.fade) : p.color), 1);
       gl.uniform1f(lineP.u.width, p.width);
       gl.uniform3fv(lineP.u.bolt, p.screw);
       moveBy(lineP, p.move);
@@ -824,7 +825,7 @@ export function createViewer(
     const draw = () => {
       for (const p of slabs) {
         gl.uniform3fv(fillP.u.off, p.off);
-        gl.uniform4f(fillP.u.color, ...rig, VEIL);
+        gl.uniform4f(fillP.u.color, ...rig, VEIL * p.fade);
         gl.uniform3fv(fillP.u.bolt, REST);
         moveBy(fillP, p.move);
         gl.bindVertexArray(p.fill.vao);
@@ -988,6 +989,12 @@ export function createViewer(
         return;
       }
       const u = Math.min(1, Math.max(0, (t - sl.start) / sl.dur));
+      // the slab is poured: it comes in place, and shows little by little
+      if (anim!.effects && p.part.kind === 'slab') {
+        p.off = [0, 0, 0];
+        p.fade = ease(u);
+        return;
+      }
       const k = anim!.effects && (p.part.kind === 'member' || p.part.kind === 'column') ? setDown(u) : ease(u);
       const far = p.part.kind === 'plate' || p.part.kind === 'base' || p.part.kind === 'slab' ? 0.12 * radius : 2.6 * radius;
       p.off = mul(anim!.dirs[i], far * (1 - k));
@@ -1005,6 +1012,7 @@ export function createViewer(
       p.visible = true;
       p.off = [0, 0, 0];
       p.screw = REST;
+      p.fade = 1;
       p.fill.draw = p.fill.n;
       if (p.lines) p.lines.draw = p.lines.n;
     }
@@ -1065,7 +1073,7 @@ export function createViewer(
         // round parts (outlined with one weight too). A pin joint has one id:
         // no outline inside it, and a pick gives its moving part.
         id: [(tag & 255) / 255, (tag >> 8) / 255, part.kind === 'bolts' ? 1 : part.round ? 0.5 : 0],
-        off: [0, 0, 0], visible: true, color: fg, width: THIN, move: moveOf(part), screw: REST,
+        off: [0, 0, 0], visible: true, color: fg, width: THIN, move: moveOf(part), screw: REST, fade: 1,
       };
       lineStyle(p);
       pieces.push(p);
