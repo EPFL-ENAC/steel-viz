@@ -60,11 +60,12 @@ build_effort = "xhigh"
 
 # Added to the baseline wtx ships. A repo can tighten, never loosen.
 [permissions]
-allow = ["Bash(node --test*)", "Bash(pnpm run test)", "Bash(pnpm run type-check)", "Bash(pnpm build)", "Bash(node cli.ts *)", "Bash(node pick.ts *)", "Bash(wtx open playground*)"]
+allow = ["Bash(node --test *.test.ts)", "Bash(pnpm test)", "Bash(pnpm test *)", "Bash(pnpm run test)", "Bash(pnpm run type-check)", "Bash(pnpm build)", "Bash(node cli.ts *)", "Bash(node pick.ts *)", "Bash(wtx open playground*)"]
+deny = ["Bash(node --test)"]  # the full run goes through pnpm test (3 files at once)
 
 # Run by `wtx land --local`.
 [checks]
-test = ["node --test", "pnpm run type-check"]
+test = ["pnpm test", "pnpm run type-check"]
 
 [[repos]]
 name = "resslab-hub"

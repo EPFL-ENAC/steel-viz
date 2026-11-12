@@ -629,7 +629,7 @@ It needs Node 24 or newer. Node runs the `.ts` files directly. Install the deps 
 
 ```sh
 pnpm install                                          # once
-node --test                                           # solver, member checks and geometry tests
+pnpm test                                             # solver, member checks and geometry tests (3 files at once)
 pnpm run type-check                                   # checks the types (Node only strips them)
 node cli.ts --seed 5 --view iso --frames --out s5.svg # one structure, plus build frames
 pnpm dev                                              # the playground, with live reload
