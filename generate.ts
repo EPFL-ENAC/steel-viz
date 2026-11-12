@@ -11,7 +11,7 @@
 // and beams are given, the solver only checks it.
 import { add, cross, dot, len, mul, norm, sub, type V } from './vec.ts';
 import { buckling, solve, type Elem, type FNode, type Solved } from './solver.ts';
-import { memberRatio, tooThin } from './checks.ts';
+import { angleFits, memberRatio, tooThin } from './checks.ts';
 import type { Catalog, Section } from './sections.ts';
 import { ANGLE_GAP, centroidDepth, rodSection } from './sections.ts';
 import {
@@ -43,8 +43,9 @@ export type Params = {
   // kinds of before, so the same parts as before these kinds.
   connKindsP: number;
   // the chance that a member gets a channel, angle or tee section: the braces
-  // of an arm (double angles), a secondary beam (a channel), a truss bottom
-  // chord (a tee). 0: only I, tubes and rods, as before these shapes.
+  // of an arm (double angles, or one angle on a small brace, see braceList),
+  // a secondary beam (a channel), a truss bottom chord (a tee). 0: only I,
+  // tubes and rods, as before these shapes.
   shapeP: number;
   // the chance that a tree arm on a column flange leaves it at 30 or 45
   // degrees, from a stream of its own (skewArms). 0: every arm square, as
@@ -121,10 +122,19 @@ const orOld = (xs: Section[], old: Section[]) => (xs.length ? xs : old);
 // a tab (gusset_cap). The tab and its weld must sit on the cap, so a smaller
 // tube than CAP_MIN_D (82 mm, see steel.ts) keeps the slot. Under CAP_WIDE_D
 // (114 mm) the tab is narrower, with one line of bolts.
+// A shaped brace (see shapeP) is a double angle, or on half of the arms one
+// angle (SINGLE_P): one keyed draw for each arm, from a stream of its own,
+// only for a shaped arm, so with shapeP 0 nothing changes. Its list has the
+// single angles first, then the double angles: size() takes the first one
+// that works, so a small brace gets one angle and a big one two.
+const SINGLE_P = 0.5;
 // the section list of the braces of an arm, and whether they get end caps
 function braceList(p: Params, cat: Catalog, a: Arm): { list: Section[]; cap: boolean } {
   const key = `${a.id}-braces`;
-  if (shaped(p, key)) return { list: orOld(cat.angles, cat.tubes), cap: false };
+  if (shaped(p, key)) {
+    const single = cat.braceAngles?.length && mulberry32(p.seed * 100663319 + fnv1a(`${a.id}-single`))() < SINGLE_P;
+    return { list: single ? [...cat.braceAngles, ...cat.angles] : orOld(cat.angles, cat.tubes), cap: false };
+  }
   if (p.roundP <= 0) return { list: cat.tubes, cap: false };
   const rng = mulberry32(p.seed * 50331653 + fnv1a(key));
   if (rng() >= p.roundP) return { list: cat.tubes, cap: false };
@@ -1195,10 +1205,13 @@ const alphaLog = (a: number, amp: number) =>
   a === Infinity ? 'alphaCr: nothing in compression' : `alphaCr ${a.toFixed(1)}, moments × ${amp.toFixed(2)}${a < ALPHA_MIN ? ` (below ${ALPHA_MIN})` : ''}`;
 // the most room between the flanges of a column of the catalog (size() keeps d >= 250)
 const webRoom = (cat: Catalog) => Math.max(...cat.columns.filter((c) => c.d >= 250).map((c) => c.d - 2 * c.tf));
-// beams that frame into the column web (above `z`) must fit between its flanges
+// beams that frame into the column web (above `z`) must fit between its flanges.
+// One angle brace too: its outstanding leg is on one side only, from the
+// gusset face (ANGLE_GAP / 2) out to bf, so it counts twice that.
 const webClear = (arms: Arm[], z = -Infinity) => Math.max(0, ...arms.filter((a) => faceOf(a) % 180 === 90).flatMap((a) => [
   ...(a.z - a.sec.d > z ? [a.sec.bf + 40] : []),
   ...(a.truss && a.z - a.truss.D - a.truss.chord.d > z ? [a.truss.chord.bf + 40] : []),
+  ...a.braces.filter((b) => !b.x && b.sec.kind === 'L' && b.zb > z).map((b) => ANGLE_GAP + 2 * b.sec.bf + 40),
 ]));
 
 function size(st: Structure, m: Model, res: Forces[], cat: Catalog, p: Params, check = false): number {
@@ -1249,7 +1262,13 @@ function size(st: Structure, m: Model, res: Forces[], cat: Catalog, p: Params, c
     a.braces.forEach((b, k) => {
       const L = Math.hypot(b.a, drop(a, b));
       if (b.x) return void (b.sec = choose(xList(cat, b.x), braceId(a, k), b.sec, xRule(b.x, L)));
-      b.sec = choose(braces.list, braceId(a, k), b.sec, (s) => L / s.rmin < 200 && (!b.short || s.d <= SHORT.tubeD));
+      // one angle: E5 (checks.ts), the others L / r under 200. On a column
+      // web, its outstanding leg must fit between the flanges (webClear), or
+      // it takes a double angle.
+      const room = st.col.d - 2 * st.col.tf;
+      const fitsWeb = (s: Section) => faceOf(a) % 180 !== 90 || ANGLE_GAP + 2 * s.bf + 40 <= room;
+      const slender = (s: Section) => (s.kind === 'L' ? angleFits(s, L, p.fy) && fitsWeb(s) : L / s.rmin < 200);
+      b.sec = choose(braces.list, braceId(a, k), b.sec, (s) => slender(s) && (!b.short || s.d <= SHORT.tubeD));
       if (braces.cap) b.cap = true;
     });
   }

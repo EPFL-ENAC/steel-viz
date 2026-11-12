@@ -21,7 +21,7 @@ function dims(s: Section): string {
     case 'ROD': return `Ø ${n1(s.d)} mm`;
     case 'CHS': return `Ø ${n1(s.d)}, t ${n1(s.tf)} mm`;
     case 'RHS': return `${n1(s.d)} × ${n1(s.bf)}, t ${n1(s.tf)} mm`;
-    case '2L': return `2 L ${n1(s.d)} × ${n1(s.d)}, t ${n1(s.tf)} mm`;
+    case '2L': return `2 L ${n1(s.d)} × ${n1((s.bf - ANGLE_GAP) / 2)}, t ${n1(s.tf)} mm`;
     case '2C': return `2 C, d ${n1(s.d)}, b ${n1((s.bf - ANGLE_GAP) / 2)}, tw ${n1(s.tw)}, tf ${n1(s.tf)} mm`;
     case 'L': return `L ${n1(s.d)} × ${n1(s.bf)}, t ${n1(s.tf)} mm`;
     case 'FB': return `${n1(s.d)} × ${n1(s.bf)} mm`;

@@ -53,6 +53,8 @@ test('one angle and a flat bar: rmin about the weak axis', () => {
   for (const cat of Object.values(cats)) {
     assert.ok(cat.flats.length > 10 && cat.singles.length > 5, cat.family);
     assert.ok(cat.flats.every((s) => s.kind === 'FB' && s.bf <= s.d / 4) && cat.singles.every((s) => s.kind === 'L'));
+    // the angles of an arm brace: one angle, legs 50 to 155 mm
+    assert.ok(cat.braceAngles.length > 5 && cat.braceAngles.every((s) => s.kind === 'L' && s.d >= 50 && s.d <= 155), cat.family);
   }
 });
 
