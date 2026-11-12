@@ -46,12 +46,19 @@ A short brace goes at 45 degrees, or flatter down to about 30 degrees when the t
 
 On seeds 1 to 40, 13 trees get a short brace with the default values, 30 with `braceP` 1, and 38 with `braceP` 1 and `shortBraceP` 1.
 
-The sizing works in two steps, with public formulas from EC3 (Eurocode 3) and AISC 360-22:
+The sizing works in two steps, with public formulas from EC3 (Eurocode 3) and AISC 360-22. First the load cases:
 
-1. The whole structure: the solver finds the elastic critical load factor `alphaCr`. It is how many times the load the structure takes before it buckles as a whole (a buckling analysis with the geometric stiffness, in `solver.ts`). The moments are then multiplied by `1 / (1 - 1/alphaCr)`, for the sway effects (EC3 5.2.2). This rule needs `alphaCr >= 3`. If it is lower, the member with the most strain energy in the buckling mode gets a heavier section, and the solver runs again.
-2. Each member, in `checks.ts`: flexural buckling (AISC E3), flexural-torsional buckling of tees and double angles (E4), lateral torsional buckling of I sections and channels (F2), of tees and double angles (F9) and of one angle (F10), weak axis bending (F6), local buckling of the wall of a round tube (F8, E7), the two together with the axial force (H1-1), and shear (chapter G). The buckling length is the member length, because step 1 already has the sway. The ratio must stay under 0.6. There are no AISC phi factors, the 0.6 is the margin.
+- Gravity: the self weight, the load on the arms, half of it on the secondaries, the point load on a post top.
+- Gravity and a side load along +x, -x, +y or -y, so 4 more cases. These are the notional loads, small side loads for the frame imperfections. At each node of a column, the side load is phi times the vertical load that enters the column there (EC3 5.3.2 figure 5.4). The beams get no side load, so a beam does not bend about its weak axis for it.
+- For `aisc`, phi is 0.002 (AISC 360-22 C2.2b).
+- For `eu`, phi is 1/200 × alpha_h × alpha_m (EC3 5.3.2(3)). alpha_h = 2 / sqrt(h), with h the height in m, kept between 2/3 and 1. alpha_m = sqrt(0.5 (1 + 1/m)), with m the columns in one row along the side load that carry at least half of the mean column load. Up to 4 m high, a tree gets 1/200, a portal about 1/231 in its plane and 1/200 across.
 
-Not checked: local buckling of thin plates (E7, F3, F9, F10) except for round tubes, E4 for a channel, one angle in compression (E5), the connectors of a double angle (E6), and notional loads (the small side loads for the frame imperfections). Cb is 1, which is on the safe side for cantilevers. The same AISC formulas size the EU sections too. A few trees with a cantilever truss stay under `alphaCr` 3 (eu tree 19 of the 240 structures of the tests, and also eu tree 7 with `shapeP` 0): the bottom chord sways out of the truss plane, and nothing braces it sideways. The log says it.
+The solver factors the stiffness matrix once. Each side case is one more back substitution (`sideCase()` in `solver.ts`). Specimens get the gravity case only. The log gives phi, for example `notional loads 0.002 of the vertical loads (AISC 360-22 C2.2b)`.
+
+1. The whole structure: the solver finds the elastic critical load factor `alphaCr`. It is how many times the load the structure takes before it buckles as a whole (a buckling analysis with the geometric stiffness, in `solver.ts`). `alphaCr` comes from the gravity case alone. The moments of every case are then multiplied by `1 / (1 - 1/alphaCr)`, for the sway effects (EC3 5.2.2). This rule needs `alphaCr >= 3`. If it is lower, the member with the most strain energy in the buckling mode gets a heavier section, and the solver runs again.
+2. Each member, in `checks.ts`: flexural buckling (AISC E3), flexural-torsional buckling of tees and double angles (E4), lateral torsional buckling of I sections and channels (F2), of tees and double angles (F9) and of one angle (F10), weak axis bending (F6), local buckling of the wall of a round tube (F8, E7), the two together with the axial force (H1-1), and shear (chapter G). A member takes the worst of the 5 cases, and the moments of two cases are never mixed. The tooltip of the playground gives that case. The buckling length is the member length, because step 1 already has the sway. The ratio must stay under 0.6. There are no AISC phi factors, the 0.6 is the margin.
+
+Not checked: local buckling of thin plates (E7, F3, F9, F10) except for round tubes, E4 for a channel, one angle in compression (E5), and the connectors of a double angle (E6). Cb is 1, which is on the safe side for cantilevers. The same AISC formulas size the EU sections too. A few trees with a cantilever truss stay under `alphaCr` 3 (eu tree 19 of the 240 structures of the tests, and also eu tree 7 with `shapeP` 0): the bottom chord sways out of the truss plane, and nothing braces it sideways. The log says it.
 
 A round tube has no lateral torsional buckling, but its wall can buckle locally when it is thin. The checks use D / t (outside diameter over wall) with AISC F8 for bending and E7 for compression:
 
@@ -634,7 +641,7 @@ Files:
 - `vec.ts`: vector helpers.
 - `sections.ts`: section properties (I, tube, rod, round tube, channel, double angle, tee) from the CSV tables. The rods and the tees are made in code. The round tubes (CHS and pipes) are in `Catalog.pipes`, not in `all`, so a specimen finds its section by name as before.
 - `sections/`, `tables.ts`: the CSV tables (see `sections/README.md`), and how Node reads them. `tables.ts` also reads a hub test and its response files for `cli.ts` and `shot.ts`.
-- `solver.ts`: 3D frame solver (6 DOF per node, pinned ends, finds mechanisms), and the buckling analysis (`alphaCr`).
+- `solver.ts`: 3D frame solver (6 DOF per node, pinned ends, finds mechanisms), the buckling analysis (`alphaCr`), and the side load cases on the same factored matrix (`sideCase()`).
 - `checks.ts`: the member checks (AISC 360-22 E3, E4, E7 and F8 for round tubes, F2, F6, F9, F10, H1-1, G for shear). `tubes.test.ts` checks the round tubes, `shear.test.ts` the shear, `open-shapes.test.ts` the channels, tees and angles.
 - `generate.ts`: topology, the fix loop, trusses and rods, posts and beam splices, and the sizing. Also the specimen path (`buildSpecimen`), and it sends a brace test, a column test (also HSS) or a link test to `bench.ts`.
 - `skew.ts`: the end of a skewed arm: the cut end, its clash boxes, the skewed end plate.
