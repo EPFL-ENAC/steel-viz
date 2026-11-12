@@ -50,14 +50,14 @@ export type Part = {
 };
 
 // Less detail when the drawing is small: at 160 px or less bolts are only
-// noise, at 64 px plates too, at 40 px the secondary beams.
+// noise, at 64 px plates too, at 40 px the secondary beams and the purlins.
 export const DETAIL = { bolts: 160, plates: 64, secondaries: 40 };
 export function forSize(parts: Part[], size?: number): Part[] {
   if (!size) return parts;
   return parts
     .filter((p) => !(size <= DETAIL.bolts && p.kind === 'bolts'))
     .filter((p) => !(size <= DETAIL.plates && (p.kind === 'plate' || p.kind === 'slab')))
-    .filter((p) => !(size <= DETAIL.secondaries && /^sec\d/.test(p.id)))
+    .filter((p) => !(size <= DETAIL.secondaries && /^sec\d|-purlin\d+$/.test(p.id)))
     .map((p) => (size <= DETAIL.bolts && p.dots.length ? { ...p, dots: [] } : p));
 }
 

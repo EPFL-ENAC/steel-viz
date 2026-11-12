@@ -24,7 +24,7 @@ import { buildBrace, buildColumn, buildLink } from './bench.ts';
 import { actuator, block, clevis, hingeSize, link } from './rig.ts';
 import { cutBoxes, cutEnd, skewHardware } from './skew.ts';
 import { RIB_PITCH, SLAB_GAP, slabParts, TIP_GAP } from './slab.ts';
-import { drawGable, eaveDepth, gableLog, gableModel, gableParts, thrust, type Gable } from './gable.ts';
+import { drawGable, drawPurlins, eaveDepth, gableLog, gableModel, gableParts, purlinSec, thrust, type Gable } from './gable.ts';
 import { frameLayout, frameRig, holdFrame, type FrameSt } from './frame.ts';
 
 export type Detail = 'members' | 'plates' | 'bolts';
@@ -53,6 +53,9 @@ export type Params = {
   // the chance that a portal gets a pitched roof on its top bay beam
   // (gable.ts), from a stream of its own. 0: flat beams only, as before.
   gableP: number;
+  // the chance that a gable gets purlins on its rafters (gable.ts), from a
+  // stream of its own. 0: bare rafters, as before purlins.
+  purlinP: number;
   // the chance that the braces of an arm are round tubes (when they don't get
   // double angles from shapeP), from a stream of its own. 0: no round tube,
   // so the same parts as before round tubes.
@@ -82,7 +85,7 @@ export type Params = {
   specimen?: Specimen; // a real test: seed, form, arms, height, braceP and secondaryP are not used
 };
 export const DEFAULTS: Params = {
-  seed: 1, arms: 8, height: 2500, load: 100, fy: 345, braceP: 0.3, secondaryP: 0.35, postP: 0.3, beamSpliceP: 0.3, connKindsP: 0.35, shapeP: 0.35, skewP: 0.3, gableP: 0.35, roundP: 0.3, shortBraceP: 0.5,
+  seed: 1, arms: 8, height: 2500, load: 100, fy: 345, braceP: 0.3, secondaryP: 0.35, postP: 0.3, beamSpliceP: 0.3, connKindsP: 0.35, shapeP: 0.35, skewP: 0.3, gableP: 0.35, purlinP: 0.5, roundP: 0.3, shortBraceP: 0.5,
   storeys: 0, spanK: 1, bracing: 'auto', xP: 0.3, xKind: 'auto', armL: [0.3, 0.7], armZ: [0.35, 0.95], conn: 'auto', trussK: 1, rodP: 0.4, colSpliceP: 0.6,
   seg: 400, form: 'mix',
 };
@@ -586,6 +589,8 @@ function addGable(st: Structure, p: Params, log: string[]) {
   const a = bays.reduce((x, y) => (y.z > x.z ? y : x));
   const g = drawGable(mulberry32(p.seed * 179424673 + 29), a.L, p.gableP);
   if (!g) return;
+  // the purlins, from a stream of their own
+  if (p.purlinP > 0) g.purlins = drawPurlins(mulberry32(p.seed * 433494437 + 43), p.purlinP);
   const i = st.arms.indexOf(a);
   Object.assign(a, { gable: g, braces: [], conn: 'end_plate', conn2: 'end_plate' });
   st.secs = st.secs.filter((s) => s.arm !== i);
@@ -1252,6 +1257,8 @@ function size(st: Structure, m: Model, res: Forces[], cat: Catalog, p: Params, c
     const arm = st.arms[s.arm];
     s.sec = choose(shaped(p, s.id) ? orOld(cat.channels, cat.beams) : cat.beams, s.id, s.sec, (x) => x.d <= arm.sec.d - 2 * arm.sec.tf);
   }
+  // the purlins are not in the model (gable.ts): their section follows the rafter
+  for (const a of st.arms) if (a.gable?.purlins) a.gable.purlins.sec = purlinSec(cat.channels, a.sec);
   const needClear = webClear(st.arms);
   const colL = m.len.get('column')!;
   const shortOnFlange = st.arms.some((a) => a.bearing % 180 === 0 && hasShortBrace(a));
@@ -1733,7 +1740,8 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
     const h = hdir(a.bearing);
     if (a.gable) {
       const [S, Sj] = [colAt(a.col, a.z - a.sec.d / 2), colAt(a.to!, a.z - a.sec.d / 2)];
-      const r = gableParts(a, { o0: st.cols[a.col].x, o1: st.cols[a.to!].x, h, f: supportFace(S, h), s0: S.id, s1: Sj.id, seg, plates, bolts });
+      const reach = Math.max(...[S, Sj].map((C) => outlineReach(C, C === S ? h : mul(h, -1)))) + CAP_OVER;
+      const r = gableParts(a, { o0: st.cols[a.col].x, o1: st.cols[a.to!].x, h, f: supportFace(S, h), reach, s0: S.id, s1: Sj.id, seg, plates, bolts });
       armGeo.set(a.id, r.near);
       for (const q of r.parts) out.push({ ...q, step: step++ });
       continue;
@@ -1890,10 +1898,15 @@ function parts(st: Structure, detail: Detail, seg: number): Part[] {
   return res;
 }
 
+// how far the outline of S goes from its axis in direction direc (its flange
+// tips across an I, where supportFace gives the web)
+const outlineReach = (S: Geo, direc: V) => Math.max(...S.polys.flat().map(([pa, pb]) => pa * dot(direc, S.v) + (pb + S.sh) * dot(direc, S.w)));
+
 // the piece of a beam at t mm along it: the far piece after a beam splice
 const pieceAt = (armGeo: Map<string, Geo>, a: Arm, t: number): Geo =>
   armGeo.get(a.splice !== undefined && t > a.splice ? farId(a) : a.id)!;
 
+const CAP_OVER = 15; // how far the column cap goes past the column, mm
 // The small plates that make a frame look built: a cap on each column, plates
 // across the column where a moment beam pulls on its flanges, stiffeners in a
 // beam where a brace pushes up, gussets at the column feet.
@@ -1909,7 +1922,7 @@ function details(
     const id = colId(ci);
     // cap plate (a specimen has an end plate there, see parts)
     const cap = add(hi.p1, [0, 0, 10]);
-    if (st.form !== 'specimen') extra(`${id}-cap`, hi.id, [flat(cap, X, Y, 20, rect(hi.sec.bf + 30, hi.sec.d + 30))], down, 'Cap plate');
+    if (st.form !== 'specimen') extra(`${id}-cap`, hi.id, [flat(cap, X, Y, 20, rect(hi.sec.bf + 2 * CAP_OVER, hi.sec.d + 2 * CAP_OVER))], down, 'Cap plate');
     // continuity plates, at the flange levels of each moment beam on a flange face
     const levels: number[] = [];
     // each beam end on a column: column, connection, bearing, top of steel,
