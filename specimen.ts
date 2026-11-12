@@ -71,6 +71,21 @@ export type ConnSpecimen = {
   // (then the beam tips stand on links). See specimenRig in generate.ts.
   load?: 'beam' | 'column';
   notes?: string[]; // what we draw differently from the real test, copied into the log
+  // A frame test (frame.ts): two columns, each fixed on a base plate, in the
+  // rig of the frame. beams[0] runs from column 0 (the joint of the hub row)
+  // to column 1: its length is the span between the column axes. beams[1], if
+  // any, is a cantilever past column 1, `length` long from the axis of column
+  // 1. A beam with `rbs` is cut at each end that is on a column. doubler stays
+  // the one of column 0.
+  frame?: {
+    doubler1?: { n: 1 | 2; t: number; w?: number }; // the doubler plates of column 1, like doubler
+    // the joists across the girder: at each column, and every `pitch` mm along
+    // the girder from column 0. `out`: mm from the girder axis to the joist end.
+    joists?: { section: SectionRef; pitch: number; out: number };
+    // the loading beam on column 0, on the far side from the girder, at the
+    // girder top. length: mm from the column face to its end plate.
+    loadingBeam?: { section: SectionRef; length: number };
+  };
 };
 
 // A brace test. The brace is in a vertical plane, `angle` above the

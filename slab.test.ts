@@ -277,23 +277,18 @@ test('the painter draws the slab with no fill', () => {
 });
 
 const dir = findHubData();
-test('hub connections: the 13 tests with a slab draw it, on every beam', { skip: dir ? false : 'no resslab-hub-data folder next to the repo' }, () => {
+test('hub connections: the 14 tests with a slab draw it, on every beam', { skip: dir ? false : 'no resslab-hub-data folder next to the repo' }, () => {
   const rows = parseCsv(readFileSync(join(dir!, HUB_TABLES.connections), 'utf8'));
   const withSlab = rows.filter((row) => /^YES$/i.test(String(row.slab).trim()));
   assert.equal(withSlab.length, 14);
   const ids: string[] = [];
   for (const row of withSlab) {
-    let s: ConnSpecimen;
-    try {
-      s = fromHubConnection(row);
-    } catch {
-      continue; // Del_Caprio_et_al_2014_RBS-A, an "Exterior - Frame"
-    }
+    const s: ConnSpecimen = fromHubConnection(row);
     assert.ok(s.slab, `${s.id}: no slab`);
     assert.ok(!s.notes!.some((n) => /slab.*not drawn/.test(n)), `${s.id}: the note is still there`);
     const r = generate({ specimen: s }, cat);
     assert.equal(slabsOf(r.parts).length, r.st.arms.length, s.id);
     ids.push(s.id);
   }
-  assert.equal(ids.length, 13);
+  assert.equal(ids.length, 14);
 });
