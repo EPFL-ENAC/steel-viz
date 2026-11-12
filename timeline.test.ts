@@ -70,6 +70,7 @@ test('effects off: the slots of before, bolts pop in', () => {
     for (const p of parts) {
       const [a, b] = [off.get(p.step)!, on.get(p.step)!];
       assert.equal(a.weld, undefined, `${p.id}: a weld with no effects`);
+      assert.equal(a.nuts, undefined, `${p.id}: anchor nuts that screw with no effects`);
       if (p.kind === 'bolts') {
         const n = p.dots.length;
         assert.ok(Math.abs(a.dur - (POP_MS + BOLT_MS * (n - 1))) < 1e-9, `${p.id}: not the time of before`);
@@ -125,6 +126,31 @@ test('the welds: after their part lands, and in the build time', () => {
       }
       if ('duration' in o) assert.ok(buildEnd(slots) <= Math.max(o.duration!, shortestBuild(parts, o.speed)) + 1e-6, 'the welds end in the build time');
     }
+});
+
+test('the anchor nuts: they screw down after their base plate lands, in the build time', () => {
+  let bases = 0;
+  for (const parts of structures)
+    for (const o of [{}, { speed: 2 }, { speed: 1, duration: 3000 }, { speed: 0.5, duration: 400 }]) {
+      const slots = timeline(parts, o);
+      const k = 1 / (o.speed ?? 1);
+      for (const p of parts) {
+        const sl = slots.get(p.step)!;
+        const n = p.kind === 'bolts' ? 0 : p.dots.filter((d) => d.anchor).length;
+        if (!n) {
+          assert.equal(sl.nuts, undefined, `${p.id}: nuts with no anchor rod`);
+          continue;
+        }
+        bases++;
+        const u = sl.nuts!;
+        assert.ok(Math.abs(u.start - sl.land) < 1e-9, `${p.id}: the nuts don't start when the plate lands`);
+        assert.ok(Math.abs(u.gap - BOLT_MS * k) < 1e-9 && Math.abs(u.dur - SCREW_MS * k) < 1e-9);
+        assert.ok(Math.abs(u.end - (u.start + (n - 1) * u.gap + u.dur)) < 1e-9, `${p.id}: the last nut is not on at end`);
+        assert.ok(slotEnd(sl) >= u.end);
+      }
+      if ('duration' in o) assert.ok(buildEnd(slots) <= Math.max(o.duration!, shortestBuild(parts, o.speed)) + 1e-6, 'the nuts end in the build time');
+    }
+  assert.ok(bases > 0, 'no base plate with anchor rods in the test structures');
 });
 
 test('no part starts before the parts it stands on land (no duration)', () => {

@@ -134,8 +134,15 @@ export function gripAt(p: V, n: V, boxes: Box[]): number | undefined {
 // bolt, on a bolts part: bolt k starts at start + k * gap and takes dur.
 // weld, on a part with welds (with the effects only): the welder starts
 // WELD_PAUSE after it lands and goes along Part.welds in dur, then the hot
-// trail takes cool to fade. Nothing waits for a bolt or a weld.
-export type Slot = { start: number; dur: number; land: number; bolt?: { gap: number; dur: number }; weld?: { start: number; dur: number; cool: number } };
+// trail takes cool to fade. nuts, on a base plate with anchor rods (with the
+// effects only): nut k screws down at start + k * gap, takes dur, and the last
+// one is on at end. Nothing waits for a bolt, a weld or a nut.
+export type Slot = {
+  start: number; dur: number; land: number;
+  bolt?: { gap: number; dur: number };
+  weld?: { start: number; dur: number; cool: number };
+  nuts?: { start: number; gap: number; dur: number; end: number };
+};
 export const BOLT_MS = 60; // between two bolts of one connection
 export const POP_MS = 220; // one bolt pops in (no effects)
 export const SCREW_MS = 320; // one bolt goes in and turns, then its nut (effects)
@@ -157,8 +164,8 @@ export function seamTimes(welds: [V, V][], w: { start: number; dur: number }): [
 export const CRANES = 3;
 const MS: Record<Kind, number> = { base: 350, column: 600, plate: 220, member: 550, bolts: 0, rig: 300, slab: 300 };
 const GAP = { big: 150, plate: 50 };
-// when nothing of this part moves anymore: it landed, its weld cooled
-export const slotEnd = (s: Slot) => Math.max(s.land, s.weld ? s.weld.start + s.weld.dur + s.weld.cool : 0);
+// when nothing of this part moves anymore: it landed, its weld cooled, its nuts are on
+export const slotEnd = (s: Slot) => Math.max(s.land, s.weld ? s.weld.start + s.weld.dur + s.weld.cool : 0, s.nuts?.end ?? 0);
 // when the build is over, in ms
 export const buildEnd = (slots: Map<number, Slot>) => Math.max(0, ...[...slots.values()].map(slotEnd));
 
@@ -194,9 +201,11 @@ function fit(parts: Part[], slots: Map<number, Slot>, duration: number): Map<num
   for (const [step, sl] of slots) {
     const a = anchor.get(step)!;
     const start = a * f + (sl.start - a);
-    // the weld moves with its part
-    const weld = sl.weld && { ...sl.weld, start: sl.weld.start + (start - sl.start) };
-    out.set(step, { ...sl, start, land: start + sl.dur, ...(weld && { weld }) });
+    // the weld and the nuts move with their part
+    const by = start - sl.start;
+    const weld = sl.weld && { ...sl.weld, start: sl.weld.start + by };
+    const nuts = sl.nuts && { ...sl.nuts, start: sl.nuts.start + by, end: sl.nuts.end + by };
+    out.set(step, { ...sl, start, land: start + sl.dur, ...(weld && { weld }), ...(nuts && { nuts }) });
   }
   return out;
 }
@@ -253,6 +262,8 @@ function sequence(parts: Part[], speed: number, effects: boolean): Map<number, S
       lastPlate = start;
     }
     if (effects && p.welds?.length) slot.weld = { start: slot.land + WELD_PAUSE * k, dur: weldMs(seamLength(p.welds)) * k, cool: COOL_MS * k };
+    const nuts = kind === 'bolts' ? 0 : p.dots.filter((d) => d.anchor).length;
+    if (effects && nuts) slot.nuts = { start: slot.land, gap: BOLT_MS * k, dur: SCREW_MS * k, end: slot.land + (SCREW_MS + BOLT_MS * (nuts - 1)) * k };
     out.set(p.step, slot);
   }
   return out;

@@ -987,6 +987,8 @@ export function createViewer(
       const k = ease(Math.min(1, Math.max(0, (t - sl.start) / sl.dur)));
       const far = p.part.kind === 'plate' || p.part.kind === 'base' || p.part.kind === 'slab' ? 0.12 * radius : 2.6 * radius;
       p.off = mul(anim!.dirs[i], far * (1 - k));
+      // the anchor nuts of a base plate screw down after it lands
+      if (anim!.effects && sl.nuts) p.screw = [t - sl.nuts.start, sl.nuts.gap, sl.nuts.dur];
     });
     if (t < anim.end) return clock === null;
     stopAnim();
