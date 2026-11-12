@@ -26,10 +26,17 @@
 // per part from deform.ts), so a new step of a test uploads no geometry. The
 // fill pass also colors the working zones. The boxes of the zones are in the
 // undeformed frame, so they follow the parts.
+//
+// The build animation (build()) reads its times from timeline(), as the SVG
+// does. With the effects on, the bolts screw in and the site welds are made,
+// all in the shaders: no new geometry and no draw call per bolt. Each vertex of
+// a head or a nut knows its bolt (SCREW chunk), so one uniform per part says
+// where every bolt of it is. All the seams of the structure are one buffer and
+// one draw call (WELD_VS), made at build().
 import { add, cross, dot, mul, norm, sub, type V } from './vec.ts';
-import { BOLT_MS, buildEnd, camera, timeline, type Part } from './steel.ts';
+import { buildEnd, camera, COOL_MS, seamTimes, timeline, type Part } from './steel.ts';
 import { triangles } from './triangles.ts';
-import { I4, MAX_KNOTS, MAX_ZONES, type DeformState, type Move } from './deform.ts';
+import { I4, MAX_KNOTS, MAX_ZONES, movePoint, type DeformState, type Move } from './deform.ts';
 
 // an M20 bolt, mm
 const HEAD = 13; // head height, as in hlr.ts
@@ -46,6 +53,13 @@ const ONE = 1.6; // px, the lines with one weight
 const VEIL = 0.3; // how far the slab goes toward the rig color
 const FADE = 0.55; // with marks: how far the parts with no mark go toward bg
 const MARKED = 1.5; // with marks: the lines of a marked part are this much wider
+// the build effects
+const TRAVEL = 55; // mm: how far out a head or a nut starts
+const TURN = (4 * Math.PI) / 3; // it turns this much on its way in: a hex and a 12 side bar end as they start
+const SPARK = 4; // CSS px: the radius of the welding spark
+const BEAD = 0.35; // the hot bead, in spark radii
+const LIFT = 8; // mm: a seam sits in the corner of two faces, it draws this much toward the eye
+const REST: [number, number, number] = [1e9, 1, 1]; // the bolt uniform of a part with no screw going on
 
 // rig: the lines of the test rig (default: half way between fg and bg).
 // zones: the color of the working zones, by Zone.slot (default: accent)
@@ -64,8 +78,10 @@ export type Viewer = {
   show(parts: Part[], marks?: Record<string, Mark>): void;
   view(az: number, el: number): void;
   // play the build animation. speed: how fast one part comes in (2: twice as
-  // fast). duration: the whole build lasts this long, ms (see timeline)
-  build(speed?: number, duration?: number): void;
+  // fast). duration: the whole build lasts this long, ms (see timeline).
+  // effects: the bolts screw in and the site welds are made (default). false:
+  // the bolts come in one after the other, as before.
+  build(speed?: number, duration?: number, effects?: boolean): void;
   // stop the clock of the build at this time, ms from its start (null: let it
   // play on). For shot.ts, which takes a frame at one time of the build.
   seek(ms: number | null): void;
@@ -91,14 +107,21 @@ export type Viewer = {
 // draws the corner only where one of its two faces looks toward the eye and
 // the other one away, so the bar shows its two sides from any view. The
 // bolts get no outline (see id in show()), so these are their only side lines.
-type Geo = { tri: number[]; seg: number[]; rad: number[] };
+// ta, sa: 8 numbers per vertex of tri and per line of seg, for the SCREW chunk:
+// where the piece sits and its bolt (bb), its axis out of the plate and its
+// role (bn).
+type Geo = { tri: number[]; seg: number[]; rad: number[]; ta: number[]; sa: number[] };
+// the roles: a head moves in, then the nut (after a head, or alone on an anchor
+// rod), and the bolt end past the nut shows with the nut. 0: not a bolt.
+const ROLE = { head: 1, nut: 2, alone: 3, end: 4 };
 const BAR = 12; // the faces of a round bar. LINE_VS needs tan(pi / BAR)
 function frame(nn: V) {
   const ref: V = Math.abs(nn[2]) > 0.9 ? [1, 0, 0] : [0, 0, 1];
   const a1 = norm(cross(nn, ref));
   return [a1, cross(nn, a1)];
 }
-function prism(b: V, nn: V, h: number, r: number, k: number, { tri, seg, rad }: Geo) {
+function prism(b: V, nn: V, h: number, r: number, k: number, { tri, seg, rad, ta, sa }: Geo, bolt: number, role: number) {
+  const t0 = tri.length;
   const [a1, a2] = frame(nn);
   // from the axis to corner i
   const out = Array.from({ length: k }, (_, i) => add(mul(a1, Math.cos((2 * i * Math.PI) / k)), mul(a2, Math.sin((2 * i * Math.PI) / k))));
@@ -112,11 +135,16 @@ function prism(b: V, nn: V, h: number, r: number, k: number, { tri, seg, rad }: 
     // a hex shows all its corners
     rad.push(0, 0, 0, 0, 0, 0, ...(k === 6 ? [0, 0, 0] : out[i]));
   }
+  const at = [...b, bolt, ...nn, role];
+  for (let i = t0; i < tri.length; i += 3) ta.push(...at);
+  for (let i = 0; i < 3 * k; i++) sa.push(...at);
 }
-const head = (b: V, nn: V, g: Geo) => prism(b, nn, HEAD, R, 6, g);
-function nut(b: V, nn: V, g: Geo) {
-  prism(b, nn, NUT, R, 6, g);
-  prism(add(b, mul(nn, NUT)), nn, TIP, SHANK, BAR, g);
+// i: the index of the bolt in its part
+const head = (b: V, nn: V, g: Geo, i: number) => prism(b, nn, HEAD, R, 6, g, i, ROLE.head);
+function nut(b: V, nn: V, g: Geo, i: number, alone = false) {
+  prism(b, nn, NUT, R, 6, g, i, alone ? ROLE.alone : ROLE.nut);
+  // the end of an anchor rod is there before its nut
+  prism(add(b, mul(nn, NUT)), nn, TIP, SHANK, BAR, g, i, alone ? 0 : ROLE.end);
 }
 
 // ---- shaders (GLSL ES 3.00). The colours are sRGB from end to end.
@@ -165,6 +193,47 @@ vec3 move(vec3 p) {
   return mix((mA * vec4(q, 1.0)).xyz, (mB * vec4(q, 1.0)).xyz, f);
 }`;
 
+// A bolt screws in: its head comes in along its axis and turns, then its nut
+// comes on from the other side and turns too. bolt: the ms since the bolts of
+// this part started, the ms between two bolts, the ms of one (REST: all of them
+// are in). Bolt i starts at i times the gap. Its head moves from 0 to 0.6 of
+// its time, its nut from 0.6 to 1 (a nut alone, from 0 to 1). Before that it is
+// hidden (sHide). The pieces that are not a bolt (role 0) never move.
+const SCREW = `
+uniform vec3 bolt;
+layout(location = 4) in vec4 bb;
+layout(location = 5) in vec4 bn;
+float sTurn;
+vec3 sOff;
+bool sHide;
+void screwAt() {
+  sTurn = 0.0;
+  sOff = vec3(0.0);
+  sHide = false;
+  float role = bn.w;
+  if (role < 0.5) return;
+  float s = (bolt.x - bb.w * bolt.y) / bolt.z;
+  vec2 span = role < 1.5 ? vec2(0.0, 0.6) : role < 2.5 ? vec2(0.6, 1.0) : role < 3.5 ? vec2(0.0, 1.0) : vec2(0.6, 0.6);
+  if (s < span.x) {
+    sHide = true;
+    return;
+  }
+  if (span.y <= span.x) return;
+  float k = 1.0 - clamp((s - span.x) / (span.y - span.x), 0.0, 1.0);
+  k = k * k * k; // what is left of the way: an ease out
+  sOff = bn.xyz * (${TRAVEL.toFixed(1)} * k);
+  sTurn = ${TURN.toFixed(5)} * k;
+}
+// v turned about the axis of the bolt
+vec3 spin(vec3 v) {
+  if (sTurn == 0.0) return v;
+  float c = cos(sTurn);
+  return v * c + cross(bn.xyz, v) * sin(sTurn) + bn.xyz * dot(bn.xyz, v) * (1.0 - c);
+}
+vec3 screw(vec3 p) { return bb.xyz + spin(p - bb.xyz) + sOff; }`;
+// a vertex out of the screen: a triangle or a line with all its corners there draws nothing
+const AWAY = 'gl_Position = vec4(2.0, 2.0, 2.0, 1.0)';
+
 // the faces: the background colour, or the part id (the outline and pick passes)
 const FILL_VS = `${TOP}
 uniform mat4 M;
@@ -172,9 +241,15 @@ uniform vec3 off;
 layout(location = 0) in vec3 pos;
 out vec3 vPos;
 ${MOVE}
+${SCREW}
 void main() {
   vPos = pos;
-  gl_Position = M * vec4(move(pos) + off, 1.0);
+  screwAt();
+  if (sHide) {
+    ${AWAY};
+    return;
+  }
+  gl_Position = M * vec4(move(screw(pos)) + off, 1.0);
 }`;
 const COLOR_FS = `${TOP}
 uniform vec4 color;
@@ -215,15 +290,23 @@ layout(location = 2) in vec3 end;
 layout(location = 3) in vec3 rad; // see Geo: 0, or a corner of a round bar
 out vec2 uv;
 ${MOVE}
+${SCREW}
 void main() {
-  vec3 s = move(start);
-  vec3 e = move(end);
-  if (rad != vec3(0.0)) {
-    // the normals of its two faces are rad +- t (times a scale), t square
-    // to rad and to the axis, and |t| = tan(pi / BAR)
-    vec3 t = ${Math.tan(Math.PI / BAR).toFixed(5)} * normalize(cross(e - s, rad));
-    if (dot(rad + t, view) * dot(rad - t, view) > 0.0) {
-      gl_Position = vec4(2.0, 2.0, 2.0, 1.0); // not on the outline: off screen
+  uv = vec2(0.0);
+  screwAt();
+  if (sHide) {
+    ${AWAY};
+    return;
+  }
+  vec3 s = move(screw(start));
+  vec3 e = move(screw(end));
+  vec3 r = spin(rad);
+  if (r != vec3(0.0)) {
+    // the normals of its two faces are r +- t (times a scale), t square
+    // to r and to the axis, and |t| = tan(pi / BAR)
+    vec3 t = ${Math.tan(Math.PI / BAR).toFixed(5)} * normalize(cross(e - s, r));
+    if (dot(r + t, view) * dot(r - t, view) > 0.0) {
+      ${AWAY}; // not on the outline
       uv = vec2(0.0);
       return;
     }
@@ -256,6 +339,67 @@ void main() {
   }
   o = color;
 }`;
+// The welds: the seams of the parts (Part.welds), one instance per segment of
+// a seam, with the times the welder is at its start and at its end (when).
+// The same quad as a line, SPARK wide. The spark is a round dot where the
+// welder is now, the bead behind it is hot, then cools and fades in cool ms.
+// Nothing is left at the end: the drawing is the one with no animation.
+const WELD_VS = `${TOP}
+uniform mat4 M;
+uniform vec2 res;
+uniform float width;
+uniform vec3 view;
+layout(location = 0) in vec4 corner;
+layout(location = 1) in vec3 start;
+layout(location = 2) in vec3 end;
+layout(location = 3) in vec2 when;
+out vec2 uv;
+out vec3 seg; // its length on screen in spark radii, then when
+void main() {
+  vec4 a = M * vec4(start + view * ${LIFT.toFixed(1)}, 1.0);
+  vec4 b = M * vec4(end + view * ${LIFT.toFixed(1)}, 1.0);
+  float aspect = res.x / res.y;
+  vec2 dir = b.xy - a.xy;
+  dir.x *= aspect;
+  dir = length(dir) > 0.0 ? normalize(dir) : vec2(1.0, 0.0);
+  vec2 side = vec2(dir.y, -dir.x);
+  dir.x /= aspect;
+  side.x /= aspect;
+  if (corner.x < 0.0) side = -side;
+  if (corner.y < 0.0) side -= dir;
+  else if (corner.y > 1.0) side += dir;
+  vec4 p = corner.y < 0.5 ? a : b;
+  p.xy += side * width / res.y;
+  gl_Position = p;
+  uv = corner.zw;
+  seg = vec3(length((b.xy - a.xy) * res) / width, when);
+}`;
+const WELD_FS = `${TOP}
+uniform float now, cool;
+uniform vec3 core, hot, warm;
+in vec2 uv;
+in vec3 seg;
+out vec4 o;
+void main() {
+  float L = max(seg.x, 0.001);
+  float f = (now - seg.y) / max(seg.z - seg.y, 0.001); // how far the welder is on it
+  if (f <= 0.0) discard;
+  // along the segment, in spark radii from its start (the round ends are one radius long)
+  float a = uv.y < -1.0 ? uv.y + 1.0 : uv.y > 1.0 ? L + uv.y - 1.0 : (uv.y + 1.0) * 0.5 * L;
+  float tip = min(f, 1.0) * L;
+  float d = length(vec2(a - tip, uv.x));
+  if (f < 1.0 && d <= 1.0) {
+    o = vec4(mix(core, hot, smoothstep(0.35, 1.0, d)), 1.0);
+    return;
+  }
+  float e = a < 0.0 ? -a : max(0.0, a - tip);
+  if (e * e + uv.x * uv.x > ${(BEAD * BEAD).toFixed(4)}) discard;
+  float k = (now - mix(seg.y, seg.z, clamp(a / L, 0.0, 1.0))) / cool;
+  if (k >= 1.0) discard;
+  o = vec4(mix(hot, warm, smoothstep(0.0, 0.5, k)), 1.0 - k * k);
+}`;
+const WELD_COLORS = { core: '#fff7d6', hot: '#ffa21a', warm: '#c8460a' };
+
 // the quad of a line: 8 corners (x, y, then uv) and 6 triangles
 const QUAD = [-1, 2, -1, 2, 1, 2, 1, 2, -1, 1, -1, 1, 1, 1, 1, 1, -1, 0, -1, -1, 1, 0, 1, -1, -1, -1, -1, -2, 1, -1, 1, -2];
 const QUAD_IDX = [0, 2, 1, 2, 3, 1, 2, 4, 3, 4, 5, 3, 4, 6, 5, 6, 7, 5];
@@ -352,13 +496,14 @@ const STILL = pack({ o: [0, 0, 0], u: [1, 0, 0], n: [0, 0, 1], knots: [], A: I4(
 type Program = { p: WebGLProgram; u: Record<string, WebGLUniformLocation | null> };
 // a render target: a colour texture, and a depth texture or buffer
 type Target = { fb: WebGLFramebuffer; color: WebGLTexture; depth?: WebGLTexture; rb?: WebGLRenderbuffer; w: number; h: number };
-type Buf = { vao: WebGLVertexArrayObject; buf: WebGLBuffer; rad?: WebGLBuffer; n: number; draw: number };
+type Buf = { vao: WebGLVertexArrayObject; bufs: WebGLBuffer[]; n: number; draw: number };
 // ends: the triangle and line floats before the first bolt, then after each
 // bolt. fill.n counts vertices, lines.n counts segments; draw: how many of
 // them the build animation shows now. off: where the animation moves it, mm.
+// screw: the bolt uniform of SCREW.
 type Piece = {
   part: Part; fill: Buf; lines?: Buf; ends: [number, number][];
-  id: RGB; off: V; visible: boolean; color: RGB; width: number; move: Packed;
+  id: RGB; off: V; visible: boolean; color: RGB; width: number; move: Packed; screw: [number, number, number];
 };
 
 // onTurn: the user turned the view (done: the drag is over). onHover: the
@@ -406,6 +551,7 @@ export function createViewer(
   let [deep, touch, outWidth, thinWidth] = [0, 0, 2, 1];
   let texel: [number, number] = [1, 1];
   let px: [number, number] = [1, 1];
+  let dpx = 1; // device px per CSS px
 
   // ---- GL objects
   const compile = (vs: string, fs: string): Program => {
@@ -466,7 +612,7 @@ export function createViewer(
   };
 
   // made again when the GPU comes back after a context loss
-  let fillP: Program, zoneP: Program, lineP: Program, outlineP: Program, downP: Program;
+  let fillP: Program, zoneP: Program, lineP: Program, outlineP: Program, downP: Program, weldP: Program;
   let rt: Target, lt: Target, pickRT: Target; // depth and ids, the outlines alone, the pick
   let quadBuf: WebGLBuffer, quadIdx: WebGLBuffer;
   const init = () => {
@@ -475,6 +621,7 @@ export function createViewer(
     lineP = compile(LINE_VS, LINE_FS);
     outlineP = compile(SCREEN_VS, OUTLINE_FS);
     downP = compile(SCREEN_VS, DOWN_FS);
+    weldP = compile(WELD_VS, WELD_FS);
     rt = target('texture');
     lt = target('none');
     pickRT = target('buffer');
@@ -489,53 +636,66 @@ export function createViewer(
     gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
     gl.polygonOffset(0.5, 2);
     gl.vertexAttrib3f(3, 0, 0, 0); // rad, for the lines that have none
+    gl.vertexAttrib4f(5, 0, 0, 0, 0); // bn: not a bolt
   };
   init();
 
-  const fillBuf = (tri: number[]): Buf => {
-    const vao = gl.createVertexArray();
+  // a buffer of floats, read by the bound VAO as attributes: [location, size]
+  // one after the other, divisor 1 for one per instance
+  const attribs = (data: number[], layout: [number, number][], divisor = 0) => {
     const buf = gl.createBuffer();
-    gl.bindVertexArray(vao);
     gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(tri), gl.STATIC_DRAW);
-    gl.enableVertexAttribArray(0);
-    gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
-    gl.bindVertexArray(null);
-    return { vao, buf, n: tri.length / 3, draw: tri.length / 3 };
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(data), gl.STATIC_DRAW);
+    const stride = 4 * layout.reduce((a, [, n]) => a + n, 0);
+    let at = 0;
+    for (const [k, n] of layout) {
+      gl.enableVertexAttribArray(k);
+      gl.vertexAttribPointer(k, n, gl.FLOAT, false, stride, at);
+      gl.vertexAttribDivisor(k, divisor);
+      at += 4 * n;
+    }
+    return buf;
   };
-  // rad: see Geo, only when some line has one
-  const lineBuf = (seg: number[], rad?: number[]): Buf => {
+  const BOLT: [number, number][] = [[4, 4], [5, 4]]; // bb, bn
+  // ta: see Geo, only when the part has bolts
+  const fillBuf = (tri: number[], ta?: number[]): Buf => {
     const vao = gl.createVertexArray();
-    const buf = gl.createBuffer();
+    gl.bindVertexArray(vao);
+    const bufs = [attribs(tri, [[0, 3]])];
+    if (ta) bufs.push(attribs(ta, BOLT));
+    gl.bindVertexArray(null);
+    return { vao, bufs, n: tri.length / 3, draw: tri.length / 3 };
+  };
+  // the quad of a line, for the instances of the buffers that follow
+  const quadVao = () => {
+    const vao = gl.createVertexArray();
     gl.bindVertexArray(vao);
     gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
     gl.enableVertexAttribArray(0);
     gl.vertexAttribPointer(0, 4, gl.FLOAT, false, 0, 0);
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, quadIdx);
-    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(seg), gl.STATIC_DRAW);
-    for (const k of [1, 2]) {
-      gl.enableVertexAttribArray(k);
-      gl.vertexAttribPointer(k, 3, gl.FLOAT, false, 24, (k - 1) * 12);
-      gl.vertexAttribDivisor(k, 1);
-    }
-    let radBuf: WebGLBuffer | undefined;
-    if (rad) {
-      radBuf = gl.createBuffer();
-      gl.bindBuffer(gl.ARRAY_BUFFER, radBuf);
-      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(rad), gl.STATIC_DRAW);
-      gl.enableVertexAttribArray(3);
-      gl.vertexAttribPointer(3, 3, gl.FLOAT, false, 0, 0);
-      gl.vertexAttribDivisor(3, 1);
-    }
+    return vao;
+  };
+  // rad, sa: see Geo, only when some line has one, when the part has bolts
+  const lineBuf = (seg: number[], rad?: number[], sa?: number[]): Buf => {
+    const vao = quadVao();
+    const bufs = [attribs(seg, [[1, 3], [2, 3]], 1)];
+    if (rad) bufs.push(attribs(rad, [[3, 3]], 1));
+    if (sa) bufs.push(attribs(sa, BOLT, 1));
     gl.bindVertexArray(null);
-    return { vao, buf, rad: radBuf, n: seg.length / 6, draw: seg.length / 6 };
+    return { vao, bufs, n: seg.length / 6, draw: seg.length / 6 };
+  };
+  // the seams: start, end, then when (see WELD_VS), 8 numbers each
+  const weldBuf = (inst: number[]): Buf => {
+    const vao = quadVao();
+    const bufs = [attribs(inst, [[1, 3], [2, 3], [3, 2]], 1)];
+    gl.bindVertexArray(null);
+    return { vao, bufs, n: inst.length / 8, draw: inst.length / 8 };
   };
   const free = (b?: Buf) => {
     if (!b) return;
     gl.deleteVertexArray(b.vao);
-    gl.deleteBuffer(b.buf);
-    if (b.rad) gl.deleteBuffer(b.rad);
+    for (const x of b.bufs) gl.deleteBuffer(x);
   };
 
   // ---- camera, from the same az and el as the SVG
@@ -631,6 +791,7 @@ export function createViewer(
       gl.uniform3fv(P.u.off, p.off);
       gl.uniform4f(P.u.color, ...(ids ? p.id : bg), 1);
       if (!ids) gl.uniform1i(P.u.nz, p.part.kind === 'rig' || p.part.kind === 'bolts' ? 0 : nz);
+      gl.uniform3fv(P.u.bolt, p.screw);
       moveBy(P, p.move);
       gl.bindVertexArray(p.fill.vao);
       gl.drawArrays(gl.TRIANGLES, 0, p.fill.draw);
@@ -647,6 +808,7 @@ export function createViewer(
       gl.uniform3fv(lineP.u.off, p.off);
       gl.uniform4f(lineP.u.color, ...p.color, 1);
       gl.uniform1f(lineP.u.width, p.width);
+      gl.uniform3fv(lineP.u.bolt, p.screw);
       moveBy(lineP, p.move);
       gl.bindVertexArray(p.lines.vao);
       gl.drawElementsInstanced(gl.TRIANGLES, QUAD_IDX.length, gl.UNSIGNED_SHORT, 0, p.lines.draw);
@@ -663,6 +825,7 @@ export function createViewer(
       for (const p of slabs) {
         gl.uniform3fv(fillP.u.off, p.off);
         gl.uniform4f(fillP.u.color, ...rig, VEIL);
+        gl.uniform3fv(fillP.u.bolt, REST);
         moveBy(fillP, p.move);
         gl.bindVertexArray(p.fill.vao);
         gl.drawArrays(gl.TRIANGLES, 0, p.fill.draw);
@@ -679,6 +842,26 @@ export function createViewer(
     gl.depthMask(true);
     gl.disable(gl.POLYGON_OFFSET_FILL);
     lines(M, true);
+  };
+  // the seams being made, on top of all (a hidden seam stays hidden)
+  const welds = (M: Float32Array) => {
+    if (!anim?.welds) return;
+    const u = weldP.u;
+    gl.enable(gl.DEPTH_TEST);
+    gl.depthMask(false);
+    gl.enable(gl.BLEND);
+    gl.useProgram(weldP.p);
+    gl.uniformMatrix4fv(u.M, false, M);
+    gl.uniform2f(u.res, canvas.width, canvas.height);
+    gl.uniform1f(u.width, 2 * SPARK * dpx);
+    gl.uniform3f(u.view, ...cam.Z);
+    gl.uniform1f(u.now, anim.t);
+    gl.uniform1f(u.cool, anim.cool);
+    for (const [k, c] of Object.entries(WELD_COLORS)) gl.uniform3f(u[k], ...rgb(c));
+    gl.bindVertexArray(anim.welds.vao);
+    gl.drawElementsInstanced(gl.TRIANGLES, QUAD_IDX.length, gl.UNSIGNED_SHORT, 0, anim.welds.n);
+    gl.disable(gl.BLEND);
+    gl.depthMask(true);
   };
   const tex = (unit: number, t: WebGLTexture, loc: WebGLUniformLocation | null) => {
     gl.activeTexture(gl.TEXTURE0 + unit);
@@ -743,6 +926,7 @@ export function createViewer(
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       gl.disable(gl.BLEND);
     }
+    welds(M);
     if (playing) redraw();
   };
   const redraw = () => {
@@ -761,6 +945,7 @@ export function createViewer(
     const [dw, dh] = dev && dpr === devicePixelRatio ? [dev.inlineSize, dev.blockSize] : [Math.round(w * dpr), Math.round(h * dpr)];
     [canvas.width, canvas.height] = [Math.max(1, dw), Math.max(1, dh)];
     const pr = canvas.width / w;
+    dpx = pr;
     // about 3 samples per CSS px each way: 2x on a 1x screen, 1.5x on a 2x one
     const ss = Math.min(2, Math.max(1, 3 / pr));
     const [rw, rh] = [Math.round(w * pr * ss), Math.round(h * pr * ss)];
@@ -777,19 +962,24 @@ export function createViewer(
   new ResizeObserver((e) => resize(e)).observe(host);
 
   // ---- the build animation: same timeline as the SVG
-  let anim: { t0: number; slots: ReturnType<typeof timeline>; dirs: V[]; end: number; bolt: number } | null = null;
+  // t: the time of the frame, ms from the start. welds: the seams (effects
+  // only), cool: how long they take to cool.
+  type Anim = { t0: number; t: number; slots: ReturnType<typeof timeline>; dirs: V[]; end: number; effects: boolean; welds?: Buf; cool: number };
+  let anim: Anim | null = null;
   let clock: number | null = null; // seek(): the build stays at this time
-  let played: [number, number | undefined] | null = null; // the last build(), for seek()
+  let played: [number, number | undefined, boolean] | null = null; // the last build(), for seek()
   const ease = (t: number) => 1 - (1 - t) ** 3;
   const animate = (now: number): boolean => {
     if (!anim) return false;
-    const t = clock ?? now - anim.t0;
+    const t = (anim.t = clock ?? now - anim.t0);
     pieces.forEach((p, i) => {
       const sl = anim!.slots.get(p.part.step)!;
       p.visible = t >= sl.start;
-      if (p.part.kind === 'bolts') {
+      if (p.part.kind === 'bolts' && sl.bolt) {
+        // the shader screws them in
+        if (anim!.effects) return void (p.screw = [t - sl.start, sl.bolt.gap, sl.bolt.dur]);
         // one bolt after the other
-        const n = Math.min(p.part.dots.length, Math.max(0, Math.floor((t - sl.start) / anim!.bolt) + 1));
+        const n = Math.min(p.part.dots.length, Math.max(0, Math.floor((t - sl.start) / sl.bolt.gap) + 1));
         p.fill.draw = p.ends[n][0] / 3;
         if (p.lines) p.lines.draw = p.ends[n][1] / 6;
         return;
@@ -803,10 +993,12 @@ export function createViewer(
     return false;
   };
   const stopAnim = () => {
+    free(anim?.welds);
     anim = null;
     for (const p of pieces) {
       p.visible = true;
       p.off = [0, 0, 0];
+      p.screw = REST;
       p.fill.draw = p.fill.n;
       if (p.lines) p.lines.draw = p.lines.n;
     }
@@ -842,29 +1034,32 @@ export function createViewer(
       // the bolts (Dot in steel.ts): the head, and the nut on the far side
       // when we know it
       const ends: [number, number][] = [[tri.length, seg.length]];
-      const g: Geo = { tri, seg, rad: new Array<number>(seg.length / 2).fill(0) };
-      for (const dt of part.dots) {
+      // the faces are not a bolt: 0 for their SCREW attributes
+      const g: Geo = { tri, seg, rad: new Array<number>(seg.length / 2).fill(0), ta: new Array<number>((tri.length / 3) * 8).fill(0), sa: new Array<number>((seg.length / 6) * 8).fill(0) };
+      part.dots.forEach((dt, i) => {
         if (dt.axis) {
           const h = dt.half ?? 0;
-          head(add(dt.p, mul(dt.axis, h)), dt.axis, g);
-          nut(sub(dt.p, mul(dt.axis, h)), mul(dt.axis, -1), g);
-        } else if (dt.n && dt.anchor) nut(dt.p, dt.n, g);
+          head(add(dt.p, mul(dt.axis, h)), dt.axis, g, i);
+          nut(sub(dt.p, mul(dt.axis, h)), mul(dt.axis, -1), g, i);
+        } else if (dt.n && dt.anchor) nut(dt.p, dt.n, g, i, true);
         else if (dt.n && !dt.far) {
-          head(dt.p, dt.n, g);
-          if (dt.grip !== undefined) nut(sub(dt.p, mul(dt.n, dt.grip)), mul(dt.n, -1), g);
+          head(dt.p, dt.n, g, i);
+          if (dt.grip !== undefined) nut(sub(dt.p, mul(dt.n, dt.grip)), mul(dt.n, -1), g, i);
         }
         ends.push([tri.length, seg.length]);
-      }
+      });
       if (!tri.length) return;
+      const bolts = tri.length > ends[0][0];
       const tag = (part.joint ? indexOf.get(part.joint.of) ?? pi : pi) + 1;
       const p: Piece = {
         part, ends,
-        fill: fillBuf(tri), lines: seg.length ? lineBuf(seg, g.rad.some((x) => x) ? g.rad : undefined) : undefined,
+        fill: fillBuf(tri, bolts ? g.ta : undefined),
+        lines: seg.length ? lineBuf(seg, g.rad.some((x) => x) ? g.rad : undefined, bolts ? g.sa : undefined) : undefined,
         // blue marks the bolts (a head or a nut gets no outline) and the
         // round parts (outlined with one weight too). A pin joint has one id:
         // no outline inside it, and a pick gives its moving part.
         id: [(tag & 255) / 255, (tag >> 8) / 255, part.kind === 'bolts' ? 1 : part.round ? 0.5 : 0],
-        off: [0, 0, 0], visible: true, color: fg, width: THIN, move: moveOf(part),
+        off: [0, 0, 0], visible: true, color: fg, width: THIN, move: moveOf(part), screw: REST,
       };
       lineStyle(p);
       pieces.push(p);
@@ -877,11 +1072,26 @@ export function createViewer(
     reset();
   };
 
-  const build = (speed = 1, duration?: number) => {
-    played = [speed, duration];
+  // the buffer of the welds: each segment of each seam, with the times the
+  // welder is at its ends. A seam moves with its part, as the MOVE chunk
+  // does: a hub test shows its shape at the step of the slider.
+  const seams = (slots: Anim['slots']) => {
+    const inst: number[] = [];
+    for (const { part } of pieces) {
+      const w = slots.get(part.step)?.weld;
+      if (!w || !part.welds) continue;
+      const m = deformed?.moves[part.id];
+      const at = (v: V) => (m ? movePoint(v, m) : v);
+      seamTimes(part.welds, w).forEach(([t0, t1], i) => inst.push(...at(part.welds![i][0]), ...at(part.welds![i][1]), t0, t1));
+    }
+    return inst.length ? weldBuf(inst) : undefined;
+  };
+  const build = (speed = 1, duration?: number, effects = true) => {
+    played = [speed, duration, effects];
     stopAnim();
     setHover(null);
-    const slots = timeline(pieces.map((p) => p.part), { speed, duration });
+    const slots = timeline(pieces.map((p) => p.part), { speed, duration, effects });
+
     const { r, up } = camera(az, el);
     // the direction each part comes from, in the screen plane, as in hlr.ts
     const dirs = pieces.map((p) => {
@@ -893,7 +1103,8 @@ export function createViewer(
       return add(mul(r, ux), mul(up, uy));
     });
     const end = buildEnd(slots) + 100;
-    anim = { t0: performance.now(), slots, dirs, end, bolt: BOLT_MS / speed };
+    anim = { t0: performance.now(), t: 0, slots, dirs, end, effects, cool: COOL_MS / speed };
+    if (effects) anim.welds = seams(slots);
     clock = null;
     redraw();
   };
@@ -1058,6 +1269,7 @@ export function createViewer(
   canvas.addEventListener('webglcontextrestored', () => {
     const f = current();
     pieces = []; // their buffers died with the old context
+    if (anim) anim.welds = undefined;
     init();
     resize();
     if (shown.length) show(shown, marks ?? undefined);
@@ -1127,6 +1339,10 @@ export function createViewer(
       const refit = !d !== !deformed && fitted;
       deformed = d;
       for (const p of pieces) p.move = moveOf(p.part);
+      if (anim?.welds) {
+        free(anim.welds);
+        anim.welds = seams(anim.slots);
+      }
       if (refit && pieces.length) reset();
       redraw();
     },
