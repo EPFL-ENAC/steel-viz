@@ -83,8 +83,8 @@ test('shapeP 1 and shapeP 0', () => {
         assert.deepEqual(clashes(all.parts), [], at);
         assert.deepEqual(floating(all.parts), [], at);
         tees += teeStemUp(all, at);
-        assert.deepEqual(shapes(all.st).filter((k) => !/ (2L|C|T|tubes)$/.test(k)), [], at);
-        assert.deepEqual(shapes(generate({ seed, form, shapeP: 0 }, cat).st).filter((k) => / (2L|C|T)$/.test(k)), [], at);
+        assert.deepEqual(shapes(all.st).filter((k) => !/ (2L|L|C|T|tubes)$/.test(k)), [], at);
+        assert.deepEqual(shapes(generate({ seed, form, shapeP: 0 }, cat).st).filter((k) => / (2L|L|C|T)$/.test(k)), [], at);
       }
   assert.ok(tees >= 10, `only ${tees} tee chords`);
 });

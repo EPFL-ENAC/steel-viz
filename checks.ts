@@ -5,13 +5,18 @@
 //   takes Fcr Ae, with an effective area Ae under A.
 // - E4: flexural-torsional buckling of a tee and a double angle (singly
 //   symmetric), with Cw = 0 (the user note of E4).
+// - E5: one angle in compression (an arm brace), loaded through the leg on
+//   its gusset: E3 with the effective slenderness of E5 (angleSlenderness()).
 // - F2: lateral torsional buckling of an I section or a channel bent about its
 //   strong axis (compact). Tubes and rods: no LTB, Mn = Fy Z (F7, F11).
 // - F9: a tee or a double angle bent in its plane of symmetry, always with the
 //   stem (or the legs along the depth) in compression: the solver gives |M|
 //   only, and a continuous chord has both signs. It is the safe side.
-// - F10: one equal angle bent about a leg (a geometric axis), with no
-//   restraint: yielding and LTB, the toe in compression.
+// - F10: one angle bent about a leg (a geometric axis), with no restraint:
+//   yielding and LTB, the toe in compression. The formula is the one of an
+//   equal angle. An unequal angle takes its short leg in it: a simple
+//   approximation, lower than with the long leg (AISC asks for the
+//   principal axes there, F10.2(b)(iii)).
 // - F8: a round tube, no LTB, but local buckling of its wall: Fy Z up to
 //   D / t = 0.07 E / Fy (compact), less past it (noncompact, slender).
 //   A round tube with D / t of 0.45 E / Fy or more is refused (tooThin).
@@ -32,8 +37,8 @@
 // elastic() and ltb(). J is the thin wall J of rectProps().
 //
 // Not checked: local buckling of slender plates of the other sections
-// (E7, F3, F9.3, F9.4, F10.3), E4 for a channel, E5 and E6 (one angle, the
-// connectors of a double angle), F11 for a flat bar, the open shapes of the
+// (E7, F3, F9.3, F9.4, F10.3), E4 for a channel, E6 (the connectors of a
+// double angle), F11 for a flat bar, the open shapes of the
 // specimens (2C keeps Fy Z), Cb > 1 (Cb = 1 is the safe side for cantilevers
 // and unbraced spans).
 import { E, G } from './solver.ts';
@@ -78,12 +83,34 @@ function effectiveArea(s: Section, fy: number): number {
 
 // E3: nominal compression strength Pn = Fcr A, for a buckling length L. A
 // thin round tube: Fcr Ae (E7-1), Fcr is the same.
+// One angle: E5, see angleSlenderness().
 export function compression(s: Section, L: number, fy: number): number {
   const r = Math.min(Math.sqrt(s.Is / s.A), Math.sqrt(s.Iw / s.A));
-  const Fe = s.kind === 'T' || s.kind === '2L' ? torsional(s, L).Fe : (Math.PI ** 2 * E) / (L / r) ** 2;
+  const lr = s.kind === 'L' ? angleSlenderness(s, L) : L / r;
+  const Fe = s.kind === 'T' || s.kind === '2L' ? torsional(s, L).Fe : (Math.PI ** 2 * E) / lr ** 2;
   const Fcr = fy / Fe <= 2.25 ? 0.658 ** (fy / Fe) * fy : 0.877 * Fe;
   return Fcr * effectiveArea(s, fy);
 }
+
+// E5(a): the effective slenderness Lc / r of one angle in compression. It
+// needs: both ends loaded through the same leg (the leg along the gap, d, on
+// the gusset), welded or two bolts or more (gussetLap() in steel.ts has two),
+// no load along the member, and an individual member (not a truss web). ra is
+// the radius about the geometric axis parallel to the connected leg: that leg
+// runs along w, so it is the radius from Iw. E5-1 up to L / ra = 80, then E5-2.
+// E5 has the end eccentricity in it, so the check adds no moment for it. An
+// unequal angle bolted by its long leg takes the same formulas (E5(a)); the
+// one bolted by its short leg (E5(b)) is never drawn. E5-2 asks for Lc / r up
+// to 200: size() keeps it (see angleFits()).
+export function angleSlenderness(s: Section, L: number): number {
+  const lr = L / Math.sqrt(s.Iw / s.A);
+  return lr <= 80 ? 72 + 0.75 * lr : 32 + 1.25 * lr;
+}
+
+// The angle of an arm brace: Lc / r of E5 up to 200, and legs that don't need
+// E4 (flexural-torsional buckling): b / t up to 0.71 sqrt(E / Fy) (E5), b the
+// long leg.
+export const angleFits = (s: Section, L: number, fy: number) => angleSlenderness(s, L) <= 200 && Math.max(s.d, s.bf) / s.tf <= 0.71 * Math.sqrt(E / fy);
 
 // E4 for a tee or a double angle: symmetric about v = 0 (y, the axis of
 // symmetry, is our w axis, so Iy is our Iw). The shear center is where the
@@ -148,9 +175,10 @@ function angleMn(My: number, Mcr: number): number {
 // F10, one equal angle bent about a leg, no restraint, toe in compression:
 // Mcr = (0.58 E b⁴ t / Lb²)(sqrt(1 + 0.88 (Lb t / b²)²) - 1), and My at 0.8
 // of the yield moment for the LTB part (F10.2(b)(ii)). Yielding: 1.5 My
-// (F10-1). The legs are equal, so the same Mcr about both axes.
+// (F10-1). The same Mcr about both axes. An unequal angle: b is the short leg
+// (see the header).
 export function angleMoment(s: Section, S: number, Lb: number, fy: number): number {
-  const [b, t] = [s.d, s.tf];
+  const [b, t] = [Math.min(s.d, s.bf), s.tf];
   const Mcr = ((0.58 * E * b ** 4 * t) / (Lb * Lb)) * (Math.sqrt(1 + 0.88 * ((Lb * t) / (b * b)) ** 2) - 1);
   return Math.min(1.5 * fy * S, angleMn(0.8 * fy * S, Mcr));
 }

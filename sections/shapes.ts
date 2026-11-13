@@ -57,8 +57,19 @@ const dicts = (file: string) => {
 };
 const spaced = (name: string) => name.replace(/^([A-Z]+)/, '$1 '); // UPN80 -> UPN 80
 out('channel-european-sections.csv', 'id,d,bf,tw,tf', [...dicts('_upn.py'), ...dicts('_upe.py')].map((r) => [spaced(r.name), r.h, r.b, r.tw, r.tf]));
-out('angle-european-sections.csv', 'id,d,b,t', [...dicts('_l.py'), ...dicts('_li.py')].map((r) => [spaced(r.name), r.h, r.b, r.t]));
+// blue-prints, a profile file: `"CHS21_3x2_3": __CHSProfileParameters("CHS 21.3x2.3", 21.3, 2.3),`, in mm
+const profiles = (file: string) => readFileSync(join(blueprints, 'blueprints', 'structural_sections', 'steel', 'standard_profiles', file), 'utf8');
 
-// blue-prints: `"CHS21_3x2_3": __CHSProfileParameters("CHS 21.3x2.3", 21.3, 2.3),`, in mm
-const chs = readFileSync(join(blueprints, 'blueprints', 'structural_sections', 'steel', 'standard_profiles', 'chs.py'), 'utf8');
+// _li.py has only 5 sizes of unequal angles. The small ones come from the
+// LNP profiles of blue-prints (`"LNP 60x40x6", 60, 40, 6, 6, ...`: long leg,
+// short leg, the two thicknesses), the ones _li.py doesn't have, after its rows.
+const angles = [...dicts('_l.py'), ...dicts('_li.py')].map((r) => [spaced(r.name), r.h, r.b, r.t]);
+const has = new Set(angles.map(([, d, b, t]) => `${d} ${b} ${t}`));
+const lnp = [...profiles('lnp.py').matchAll(/Parameters\("LNP ([^"]+)",\s*([\d.]+),\s*([\d.]+),\s*([\d.]+),\s*([\d.]+)/g)]
+  .map(([, , d, b, t, t2]) => [+d, +b, +t, +t2])
+  .filter(([d, b, t, t2]) => d > b && t === t2 && !has.has(`${d} ${b} ${t}`))
+  .map(([d, b, t]) => [`L ${d}x${b}x${t}`, d, b, t]);
+out('angle-european-sections.csv', 'id,d,b,t', [...angles, ...lnp]);
+
+const chs = profiles('chs.py');
 out('chs-european-sections.csv', 'id,d,t', [...chs.matchAll(/Parameters\("(CHS [^"]+)",\s*([\d.]+),\s*([\d.]+)\)/g)].map(([, id, d, t]) => [id, +d, +t]));
